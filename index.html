@@ -1,0 +1,989 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Apartment Tracker by JEZ</title>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,300;0,8..60,400;0,8..60,600;0,8..60,700;1,8..60,400;1,8..60,600&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --blue:    #4169e1;
+    --navy:    #2c3e50;
+    --bg:      #f9f9fa;
+    --white:   #ffffff;
+    --text:    #333333;
+    --ink:     #111111;
+    --muted:   #7a8694;
+    --border:  #e8e8ed;
+    --green:   #27ae60;
+    --rust:    #c0392b;
+    --orange:  #e67e22;
+    --shadow:  0 8px 48px rgba(44,62,80,0.08);
+    --shadow-sm: 0 2px 16px rgba(44,62,80,0.06);
+  }
+
+  body {
+    font-family: 'Inter', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* LOGIN */
+  #login-screen {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg);
+  }
+  .login-wrap {
+    width: 100%;
+    max-width: 440px;
+    padding: 24px;
+    animation: rise 0.5s cubic-bezier(.16,1,.3,1);
+  }
+  @keyframes rise { from{opacity:0;transform:translateY(20px)} to{opacity:1;transform:none} }
+
+  .login-wordmark {
+    font-family: 'Source Serif 4', serif;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    color: var(--blue);
+    text-transform: uppercase;
+    margin-bottom: 40px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .login-wordmark::before {
+    content: '';
+    display: inline-block;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--blue);
+  }
+  .login-heading {
+    font-family: 'Source Serif 4', serif;
+    font-size: 36px;
+    font-weight: 600;
+    color: var(--ink);
+    line-height: 1.15;
+    margin-bottom: 8px;
+    letter-spacing: -0.02em;
+  }
+  .login-sub {
+    font-size: 14px;
+    color: var(--muted);
+    margin-bottom: 40px;
+    font-weight: 400;
+    line-height: 1.6;
+  }
+  .login-tabs {
+    display: flex;
+    border-bottom: 2px solid var(--border);
+    margin-bottom: 32px;
+  }
+  .login-tab {
+    padding: 10px 20px 12px;
+    background: none; border: none;
+    font-family: 'Inter', sans-serif;
+    font-size: 13px; font-weight: 500;
+    cursor: pointer; color: var(--muted);
+    position: relative; transition: color 0.2s;
+  }
+  .login-tab.active { color: var(--blue); }
+  .login-tab.active::after {
+    content: ''; position: absolute;
+    bottom: -2px; left: 0; right: 0;
+    height: 2px; background: var(--blue);
+    border-radius: 2px 2px 0 0;
+  }
+  .field { margin-bottom: 22px; }
+  .field label {
+    display: block;
+    font-size: 11px; font-weight: 600;
+    letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--navy); margin-bottom: 8px;
+  }
+  input[type=text], input[type=password], input[type=number], input[type=date], select {
+    width: 100%; padding: 11px 14px;
+    border: 1.5px solid var(--border); border-radius: 6px;
+    font-family: 'Inter', sans-serif; font-size: 14px;
+    background: var(--white); color: var(--ink);
+    outline: none; transition: border-color 0.2s, box-shadow 0.2s;
+    appearance: none;
+  }
+  input:focus, select:focus {
+    border-color: var(--blue);
+    box-shadow: 0 0 0 3px rgba(65,105,225,0.1);
+  }
+  .btn-primary {
+    width: 100%; padding: 13px;
+    background: var(--blue); color: white; border: none; border-radius: 6px;
+    font-family: 'Inter', sans-serif; font-size: 13px; font-weight: 600;
+    letter-spacing: 0.04em; cursor: pointer; transition: background 0.2s, transform 0.1s;
+  }
+  .btn-primary:hover { background: #3558d0; }
+  .btn-primary:active { transform: scale(0.99); }
+  .login-error {
+    color: var(--rust); font-size: 12px; margin-top: 14px;
+    text-align: center; min-height: 16px; font-weight: 500;
+  }
+
+  /* APP */
+  #app { display: none; flex-direction: column; min-height: 100vh; }
+  header {
+    background: var(--white); border-bottom: 1px solid var(--border);
+    padding: 0 40px; height: 58px;
+    display: flex; align-items: center; justify-content: space-between;
+    position: sticky; top: 0; z-index: 100; box-shadow: var(--shadow-sm);
+  }
+  .nav-wordmark {
+    font-family: 'Source Serif 4', serif; font-size: 15px; font-weight: 600;
+    color: var(--ink); letter-spacing: -0.01em;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .nav-dot { width:6px; height:6px; border-radius:50%; background:var(--blue); display:inline-block; }
+  .nav-right { display: flex; align-items: center; gap: 20px; }
+  .nav-user { font-size: 12px; color: var(--muted); font-weight: 500; }
+  .btn-logout {
+    padding: 7px 16px; background: none;
+    border: 1.5px solid var(--border); border-radius: 6px;
+    font-family: 'Inter', sans-serif; font-size: 12px; font-weight: 500;
+    color: var(--navy); cursor: pointer; transition: all 0.2s;
+  }
+  .btn-logout:hover { border-color: var(--navy); background: var(--bg); }
+
+  main { flex: 1; padding: 52px 40px; max-width: 1120px; margin: 0 auto; width: 100%; }
+
+  .page-eyebrow {
+    font-size: 11px; font-weight: 600; letter-spacing: 0.12em;
+    text-transform: uppercase; color: var(--blue); margin-bottom: 10px;
+  }
+  .page-title {
+    font-family: 'Source Serif 4', serif; font-size: 40px; font-weight: 600;
+    color: var(--ink); letter-spacing: -0.03em; line-height: 1.1; margin-bottom: 40px;
+  }
+
+  /* STATS */
+  .summary-strip {
+    display: grid; grid-template-columns: repeat(3, 1fr);
+    gap: 1px; background: var(--border);
+    border: 1px solid var(--border); border-radius: 10px;
+    overflow: hidden; margin-bottom: 48px; box-shadow: var(--shadow-sm);
+  }
+  .summary-stat { background: var(--white); padding: 22px 28px; }
+  .stat-label {
+    font-size: 11px; font-weight: 600; letter-spacing: 0.1em;
+    text-transform: uppercase; color: var(--muted); margin-bottom: 8px;
+  }
+  .stat-value {
+    font-family: 'Source Serif 4', serif; font-size: 28px;
+    font-weight: 600; color: var(--ink); letter-spacing: -0.02em;
+  }
+  .stat-value.blue { color: var(--blue); }
+
+  /* TABLE */
+  .section-bar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+  .section-label { font-size: 11px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--navy); }
+  .btn-add {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 8px 18px; background: var(--blue); color: white;
+    border: none; border-radius: 6px;
+    font-family: 'Inter', sans-serif; font-size: 12px; font-weight: 600;
+    letter-spacing: 0.03em; cursor: pointer; transition: background 0.2s;
+  }
+  .btn-add:hover { background: #3558d0; }
+
+  .tenant-table {
+    background: var(--white); border-radius: 10px;
+    border: 1px solid var(--border); overflow: hidden;
+    box-shadow: var(--shadow); margin-bottom: 48px;
+  }
+  .table-head {
+    display: grid; grid-template-columns: 2fr 1fr 1.4fr 1fr auto;
+    padding: 12px 24px; background: var(--bg); border-bottom: 1px solid var(--border);
+  }
+  .th { font-size: 10px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+  .tenant-row {
+    display: grid; grid-template-columns: 2fr 1fr 1.4fr 1fr auto;
+    align-items: center; padding: 0 24px; border-bottom: 1px solid var(--border);
+    min-height: 68px; transition: background 0.15s; animation: fadeIn 0.3s ease;
+  }
+  .tenant-row:last-child { border-bottom: none; }
+  .tenant-row:hover { background: #fafbff; }
+  @keyframes fadeIn { from{opacity:0;transform:translateY(4px)} to{opacity:1;transform:none} }
+
+  .row-name { font-family: 'Source Serif 4', serif; font-size: 16px; font-weight: 600; color: var(--ink); letter-spacing: -0.01em; }
+  .row-unit { font-size: 11px; color: var(--muted); margin-top: 2px; font-weight: 500; }
+  .row-code {
+    font-size: 12px; font-weight: 600; letter-spacing: 0.1em; color: var(--blue);
+    background: rgba(65,105,225,0.07); padding: 4px 10px; border-radius: 4px; display: inline-block;
+  }
+  .row-bills { display: flex; flex-wrap: wrap; gap: 4px; }
+  .mini-status {
+    font-size: 10px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase;
+    padding: 3px 8px; border-radius: 20px; cursor: pointer; border: none;
+    transition: opacity 0.2s, transform 0.1s;
+  }
+  .mini-status:hover { opacity: 0.78; transform: scale(0.97); }
+  .status-paid    { background: #e8f5e9; color: var(--green); }
+  .status-unpaid  { background: #fdecea; color: var(--rust); }
+  .status-overdue { background: #fff3e0; color: var(--orange); }
+  .row-total { font-family: 'Source Serif 4', serif; font-size: 16px; font-weight: 600; color: var(--ink); }
+  .row-actions { display: flex; gap: 6px; justify-content: flex-end; }
+  .btn-icon {
+    width: 32px; height: 32px; border-radius: 6px;
+    border: 1.5px solid var(--border); background: var(--white);
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    font-size: 13px; color: var(--muted); transition: all 0.15s;
+  }
+  .btn-icon:hover { border-color: var(--blue); color: var(--blue); background: rgba(65,105,225,0.05); }
+  .btn-icon.del:hover { border-color: var(--rust); color: var(--rust); background: #fdecea; }
+  .empty-state { text-align: center; padding: 72px 24px; color: var(--muted); }
+  .empty-state .icon { font-size: 40px; margin-bottom: 16px; opacity: 0.5; }
+  .empty-state p { font-size: 14px; line-height: 1.6; max-width: 280px; margin: 0 auto; }
+
+  /* MODAL */
+  .modal-overlay {
+    display: none; position: fixed; inset: 0;
+    background: rgba(17,17,17,0.5); backdrop-filter: blur(4px);
+    z-index: 1000; align-items: center; justify-content: center; animation: fadeIn 0.2s;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal {
+    background: var(--white); border-radius: 12px; padding: 36px;
+    width: 100%; max-width: 540px; max-height: 90vh; overflow-y: auto;
+    box-shadow: 0 32px 80px rgba(17,17,17,0.2);
+    animation: rise 0.3s cubic-bezier(.16,1,.3,1);
+  }
+  .modal-eyebrow { font-size: 10px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--blue); margin-bottom: 6px; }
+  .modal-title { font-family: 'Source Serif 4', serif; font-size: 24px; font-weight: 600; color: var(--ink); margin-bottom: 28px; letter-spacing: -0.02em; }
+  .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
+  .field.full { grid-column: 1 / -1; }
+  .code-row { display: flex; gap: 8px; }
+  .code-row input { flex: 1; }
+  .btn-gen {
+    padding: 11px 14px; background: var(--bg); border: 1.5px solid var(--border); border-radius: 6px;
+    font-family: 'Inter', sans-serif; font-size: 12px; font-weight: 600; color: var(--navy);
+    cursor: pointer; white-space: nowrap; transition: all 0.2s;
+  }
+  .btn-gen:hover { border-color: var(--blue); color: var(--blue); }
+  .divider { border: none; border-top: 1px solid var(--border); margin: 24px 0 20px; }
+  .bills-section-label { font-size: 10px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--navy); margin-bottom: 14px; }
+  .bill-item {
+    display: grid; grid-template-columns: 1.4fr 1fr 1fr 90px 28px;
+    gap: 8px; align-items: end; margin-bottom: 10px;
+  }
+  .bill-item input, .bill-item select { padding: 9px 11px; font-size: 13px; }
+  .bill-item label { font-size: 10px; }
+  .btn-rm {
+    width: 28px; height: 38px; background: none;
+    border: 1.5px solid var(--border); border-radius: 6px;
+    color: var(--muted); cursor: pointer; font-size: 14px;
+    transition: all 0.15s; display: flex; align-items: center; justify-content: center;
+  }
+  .btn-rm:hover { border-color: var(--rust); color: var(--rust); background: #fdecea; }
+  .btn-add-bill {
+    width: 100%; padding: 9px; background: none;
+    border: 1.5px dashed var(--border); border-radius: 6px;
+    font-family: 'Inter', sans-serif; font-size: 12px; font-weight: 500;
+    color: var(--muted); cursor: pointer; transition: all 0.2s; margin-top: 4px;
+  }
+  .btn-add-bill:hover { border-color: var(--blue); color: var(--blue); background: rgba(65,105,225,0.03); }
+  .modal-actions {
+    display: flex; gap: 10px; margin-top: 28px;
+    padding-top: 20px; border-top: 1px solid var(--border);
+  }
+  .btn-cancel {
+    flex: 1; padding: 12px; background: var(--bg);
+    border: 1.5px solid var(--border); border-radius: 6px;
+    font-family: 'Inter', sans-serif; font-size: 13px; font-weight: 500;
+    color: var(--muted); cursor: pointer; transition: all 0.2s;
+  }
+  .btn-cancel:hover { border-color: var(--navy); color: var(--navy); }
+  .btn-save {
+    flex: 2; padding: 12px; background: var(--blue); color: white; border: none; border-radius: 6px;
+    font-family: 'Inter', sans-serif; font-size: 13px; font-weight: 600; cursor: pointer; transition: background 0.2s;
+  }
+  .btn-save:hover { background: #3558d0; }
+
+  /* TENANT PORTAL */
+  .portal-wrap { max-width: 640px; margin: 0 auto; animation: rise 0.45s cubic-bezier(.16,1,.3,1); }
+  .portal-pull { margin-bottom: 40px; padding-left: 20px; border-left: 3px solid var(--blue); }
+  .portal-pull-text {
+    font-family: 'Source Serif 4', serif; font-size: 21px; font-weight: 400;
+    font-style: italic; color: var(--navy); line-height: 1.5; letter-spacing: -0.01em;
+  }
+  .portal-pull-sub { font-size: 12px; color: var(--muted); margin-top: 6px; font-weight: 500; }
+  .bills-card {
+    background: var(--white); border-radius: 10px;
+    border: 1px solid var(--border); overflow: hidden; box-shadow: var(--shadow);
+  }
+  .bills-card-head {
+    padding: 20px 28px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .bills-card-title { font-size: 11px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+  .bills-count { font-size: 12px; color: var(--blue); font-weight: 600; }
+  .portal-bill-row {
+    display: flex; align-items: center; padding: 20px 28px;
+    border-bottom: 1px solid var(--border); gap: 16px; transition: background 0.15s;
+  }
+  .portal-bill-row:last-child { border-bottom: none; }
+  .portal-bill-row:hover { background: #fafbff; }
+  .pbill-info { flex: 1; }
+  .pbill-label { font-family: 'Source Serif 4', serif; font-size: 16px; font-weight: 600; color: var(--ink); margin-bottom: 3px; letter-spacing: -0.01em; }
+  .pbill-due { font-size: 12px; color: var(--muted); font-weight: 400; }
+  .pbill-amount { font-family: 'Source Serif 4', serif; font-size: 20px; font-weight: 600; color: var(--ink); letter-spacing: -0.02em; }
+  .bills-footer {
+    padding: 20px 28px; background: var(--bg); border-top: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .footer-label { font-size: 11px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+  .footer-total { font-family: 'Source Serif 4', serif; font-size: 26px; font-weight: 600; color: var(--ink); letter-spacing: -0.02em; }
+
+
+  /* SCAN LINK */
+  .pbill-scan-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    margin-top: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--blue);
+    text-decoration: none;
+    letter-spacing: 0.03em;
+    transition: opacity 0.2s;
+  }
+  .pbill-scan-link:hover { opacity: 0.7; text-decoration: underline; }
+  .pbill-scan-link-icon { font-size: 12px; }
+
+  /* ARCHIVED SECTION */
+  .archived-section {
+    max-width: 640px;
+    margin: 28px auto 0;
+  }
+  .archived-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0;
+    color: var(--muted);
+    font-family: 'Inter', sans-serif;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-bottom: 12px;
+    transition: color 0.2s;
+    width: 100%;
+    text-align: left;
+  }
+  .archived-toggle:hover { color: var(--navy); }
+  .archived-toggle-arrow { transition: transform 0.25s; display: inline-block; font-style: normal; }
+  .archived-toggle-arrow.open { transform: rotate(90deg); }
+  .archived-list {
+    display: none;
+    background: var(--white);
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    overflow: hidden;
+    opacity: 0.75;
+  }
+  .archived-list.open { display: block; }
+  .archived-bill-row {
+    display: flex;
+    align-items: center;
+    padding: 14px 28px;
+    border-bottom: 1px solid var(--border);
+    gap: 12px;
+  }
+  .archived-bill-row:last-child { border-bottom: none; }
+  .archived-label {
+    font-family: 'Source Serif 4', serif;
+    font-size: 14px;
+    color: var(--muted);
+    flex: 1;
+    text-decoration: line-through;
+    text-decoration-color: rgba(122,134,148,0.4);
+  }
+  .archived-amount {
+    font-family: 'Source Serif 4', serif;
+    font-size: 14px;
+    color: var(--muted);
+  }
+  .archived-scan {
+    font-size: 11px;
+    color: var(--blue);
+    text-decoration: none;
+    font-weight: 600;
+    opacity: 0.7;
+  }
+  .archived-scan:hover { opacity: 1; }
+
+  /* REMARK */
+  .bill-remark-field { grid-column: 1 / -1; }
+  .pbill-remark {
+    display: inline-flex;
+    align-items: flex-start;
+    gap: 7px;
+    margin-top: 7px;
+    background: rgba(65,105,225,0.06);
+    border-left: 2px solid var(--blue);
+    border-radius: 0 4px 4px 0;
+    padding: 6px 10px;
+    font-size: 12px;
+    color: var(--navy);
+    font-style: italic;
+    line-height: 1.5;
+    max-width: 100%;
+  }
+  .pbill-remark-icon {
+    font-style: normal;
+    font-size: 11px;
+    opacity: 0.6;
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+
+  /* ── MOBILE-FIRST RESPONSIVE ── */
+  @media (max-width: 768px) {
+    /* Layout */
+    main { padding: 28px 16px; }
+    header { padding: 0 16px; height: 52px; }
+    .nav-user { display: none; }
+    .btn-logout { padding: 6px 12px; font-size: 11px; }
+
+    /* Login */
+    .login-wrap { padding: 24px 20px; }
+    .login-heading { font-size: 28px; }
+
+    /* Page headers */
+    .page-title { font-size: 28px; margin-bottom: 24px; }
+
+    /* Stats strip — 3 columns side by side on mobile */
+    .summary-strip { grid-template-columns: repeat(3, 1fr); }
+    .summary-strip .summary-stat:last-child { grid-column: auto; }
+    .summary-stat { padding: 14px 12px; }
+    .stat-label { font-size: 9px; letter-spacing: 0.08em; margin-bottom: 5px; }
+    .stat-value { font-size: 18px; }
+
+    /* Section bar */
+    .section-bar { margin-bottom: 14px; align-items: center; }
+    .btn-add { padding: 8px 14px; font-size: 12px; }
+
+    /* ── TENANT TABLE → CARDS on mobile ── */
+    .table-head { display: none; }
+    .tenant-table { border-radius: 10px; }
+
+    .tenant-row {
+      display: flex !important;
+      flex-direction: column !important;
+      grid-template-columns: unset !important;
+      gap: 0;
+      padding: 0;
+      min-height: unset;
+      border-bottom: 1px solid var(--border);
+    }
+    .tenant-row:last-child { border-bottom: none; }
+    .tenant-row:hover { background: none; }
+
+    /* Card top: name left, buttons right */
+    .tenant-row-top {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      padding: 14px 14px 8px;
+      width: 100%;
+      text-align: left;
+    }
+    .tenant-row-top > div:first-child { flex: 1; text-align: left; }
+    .tenant-row-top .row-name { font-size: 15px; text-align: left; }
+    .tenant-row-top .row-unit { font-size: 11px; margin-top: 2px; text-align: left; }
+
+    .tenant-row-meta {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 14px 8px;
+      flex-wrap: wrap;
+      text-align: left;
+    }
+    .row-code { font-size: 11px; padding: 3px 8px; }
+
+    .tenant-row-bills {
+      padding: 0 14px 10px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .mini-status { padding: 5px 10px; font-size: 11px; border-radius: 20px; }
+
+    .tenant-row-footer {
+      padding: 10px 14px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-top: 1px solid var(--border);
+    }
+    .row-total-label {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .row-total { font-size: 16px; }
+
+    /* Action buttons — compact, pinned right */
+    .row-actions { display: flex; gap: 6px; align-items: center; flex-shrink: 0; margin-left: 10px; }
+    .btn-icon { width: 34px; height: 34px; font-size: 14px; flex-shrink: 0; }
+
+    /* Modal — full-screen sheet on mobile */
+    .modal-overlay { align-items: flex-end; }
+    .modal {
+      border-radius: 16px 16px 0 0;
+      max-height: 92vh;
+      padding: 24px 20px 32px;
+      width: 100%;
+      max-width: 100%;
+    }
+
+    /* Form grid — single column on mobile */
+    .form-grid { grid-template-columns: 1fr; }
+    .field.full { grid-column: 1; }
+
+    /* Bill form — fully stacked on mobile */
+    .bill-item {
+      grid-template-columns: 1fr;
+      grid-template-rows: unset;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px;
+      position: relative;
+      margin-bottom: 12px;
+    }
+    .bill-item > .btn-rm {
+      position: absolute;
+      top: 10px; right: 10px;
+      width: 30px; height: 30px;
+    }
+
+    /* Portal */
+    .portal-wrap { max-width: 100%; }
+    .portal-pull-text { font-size: 17px; }
+    .bills-card-head { padding: 16px 20px; }
+    .portal-bill-row { padding: 16px 20px; gap: 10px; flex-wrap: wrap; }
+    .pbill-amount { font-size: 17px; }
+    .bills-footer { padding: 16px 20px; }
+    .footer-total { font-size: 22px; }
+  }
+
+  @media (max-width: 400px) {
+    .summary-stat { padding: 12px 10px; }
+    .stat-value { font-size: 16px; }
+    .stat-label { font-size: 8px; }
+    .login-heading { font-size: 24px; }
+    main { padding: 24px 14px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="login-screen">
+  <div class="login-wrap">
+    <div class="login-wordmark">Apartment Tracker by JEZ</div>
+    <h1 class="login-heading">Welcome back.</h1>
+    <p class="login-sub">Sign in to manage your tenants, or enter your access code to view your bills.</p>
+    <div class="login-tabs">
+      <button class="login-tab active" onclick="switchTab('admin')">Admin</button>
+      <button class="login-tab" onclick="switchTab('tenant')">Tenant Portal</button>
+    </div>
+    <div id="admin-form">
+      <div class="field">
+        <label>Admin Password</label>
+        <input type="password" id="admin-pw" placeholder="Enter password" onkeydown="if(event.key==='Enter')adminLogin()">
+      </div>
+      <button class="btn-primary" onclick="adminLogin()">Enter Dashboard</button>
+    </div>
+    <div id="tenant-form" style="display:none">
+      <div class="field">
+        <label>Access Code</label>
+        <input type="text" id="tenant-code" placeholder="e.g. XKQR-A7BN" style="letter-spacing:0.1em;text-transform:uppercase" oninput="this.value=this.value.toUpperCase()" onkeydown="if(event.key==='Enter')tenantLogin()">
+      </div>
+      <button class="btn-primary" onclick="tenantLogin()">View My Bills</button>
+    </div>
+    <div class="login-error" id="login-error"></div>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="app">
+  <header>
+    <div class="nav-wordmark"><span class="nav-dot"></span>Apartment Tracker by JEZ</div>
+    <div class="nav-right">
+      <span class="nav-user" id="header-info"></span>
+      <button class="btn-logout" onclick="logout()">Sign out</button>
+    </div>
+  </header>
+  <main id="main-content"></main>
+</div>
+
+<!-- MODAL -->
+<div class="modal-overlay" id="tenant-modal">
+  <div class="modal">
+    <div class="modal-eyebrow" id="modal-eyebrow">New Tenant</div>
+    <div class="modal-title" id="modal-title">Add a tenant</div>
+    <div class="form-grid">
+      <div class="field"><label>Full Name</label><input type="text" id="m-name" placeholder="e.g. Maria Santos"></div>
+      <div class="field"><label>Unit Number</label><input type="text" id="m-unit" placeholder="e.g. 301"></div>
+      <div class="field full">
+        <label>Access Code</label>
+        <div class="code-row">
+          <input type="text" id="m-code" placeholder="Auto-generated" style="letter-spacing:0.1em;text-transform:uppercase" oninput="this.value=this.value.toUpperCase()">
+          <button class="btn-gen" onclick="generateCode()">Generate</button>
+        </div>
+      </div>
+    </div>
+    <hr class="divider">
+    <div class="bills-section-label">Bills</div>
+    <div id="bill-forms"></div>
+    <button class="btn-add-bill" onclick="addBillForm()">+ Add another bill</button>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeModal()">Cancel</button>
+      <button class="btn-save" onclick="saveTenant()">Save tenant</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── SUPABASE CONFIG ──
+const SB_URL = 'https://bxzfqjspoyvwosmpgeof.supabase.co';
+const SB_KEY = 'sb_publishable_9xF-V89S4gT7cJbfmSdr4w_N_Snmv0s';
+const SB_HEADERS = { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=representation' };
+
+async function sbFetch(path, options={}) {
+  const res = await fetch(SB_URL + '/rest/v1/' + path, { headers: SB_HEADERS, ...options });
+  if (!res.ok) { const e = await res.text(); throw new Error(e); }
+  const txt = await res.text();
+  return txt ? JSON.parse(txt) : null;
+}
+async function dbGetAll()       { return await sbFetch('tenants?select=*&order=name'); }
+async function dbInsert(t)      { return await sbFetch('tenants', { method:'POST', body: JSON.stringify(t) }); }
+async function dbUpdate(id, t)  { return await sbFetch('tenants?id=eq.' + id, { method:'PATCH', body: JSON.stringify(t) }); }
+async function dbDelete(id)     { return await sbFetch('tenants?id=eq.' + id, { method:'DELETE' }); }
+
+const ADMIN_PW = '37MCO!';
+let currentUser = null;
+let tenants = [];
+let editingId = null;
+let billForms = [];
+
+function setLoading(on, msg='Loading…') {
+  let el = document.getElementById('loading-overlay');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'loading-overlay';
+    el.style.cssText = 'position:fixed;inset:0;background:rgba(249,249,250,0.85);backdrop-filter:blur(4px);z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;';
+    el.innerHTML = '<div class="spinner"></div><div style="font-family:Inter,sans-serif;font-size:13px;color:var(--muted);font-weight:500;" id="loading-msg"></div>';
+    document.body.appendChild(el);
+    const style = document.createElement('style');
+    style.textContent = '.spinner{width:28px;height:28px;border:2.5px solid var(--border);border-top-color:var(--blue);border-radius:50%;animation:spin 0.7s linear infinite;}@keyframes spin{to{transform:rotate(360deg)}}';
+    document.head.appendChild(style);
+  }
+  el.style.display = on ? 'flex' : 'none';
+  if (on) document.getElementById('loading-msg').textContent = msg;
+}
+
+function showToast(msg, ok=true) {
+  let el = document.getElementById('toast');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'toast';
+    el.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(12px);padding:10px 20px;border-radius:8px;font-family:Inter,sans-serif;font-size:13px;font-weight:500;z-index:9999;opacity:0;transition:all 0.3s;pointer-events:none;white-space:nowrap;';
+    document.body.appendChild(el);
+  }
+  el.textContent = msg;
+  el.style.background = ok ? 'var(--navy)' : 'var(--rust)';
+  el.style.color = 'white';
+  el.style.opacity = '1';
+  el.style.transform = 'translateX(-50%) translateY(0)';
+  clearTimeout(el._t);
+  el._t = setTimeout(()=>{ el.style.opacity='0'; el.style.transform='translateX(-50%) translateY(12px)'; }, 2500);
+}
+
+function switchTab(tab) {
+  document.querySelectorAll('.login-tab').forEach((t,i) => t.classList.toggle('active', (tab==='admin'&&i===0)||(tab==='tenant'&&i===1)));
+  document.getElementById('admin-form').style.display  = tab==='admin'  ? 'block' : 'none';
+  document.getElementById('tenant-form').style.display = tab==='tenant' ? 'block' : 'none';
+  document.getElementById('login-error').textContent = '';
+}
+function adminLogin() {
+  if (document.getElementById('admin-pw').value === ADMIN_PW) { currentUser='admin'; showApp(); }
+  else document.getElementById('login-error').textContent = 'Incorrect password.';
+}
+async function tenantLogin() {
+  const code = document.getElementById('tenant-code').value.trim().toUpperCase();
+  document.getElementById('login-error').textContent='';
+  setLoading(true,'Verifying code…');
+  try {
+    const rows = await sbFetch('tenants?code=eq.'+encodeURIComponent(code)+'&select=*');
+    setLoading(false);
+    if (rows && rows.length) { currentUser=rows[0]; tenants=rows; showApp(); }
+    else document.getElementById('login-error').textContent='That access code was not found.';
+  } catch(e) { setLoading(false); document.getElementById('login-error').textContent='Connection error. Please try again.'; }
+}
+async function showApp() {
+  document.getElementById('login-screen').style.display='none';
+  document.getElementById('app').style.display='flex';
+  if (currentUser==='admin') {
+    document.getElementById('header-info').textContent='Admin';
+    setLoading(true,'Loading tenants…');
+    try { tenants = await dbGetAll() || []; } catch(e){ showToast('Could not load data: '+e.message, false); tenants=[]; }
+    setLoading(false); renderAdmin();
+  } else {
+    document.getElementById('header-info').textContent=`Unit ${currentUser.unit}`;
+    renderTenant();
+  }
+}
+function logout() {
+  currentUser=null;
+  document.getElementById('login-screen').style.display='flex';
+  document.getElementById('app').style.display='none';
+  document.getElementById('admin-pw').value='';
+  document.getElementById('tenant-code').value='';
+  document.getElementById('login-error').textContent='';
+}
+
+function renderAdmin() {
+  const totalDue = tenants.reduce((s,t)=>s+t.bills.filter(b=>b.status!=='paid').reduce((a,b)=>a+Number(b.amount),0),0);
+  const unpaid   = tenants.reduce((s,t)=>s+t.bills.filter(b=>b.status==='unpaid').length,0);
+  document.getElementById('main-content').innerHTML=`
+    <div class="page-eyebrow">Dashboard</div>
+    <div class="page-title">Tenant Overview</div>
+    <div class="summary-strip">
+      <div class="summary-stat"><div class="stat-label">Total Tenants</div><div class="stat-value">${tenants.length}</div></div>
+      <div class="summary-stat"><div class="stat-label">Unpaid Bills</div><div class="stat-value">${unpaid}</div></div>
+      <div class="summary-stat"><div class="stat-label">Balance Outstanding</div><div class="stat-value blue">&#8369;${totalDue.toLocaleString()}</div></div>
+    </div>
+    <div class="section-bar">
+      <div class="section-label">All Tenants</div>
+      <button class="btn-add" onclick="openAddModal()">+ Add Tenant</button>
+    </div>
+    <div class="tenant-table">
+      <div class="table-head">
+        <div class="th">Tenant</div><div class="th">Access Code</div>
+        <div class="th">Bills</div><div class="th">Balance Due</div><div class="th"></div>
+      </div>
+      <div id="tenant-rows"></div>
+    </div>`;
+  renderRows();
+}
+
+function renderRows() {
+  const c = document.getElementById('tenant-rows');
+  if (!c) return;
+  if (!tenants.length) { c.innerHTML=`<div class="empty-state"><div class="icon">&#127962;</div><p>No tenants yet. Add your first tenant to get started.</p></div>`; return; }
+  const mob = window.innerWidth <= 768;
+  c.innerHTML = tenants.map(t=>{
+    const due=t.bills.filter(b=>b.status!=='paid').reduce((s,b)=>s+Number(b.amount),0);
+    const bills=t.bills.length?t.bills.map((b,bi)=>`<button class="mini-status status-${b.status}" onclick="toggleStatus('${t.id}',${bi})">${esc(b.label)}</button>`).join(''):'<span style="font-size:12px;color:var(--muted)">No bills</span>';
+    const total=due?'&#8369;'+due.toLocaleString():`<span style="color:var(--green);font-size:13px;font-family:Inter,sans-serif">Settled</span>`;
+    const actions=`<div class="row-actions"><button class="btn-icon" onclick="openEditModal('${t.id}')">&#9998;</button><button class="btn-icon del" onclick="deleteTenant('${t.id}')">&#10005;</button></div>`;
+    if (mob) {
+      return `<div class="tenant-row">
+        <div class="tenant-row-top">
+          <div><div class="row-name">${esc(t.name)}</div><div class="row-unit">Unit ${esc(t.unit)}</div></div>
+          ${actions}
+        </div>
+        <div class="tenant-row-meta"><span class="row-code">${esc(t.code)}</span></div>
+        <div class="tenant-row-bills">${bills}</div>
+        <div class="tenant-row-footer"><div class="row-total-label">Balance Due</div><div class="row-total">${total}</div></div>
+      </div>`;
+    }
+    return `<div class="tenant-row">
+      <div><div class="row-name">${esc(t.name)}</div><div class="row-unit">Unit ${esc(t.unit)}</div></div>
+      <div><span class="row-code">${esc(t.code)}</span></div>
+      <div class="row-bills">${bills}</div>
+      <div class="row-total">${total}</div>
+      ${actions}
+    </div>`;
+  }).join('');
+}
+
+function toggleStatus(tid,bi){
+  const t=tenants.find(t=>t.id===tid);
+  const cy=['unpaid','paid','overdue'];
+  t.bills[bi].status=cy[(cy.indexOf(t.bills[bi].status)+1)%cy.length];
+  dbUpdate(t.id, {bills: t.bills}).then(()=>{ tenants = tenants.map(x=>x.id===t.id?t:x); renderAdmin(); }).catch(e=>showToast('Save failed: '+e.message, false));
+}
+function deleteTenant(tid){
+  if(!confirm('Remove this tenant?')) return;
+  setLoading(true,'Deleting…');
+  dbDelete(tid).then(()=>{ tenants=tenants.filter(t=>t.id!==tid); setLoading(false); showToast('Tenant removed.'); renderAdmin(); })
+  .catch(e=>{ setLoading(false); showToast('Delete failed: '+e.message, false); });
+}
+
+function openAddModal(){
+  editingId=null;
+  document.getElementById('modal-eyebrow').textContent='New Tenant';
+  document.getElementById('modal-title').textContent='Add a tenant';
+  document.getElementById('m-name').value='';
+  document.getElementById('m-unit').value='';
+  document.getElementById('m-code').value=randCode();
+  billForms=[{label:'Monthly Rent',amount:'',due:'',status:'unpaid'}];
+  renderBillForms();
+  document.getElementById('tenant-modal').classList.add('open');
+}
+function openEditModal(tid){
+  const t=tenants.find(t=>t.id===tid); editingId=tid;
+  document.getElementById('modal-eyebrow').textContent='Edit Tenant';
+  document.getElementById('modal-title').textContent=esc(t.name);
+  document.getElementById('m-name').value=t.name;
+  document.getElementById('m-unit').value=t.unit;
+  document.getElementById('m-code').value=t.code;
+  billForms=t.bills.map(b=>({...b}));
+  renderBillForms();
+  document.getElementById('tenant-modal').classList.add('open');
+}
+function closeModal(){ document.getElementById('tenant-modal').classList.remove('open'); }
+function addBillForm(){ billForms.push({label:'',amount:'',due:'',status:'unpaid'}); renderBillForms(); }
+function removeBill(i){ billForms.splice(i,1); renderBillForms(); }
+function renderBillForms(){
+  document.getElementById('bill-forms').innerHTML=billForms.map((b,i)=>`
+    <div class="bill-item">
+      <div class="field"><label>Description</label><input type="text" value="${esc(b.label)}" placeholder="e.g. Monthly Rent" oninput="billForms[${i}].label=this.value"></div>
+      <div class="field"><label>Amount (&#8369;)</label><input type="number" value="${b.amount}" placeholder="0" oninput="billForms[${i}].amount=this.value"></div>
+      <div class="field"><label>Due Date</label><input type="date" value="${b.due}" onchange="billForms[${i}].due=this.value"></div>
+      <div class="field"><label>Status</label>
+        <select onchange="billForms[${i}].status=this.value">
+          <option value="unpaid"  ${b.status==='unpaid' ?'selected':''}>Unpaid</option>
+          <option value="paid"    ${b.status==='paid'   ?'selected':''}>Paid</option>
+          <option value="overdue" ${b.status==='overdue'?'selected':''}>Overdue</option>
+        </select>
+      </div>
+      <div class="field bill-remark-field"><label>Remark <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted)">(optional)</span></label><input type="text" value="${esc(b.remark||'')}" placeholder="e.g. Partial payment of ₱2,000 received" oninput="billForms[${i}].remark=this.value"></div>
+      <div class="field bill-remark-field"><label>Google Drive Scan Link <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted)">(optional)</span></label><input type="text" value="${esc(b.scanLink||'')}" placeholder="https://drive.google.com/..." oninput="billForms[${i}].scanLink=this.value"></div>
+      <button class="btn-rm" onclick="removeBill(${i})">×</button>
+    </div>`).join('');
+}
+async function saveTenant(){
+  const name=document.getElementById('m-name').value.trim();
+  const unit=document.getElementById('m-unit').value.trim();
+  const code=document.getElementById('m-code').value.trim().toUpperCase();
+  if(!name||!unit||!code){alert('Please fill in name, unit, and access code.');return;}
+  if(tenants.find(t=>t.code===code&&t.id!==editingId)){alert('That access code is already in use.');return;}
+  const bills=billForms.filter(b=>b.label).map(b=>({...b}));
+  closeModal();
+  setLoading(true, editingId?'Saving changes…':'Adding tenant…');
+  try {
+    if(editingId){
+      await dbUpdate(editingId,{name,unit,code,bills});
+      tenants=tenants.map(t=>t.id===editingId?{...t,name,unit,code,bills}:t);
+      showToast('Changes saved.');
+    } else {
+      const rec={id:uid(),name,unit,code,bills};
+      await dbInsert(rec);
+      tenants.push(rec);
+      showToast('Tenant added.');
+    }
+  } catch(e){ showToast('Error: '+e.message, false); }
+  setLoading(false); renderAdmin();
+}
+function generateCode(){ document.getElementById('m-code').value=randCode(); }
+
+function renderTenant(){
+  const t=currentUser;
+  const activeBills=t.bills.filter(b=>b.status!=='paid');
+  const paidBills=t.bills.filter(b=>b.status==='paid');
+  const due=activeBills.reduce((s,b)=>s+Number(b.amount),0);
+
+  const billRow = b => `
+    <div class="portal-bill-row">
+      <div class="pbill-info">
+        <div class="pbill-label">${esc(b.label)}</div>
+        <div class="pbill-due">${b.due?'Due '+formatDate(b.due):'No due date set'}</div>
+        ${b.remark?`<div class="pbill-remark"><span class="pbill-remark-icon">&#128172;</span>${esc(b.remark)}</div>`:''}
+        ${b.scanLink?`<a class="pbill-scan-link" href="${esc(b.scanLink)}" target="_blank" rel="noopener"><span class="pbill-scan-link-icon">&#128196;</span>View Scanned Bill</a>`:''}
+      </div>
+      <div class="pbill-amount">&#8369;${Number(b.amount).toLocaleString()}</div>
+      <span class="mini-status status-${b.status}">${b.status}</span>
+    </div>`;
+
+  const archivedRows = paidBills.length ? paidBills.map(b=>`
+    <div class="archived-bill-row">
+      <div>
+        <div class="archived-label">${esc(b.label)}</div>
+        ${b.due?`<div style="font-size:11px;color:var(--muted);margin-top:2px;">Paid · ${formatDate(b.due)}</div>`:''}
+      </div>
+      <div class="archived-amount">&#8369;${Number(b.amount).toLocaleString()}</div>
+      ${b.scanLink?`<a class="archived-scan" href="${esc(b.scanLink)}" target="_blank" rel="noopener">&#128196; View</a>`:''}
+    </div>`).join('') : '';
+
+  document.getElementById('main-content').innerHTML=`
+    <div class="portal-wrap">
+      <div class="page-eyebrow">Tenant Portal</div>
+      <div class="page-title">${esc(t.name)}</div>
+      <div class="portal-pull">
+        <div class="portal-pull-text">"Your bills, clearly laid out."</div>
+        <div class="portal-pull-sub">Unit ${esc(t.unit)} &nbsp;·&nbsp; Contact your landlord if anything looks incorrect.</div>
+      </div>
+      <div class="bills-card">
+        <div class="bills-card-head">
+          <div class="bills-card-title">Statement of Account</div>
+          <div class="bills-count">${activeBills.length} active</div>
+        </div>
+        ${activeBills.length
+          ? activeBills.map(billRow).join('')
+          : '<div class="empty-state" style="padding:40px 24px"><div class="icon" style="font-size:28px;margin-bottom:10px">&#10003;</div><p>All bills are settled.</p></div>'}
+        <div class="bills-footer">
+          <div class="footer-label">Total Balance Due</div>
+          <div class="footer-total">${due?'&#8369;'+due.toLocaleString():'Fully paid ✓'}</div>
+        </div>
+      </div>
+      ${paidBills.length ? `
+      <div class="archived-section">
+        <button class="archived-toggle" onclick="toggleArchive(this)">
+          <span class="archived-toggle-arrow">&#9654;</span>
+          Paid Bills &nbsp;(${paidBills.length})
+        </button>
+        <div class="archived-list">
+          ${archivedRows}
+        </div>
+      </div>` : ''}
+    </div>`;
+}
+
+function toggleArchive(btn){
+  const list = btn.nextElementSibling;
+  const arrow = btn.querySelector('.archived-toggle-arrow');
+  list.classList.toggle('open');
+  arrow.classList.toggle('open');
+}
+
+function uid(){ return Math.random().toString(36).slice(2,10).toUpperCase(); }
+function randCode(){
+  const c='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  return Array.from({length:4},()=>c[Math.random()*c.length|0]).join('')+'-'+Array.from({length:4},()=>c[Math.random()*c.length|0]).join('');
+}
+function esc(s){ return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function formatDate(d){
+  try{return new Date(d+'T00:00:00').toLocaleDateString('en-PH',{month:'long',day:'numeric',year:'numeric'});}catch{return d;}
+}
+document.getElementById('tenant-modal').addEventListener('click',e=>{if(e.target===document.getElementById('tenant-modal'))closeModal();});
+let _rt; window.addEventListener('resize',()=>{clearTimeout(_rt);_rt=setTimeout(()=>{if(currentUser==='admin')renderRows();},150);});
+</script>
+</body>
+</html>
