@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://bxzfqjspoyvwosmpgeof.supabase.co https://api.anthropic.com; img-src 'self' data: blob:;">
 <meta name="robots" content="noindex, nofollow">
 <meta name="description" content="Tenant billing portal for Orange Apartment, Baguio">
 <meta name="theme-color" content="#4169e1">
@@ -1441,10 +1442,12 @@ async function savePaymentEntry(bi) {
   if(!amt||amt<=0){ showToast('Please enter a valid amount.',false); return; }
   if(!date){ showToast('Please select a date.',false); return; }
   const t = tenants.find(t=>t.id===editingId);
-  if(!t.bills[bi].payments) t.bills[bi].payments = [];
-  t.bills[bi].payments.push({amount:amt, date, note});
+  const billsCopy = JSON.parse(JSON.stringify(t.bills));
+  if(!billsCopy[bi].payments) billsCopy[bi].payments = [];
+  billsCopy[bi].payments.push({amount:amt, date, note});
   try {
-    await dbUpdate(t.id,{bills:t.bills});
+    await dbUpdate(t.id,{bills:billsCopy});
+    t.bills = billsCopy;
     tenants = tenants.map(x=>x.id===t.id?t:x);
     showToast('Payment recorded.');
     renderBillListItems();
@@ -1455,9 +1458,11 @@ async function savePaymentEntry(bi) {
 async function deletePaymentEntry(bi, pi) {
   if(!confirm('Remove this payment entry?')) return;
   const t = tenants.find(t=>t.id===editingId);
-  t.bills[bi].payments.splice(pi,1);
+  const billsCopy = JSON.parse(JSON.stringify(t.bills));
+  billsCopy[bi].payments.splice(pi,1);
   try {
-    await dbUpdate(t.id,{bills:t.bills});
+    await dbUpdate(t.id,{bills:billsCopy});
+    t.bills = billsCopy;
     tenants = tenants.map(x=>x.id===t.id?t:x);
     showToast('Payment entry removed.');
     renderBillListItems();
@@ -1721,20 +1726,22 @@ async function applyReceipt(){
   if(!_pendingReceipt) return;
   const {tid, bi, paidAmt, paidDate, noteType, diff} = _pendingReceipt;
   const t = tenants.find(t=>t.id===tid);
+  const billsCopy = JSON.parse(JSON.stringify(t.bills));
 
   if(noteType === 'partial'){
-    t.bills[bi].remark = `Partial payment of ₱${paidAmt.toLocaleString()} received on ${formatDate(paidDate)}. Remaining: ₱${diff.toLocaleString()}`;
-    t.bills[bi].status = 'unpaid';
-    t.bills[bi].paidDate = '';
+    billsCopy[bi].remark = `Partial payment of ₱${paidAmt.toLocaleString()} received on ${formatDate(paidDate)}. Remaining: ₱${diff.toLocaleString()}`;
+    billsCopy[bi].status = 'unpaid';
+    billsCopy[bi].paidDate = '';
   } else {
-    t.bills[bi].status = 'paid';
-    t.bills[bi].paidDate = paidDate;
-    if(noteType === 'mismatch') t.bills[bi].remark = `Paid ₱${paidAmt.toLocaleString()} (receipt amount, reviewed by admin)`;
+    billsCopy[bi].status = 'paid';
+    billsCopy[bi].paidDate = paidDate;
+    if(noteType === 'mismatch') billsCopy[bi].remark = `Paid ₱${paidAmt.toLocaleString()} (receipt amount, reviewed by admin)`;
   }
 
   closeReceiptModal();
   try {
-    await dbUpdate(t.id, {bills: t.bills});
+    await dbUpdate(t.id, {bills: billsCopy});
+    t.bills = billsCopy;
     tenants = tenants.map(x=>x.id===t.id?t:x);
     showToast(noteType==='partial' ? 'Partial payment recorded.' : 'Payment applied ✓');
     renderBillListItems();
@@ -1890,11 +1897,15 @@ async function tenantLogin() {
   }
   setLoading(true,'Verifying code…');
   try {
-    const rows = await sbFetch('tenants?code=eq.'+encodeURIComponent(code)+'&select=*');
+    const rows = await sbFetch('rpc/login_tenant', { method:'POST', body: JSON.stringify({ access_code: code }) });
     setLoading(false);
     if(rows && rows.length) { _loginAttempts.count = 0; currentUser=rows[0]; tenants=rows; showApp(); }
     else document.getElementById('login-error').textContent = 'That access code was not found.';
-  } catch(e) { setLoading(false); document.getElementById('login-error').textContent = 'Connection error. Please try again.'; }
+  } catch(e) {
+    setLoading(false);
+    const msg = (e.message && e.message.includes('Too many')) ? 'Too many attempts. Please wait and try again.' : 'Connection error. Please try again.';
+    document.getElementById('login-error').textContent = msg;
+  }
 }
 
 // Auto-mark unpaid bills past their due date as Overdue, sync any changes to Supabase
@@ -1902,14 +1913,15 @@ async function checkAndSyncOverdue() {
   const today = new Date(); today.setHours(0,0,0,0);
   const updates = [];
   tenants.forEach(t => {
+    const billsCopy = JSON.parse(JSON.stringify(t.bills));
     let changed = false;
-    t.bills.forEach(b => {
+    billsCopy.forEach(b => {
       if (b.status === 'unpaid' && b.due) {
         const due = new Date(b.due); due.setHours(0,0,0,0);
         if (due < today) { b.status = 'overdue'; changed = true; }
       }
     });
-    if (changed) updates.push(dbUpdate(t.id, { bills: t.bills }));
+    if (changed) updates.push(dbUpdate(t.id, { bills: billsCopy }).then(() => { t.bills = billsCopy; }));
   });
   if (updates.length) await Promise.all(updates);
 }
@@ -1933,7 +1945,10 @@ async function showApp() {
     setLoading(false); renderAdmin();
   } else {
     document.getElementById('header-info').textContent=`Unit ${currentUser.unit}`;
-    try { paymentInstructions = await dbGetSetting('payment_instructions'); } catch(e) { paymentInstructions = ''; }
+    try {
+      const val = await sbFetch('rpc/read_setting', { method:'POST', body: JSON.stringify({ setting_key: 'payment_instructions' }) });
+      paymentInstructions = (typeof val === 'string') ? val : '';
+    } catch(e) { paymentInstructions = ''; }
     renderTenant();
   }
 }
@@ -2157,7 +2172,7 @@ function renderRows() {
     const paidBills   = t.bills.filter(b=>b.status==='paid');
     const due = activeBills.reduce((s,b)=>s+Math.max(0,billRemaining(b)),0);
     const total = due?'&#8369;'+due.toLocaleString():`<span style="color:var(--green);font-size:13px;font-family:Inter,sans-serif">Settled</span>`;
-    const actions = `<div class="row-actions"><button class="btn-statement" style="padding:4px 10px;font-size:10px;" onclick="openStmtModalById('${t.id}')">Stmt</button><button class="btn-icon" onclick="openEditModal('${t.id}')">&#9998;</button><button class="btn-icon del" onclick="deleteTenant('${t.id}')">&#10005;</button></div>`;
+    const actions = `<div class="row-actions"><button class="btn-statement" style="padding:4px 10px;font-size:10px;" onclick="openStmtModalById('${t.id}')" aria-label="Statement">Stmt</button><button class="btn-icon" onclick="openEditModal('${t.id}')" aria-label="Edit">&#9998;</button><button class="btn-icon del" onclick="deleteTenant('${t.id}')" aria-label="Delete">&#10005;</button></div>`;
 
     // Active bill badges sorted by urgency (F-12: uses getDueStatus)
     const sortedActive = activeBills.slice().sort((a,b)=>getDueUrgencyScore(a)-getDueUrgencyScore(b));
@@ -2307,8 +2322,8 @@ async function loadArchivedTenants(){
           <div style="font-size:14px;font-weight:600;color:var(--ink);" data-tid="${t.id}">${esc(t.name)}</div>
           <div style="font-size:11px;color:var(--muted);">Unit ${esc(t.unit)} &nbsp;·&nbsp; Archived ${formatDate((t.archived_at||'').slice(0,10))}</div>
         </div>
-        <button class="btn-icon" onclick="restoreTenant('${t.id}')" title="Restore tenant" style="color:var(--green);border-color:var(--green);">&#8635;</button>
-        <button class="btn-icon del" onclick="permanentlyDeleteTenant('${t.id}')" title="Permanently delete">&#10005;</button>
+        <button class="btn-icon" onclick="restoreTenant('${t.id}')" title="Restore tenant" aria-label="Restore" style="color:var(--green);border-color:var(--green);">&#8635;</button>
+        <button class="btn-icon del" onclick="permanentlyDeleteTenant('${t.id}')" title="Permanently delete" aria-label="Delete">&#10005;</button>
       </div>`).join('');
   } catch(e){ showToast('Could not load archived tenants.', false); }
 }
@@ -2376,7 +2391,7 @@ function billListItemHtml(b, i, extraClass) {
       <span class="payment-entry-date">${formatDate(p.date)}</span>
       <span class="payment-entry-amt">&#8369;${Number(p.amount).toLocaleString()} paid</span>
       ${p.note?`<span class="payment-entry-note">${esc(p.note)}</span>`:'<span class="payment-entry-note"></span>'}
-      ${extraClass!=='paid-item'?`<button class="payment-entry-del" onclick="deletePaymentEntry(${i},${pi})" title="Remove">&#10005;</button>`:''}
+      ${extraClass!=='paid-item'?`<button class="payment-entry-del" onclick="deletePaymentEntry(${i},${pi})" title="Remove" aria-label="Delete">&#10005;</button>`:''}
     </div>`).join('');
   return `<div class="bill-list-item ${extraClass||''}">
     <div class="bill-list-info" style="flex:1">
@@ -2393,8 +2408,8 @@ function billListItemHtml(b, i, extraClass) {
       ${extraClass!=='paid-item'?`<button class="btn-add-payment" onclick="openAddPayment(${i})">+ Add Payment</button><div id="add-payment-form-${i}" style="display:none"></div>`:''}
     </div>
     <div class="bill-list-actions" style="gap:6px;align-self:flex-start;margin-top:2px;">
-      <button class="btn-icon" onclick="editBillInline(${i})">&#9998;</button>
-      <button class="btn-icon del" onclick="deleteBillFromList(${i})">&#10005;</button>
+      <button class="btn-icon" onclick="editBillInline(${i})" aria-label="Edit">&#9998;</button>
+      <button class="btn-icon del" onclick="deleteBillFromList(${i})" aria-label="Delete">&#10005;</button>
     </div>
   </div>
   <div id="bill-edit-inline-${i}" style="display:none"></div>`;
@@ -2802,6 +2817,7 @@ document.addEventListener('DOMContentLoaded',()=>{
   _wire('paiddate-modal', closePaidModal);
   _wire('payinst-modal', closePayInstModal);
   _wire('stmt-modal',    closeStmtModal);
+  _wire('genbills-modal', closeGenModal);
 
   // Detect Supabase password recovery redirect
   checkPasswordRecovery();
@@ -2849,20 +2865,19 @@ async function checkPasswordRecovery() {
 
 async function submitPasswordReset() {
   const pw = document.getElementById('reset-pw').value;
-  const confirm = document.getElementById('reset-pw-confirm').value;
+  const confirmValue = document.getElementById('reset-pw-confirm').value;
   const errEl = document.getElementById('reset-error');
   errEl.textContent = '';
-  if(!pw || pw.length < 6) { errEl.textContent = 'Password must be at least 6 characters.'; return; }
-  if(pw !== confirm) { errEl.textContent = 'Passwords do not match.'; return; }
+  if(!pw || pw.length < 8) { errEl.textContent = 'Password must be at least 8 characters.'; return; }
+  if(pw !== confirmValue) { errEl.textContent = 'Passwords do not match.'; return; }
   setLoading(true, 'Updating password…');
   try {
     const { error } = await _sbClient.auth.updateUser({ password: pw });
     setLoading(false);
     if(error) { errEl.textContent = error.message; return; }
     await _sbClient.auth.signOut();
-    // Restore normal login screen
-    location.reload();
     showToast('Password updated. Please sign in with your new password.');
+    setTimeout(() => location.reload(), 2000);
   } catch(e) {
     setLoading(false);
     errEl.textContent = 'Update failed: ' + e.message;
@@ -2915,8 +2930,8 @@ function renderTemplateList() {
         </div>
       </div>
       <div style="display:flex;gap:5px">
-        <button class="btn-icon" onclick="editTemplateInline(${i})">&#9998;</button>
-        <button class="btn-icon del" onclick="deleteTemplate(${i})">&#10005;</button>
+        <button class="btn-icon" onclick="editTemplateInline(${i})" aria-label="Edit">&#9998;</button>
+        <button class="btn-icon del" onclick="deleteTemplate(${i})" aria-label="Delete">&#10005;</button>
       </div>
     </div>
     <div id="tmpl-edit-inline-${i}" style="display:none"></div>
@@ -3134,12 +3149,6 @@ async function confirmGenerateBills() {
   } catch(e){ setLoading(false); showToast('Error: '+e.message, false); }
 }
 
-// Close gen modal on overlay click
-document.addEventListener('DOMContentLoaded',()=>{
-  document.getElementById('genbills-modal').addEventListener('click', e=>{
-    if(e.target===document.getElementById('genbills-modal')) closeGenModal();
-  });
-});
 
 
 
