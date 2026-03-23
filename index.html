@@ -499,7 +499,7 @@
   .action-badge.due-soon { background: #fff3e0; color: var(--orange); }
   .action-info { flex: 1; min-width: 0; overflow: hidden; }
   .action-bill-name { font-size: 13px; font-weight: 600; color: var(--ink); }
-  .action-tenant { font-size: 11px; color: var(--muted); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .action-tenant { font-size: 11px; color: var(--muted); margin-top: 2px; }
   .action-amount { font-family: 'Source Serif 4', serif; font-size: 14px; font-weight: 600; color: var(--ink); flex-shrink: 0; white-space: nowrap; }
   .btn-action-pay {
     font-size: 11px; font-weight: 600; padding: 6px 14px;
@@ -507,6 +507,26 @@
     cursor: pointer; transition: background 0.15s; flex-shrink: 0; font-family: 'Inter', sans-serif;
   }
   .btn-action-pay:hover { background: #3558d0; }
+
+  /* VIEW TOGGLE */
+  .view-toggle { display: inline-flex; border: 1.5px solid var(--border); border-radius: 6px; overflow: hidden; margin-left: 12px; }
+  .view-toggle button { padding: 4px 10px; font-size: 12px; border: none; background: var(--white); cursor: pointer; color: var(--muted); font-weight: 600; transition: all 0.15s; font-family: 'Inter', sans-serif; }
+  .view-toggle button.active { background: var(--blue); color: var(--white); }
+  .view-toggle button:not(.active):hover { background: var(--bg); }
+
+  /* TABLE DATABASE VIEW */
+  .db-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; margin-bottom: 48px; }
+  .db-table { width: 100%; border-collapse: separate; border-spacing: 0; background: var(--white); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); font-size: 13px; overflow: hidden; }
+  .db-table thead th { font-size: 10px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); padding: 12px 14px; background: var(--bg); border-bottom: 1px solid var(--border); cursor: pointer; white-space: nowrap; user-select: none; text-align: left; }
+  .db-table thead th:hover { color: var(--ink); }
+  .db-table thead th .sort-arrow { margin-left: 4px; font-size: 9px; opacity: 0.7; }
+  .db-table tbody td { padding: 10px 14px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  .db-table tbody tr:last-child td { border-bottom: none; }
+  .db-table tbody tr:hover { background: #fafbff; }
+  .db-table .td-amount { text-align: right; font-family: 'Source Serif 4', serif; font-weight: 600; white-space: nowrap; }
+  .db-table .td-remark { max-width: 150px; font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .db-table .td-date { white-space: nowrap; font-size: 12px; }
+  .db-empty { text-align: center; padding: 48px 24px; color: var(--muted); font-size: 13px; }
 
   /* GENERATE BILLS */
   .btn-generate {
@@ -1063,13 +1083,16 @@
   @media (max-width: 768px) {
     .filter-select { flex: 1 1 100%; max-width: 100%; }
     .filter-month, .filter-sort { width: 100%; flex: 1 1 calc(50% - 3px); }
-    .action-item { padding: 10px 14px; }
-    .action-info { min-width: 0; }
+    .action-item { padding: 10px 14px; flex-wrap: wrap; row-gap: 6px; }
+    .action-info { min-width: 0; flex: 1 1 calc(100% - 110px); }
+    .action-amount { margin-left: auto; }
     .admin-paid-section { padding: 0 14px 12px; }
     .tenant-row-footer { padding: 8px 14px 12px; }
     .row-total-label { font-size: 10px; }
     .row-total { font-size: 15px; }
     .pay-inst-card { padding: 12px 14px; }
+    .db-table-wrap { margin: 0 -16px; border-radius: 0; }
+    .db-table { font-size: 12px; min-width: 700px; }
     /* Layout */
     main { padding: 28px 16px; }
     header { padding: 0 16px; height: 52px; }
@@ -1811,6 +1834,9 @@ let editingId = null;
 let filterTenantId = '';   // '' = all
 let filterMonth    = '';   // '' = all, else 'YYYY-MM'
 let sortOrder      = 'unit-asc'; // 'unit-asc' | 'unit-desc' | 'name-asc'
+let viewMode       = 'card';     // 'card' | 'table'
+let tableSortCol   = 'due';      // column to sort table by
+let tableSortDir   = 'asc';      // 'asc' | 'desc'
 let portalMonth    = 'current'; // 'all' | 'YYYY-MM' | 'current'
 let billForms = [];
 
@@ -2025,7 +2051,13 @@ function renderAdmin() {
     </div>
     ${renderActionRequired()}
     <div class="section-bar">
-      <div class="section-label">All Tenants</div>
+      <div style="display:flex;align-items:center;">
+        <div class="section-label">All Tenants</div>
+        <div class="view-toggle">
+          <button class="${viewMode==='card'?'active':''}" onclick="setViewMode('card')" title="Card View">&#9776;</button>
+          <button class="${viewMode==='table'?'active':''}" onclick="setViewMode('table')" title="Table View">&#9638;</button>
+        </div>
+      </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn-generate" onclick="exportCSV()" title="Export all bills to CSV">&#128190; Export CSV</button>
         ${hasTemplates?'<button class="btn-generate" onclick="openGenModal()">&#128197; Generate Bills</button>':''}
@@ -2039,22 +2071,22 @@ function renderAdmin() {
         ${tenants.map(t=>`<option value="${t.id}" ${filterTenantId===t.id?'selected':''}>${esc(t.name)} · Unit ${esc(t.unit)}</option>`).join('')}
       </select>
       <input type="month" class="filter-month${filterMonth?' active':''}" id="filter-month-inp" value="${filterMonth}" onchange="filterMonth=this.value;this.classList.toggle('active',!!this.value);renderRows()" title="Filter by bill due month">
-      <span class="filter-bar-label" style="margin-left:8px;margin-right:0">Sort</span>
+      ${viewMode==='card'?`<span class="filter-bar-label" style="margin-left:8px;margin-right:0">Sort</span>
       <select class="filter-sort" id="filter-sort-sel" onchange="sortOrder=this.value;renderRows()">
         <option value="unit-asc"  ${sortOrder==='unit-asc' ?'selected':''}>Unit &#8593;</option>
         <option value="unit-desc" ${sortOrder==='unit-desc'?'selected':''}>Unit &#8595;</option>
         <option value="name-asc"  ${sortOrder==='name-asc' ?'selected':''}>Name A–Z</option>
-      </select>
+      </select>`:''}
       ${(filterTenantId||filterMonth)?'<button class="filter-clear" onclick="clearFilters()">&#10005; Clear</button>':''}
     </div>
     <div id="filter-result-note" class="filter-result-note"></div>
-    <div class="tenant-table">
+    ${viewMode==='card'?`<div class="tenant-table">
       <div class="table-head">
         <div class="th">Tenant</div><div class="th center">Access Code</div>
         <div class="th center">Bills</div><div class="th center">Balance Due</div><div class="th"></div>
       </div>
       <div id="tenant-rows"></div>
-    </div>
+    </div>`:'<div id="tenant-rows"></div>'}
     <div style="margin-top:24px;">
       <button class="admin-paid-toggle" style="font-size:11px;font-weight:600;color:var(--muted);letter-spacing:0.1em;text-transform:uppercase;" onclick="this.nextElementSibling.classList.toggle('open');this.querySelector('.admin-paid-arrow').classList.toggle('open');if(this.nextElementSibling.classList.contains('open'))loadArchivedTenants();">
         <span class="admin-paid-arrow">›</span>&nbsp; Archived Tenants
@@ -2167,6 +2199,8 @@ function renderRows() {
     return;
   }
 
+  if (viewMode === 'table') { renderTableView(c, filtered); return; }
+
   c.innerHTML = filtered.map(t=>{
     const activeBills = t.bills.filter(b=>b.status!=='paid');
     const paidBills   = t.bills.filter(b=>b.status==='paid');
@@ -2234,6 +2268,88 @@ function renderRows() {
       ${paidSection}
     </div>`;
   }).join('');
+}
+
+// ── TABLE DATABASE VIEW ──
+function setViewMode(mode) { viewMode = mode; renderAdmin(); }
+
+function sortTable(col) {
+  if (tableSortCol === col) { tableSortDir = tableSortDir === 'asc' ? 'desc' : 'asc'; }
+  else { tableSortCol = col; tableSortDir = 'asc'; }
+  renderRows();
+}
+
+function renderTableView(c, filtered) {
+  // Flatten all tenants' bills into individual rows
+  const rows = [];
+  filtered.forEach(t => {
+    t.bills.forEach((b, bi) => {
+      const origTenant = tenants.find(ot => ot.id === t.id) || t;
+      rows.push({ tenant: origTenant, bill: b, bi: origTenant.bills.indexOf(b) });
+    });
+  });
+
+  // Sort by selected column
+  const dir = tableSortDir === 'asc' ? 1 : -1;
+  rows.sort((a, b) => {
+    let av, bv;
+    switch (tableSortCol) {
+      case 'status':    av = getDueUrgencyScore(a.bill); bv = getDueUrgencyScore(b.bill); return (av - bv) * dir;
+      case 'tenant':    return a.tenant.name.localeCompare(b.tenant.name) * dir;
+      case 'unit':      return (unitRank(a.tenant.unit) - unitRank(b.tenant.unit)) * dir;
+      case 'label':     return (a.bill.label || '').localeCompare(b.bill.label || '') * dir;
+      case 'amount':    return ((a.bill.amount || 0) - (b.bill.amount || 0)) * dir;
+      case 'remaining': return (billRemaining(a.bill) - billRemaining(b.bill)) * dir;
+      case 'due':       return ((a.bill.due || '9999-99-99').localeCompare(b.bill.due || '9999-99-99')) * dir;
+      case 'paidDate':  return ((a.bill.paidDate || '9999-99-99').localeCompare(b.bill.paidDate || '9999-99-99')) * dir;
+      default: return 0;
+    }
+  });
+
+  if (!rows.length) {
+    c.innerHTML = '<div class="db-empty">No bills to display.</div>';
+    return;
+  }
+
+  function thHtml(col, label) {
+    const arrow = tableSortCol === col ? (tableSortDir === 'asc' ? ' ↑' : ' ↓') : '';
+    return '<th onclick="sortTable(\''+col+'\')">'+label+'<span class="sort-arrow">'+arrow+'</span></th>';
+  }
+
+  const dueStatusLabel = { overdue:'Overdue', 'due-today':'Due Today', 'due-soon':'Due Soon', upcoming:'Upcoming', paid:'Paid' };
+  const dueStatusClass = { overdue:'status-unpaid', 'due-today':'status-overdue', 'due-soon':'status-overdue', upcoming:'status-unpaid', paid:'status-paid' };
+
+  const tbody = rows.map(r => {
+    const b = r.bill, t = r.tenant;
+    const ds = b.status === 'paid' ? 'paid' : getDueStatus(b);
+    const remaining = Math.max(0, billRemaining(b));
+    return '<tr>' +
+      '<td><span class="mini-status '+(dueStatusClass[ds]||'status-unpaid')+'" style="cursor:default;font-size:9px;">'+(dueStatusLabel[ds]||ds)+'</span></td>' +
+      '<td>'+esc(t.name)+'</td>' +
+      '<td>'+esc(t.unit)+'</td>' +
+      '<td>'+esc(b.label)+'</td>' +
+      '<td class="td-amount">&#8369;'+Number(b.amount).toLocaleString()+'</td>' +
+      '<td class="td-amount">'+(remaining ? '&#8369;'+remaining.toLocaleString() : '<span style="color:var(--green)">—</span>')+'</td>' +
+      '<td class="td-date">'+(b.due ? formatDate(b.due) : '—')+'</td>' +
+      '<td class="td-date">'+(b.paidDate ? formatDate(b.paidDate) : '—')+'</td>' +
+      '<td class="td-remark" title="'+(b.remark ? esc(b.remark) : '')+'">'+(b.remark ? esc(b.remark) : '')+'</td>' +
+    '</tr>';
+  }).join('');
+
+  c.innerHTML = '<div class="db-table-wrap"><table class="db-table">' +
+    '<thead><tr>' +
+      thHtml('status','Status') +
+      thHtml('tenant','Tenant') +
+      thHtml('unit','Unit') +
+      thHtml('label','Bill') +
+      thHtml('amount','Amount') +
+      thHtml('remaining','Balance') +
+      thHtml('due','Due Date') +
+      thHtml('paidDate','Paid Date') +
+      thHtml('remark','Remarks') +
+    '</tr></thead>' +
+    '<tbody>'+tbody+'</tbody>' +
+  '</table></div>';
 }
 
 // Pending paid-date action
