@@ -1837,6 +1837,7 @@ let sortOrder      = 'unit-asc'; // 'unit-asc' | 'unit-desc' | 'name-asc'
 let viewMode       = 'card';     // 'card' | 'table'
 let tableSortCol   = 'due';      // column to sort table by
 let tableSortDir   = 'asc';      // 'asc' | 'desc'
+let tableStatusFilter = 'unpaid'; // 'all' | 'unpaid' | 'paid'
 let portalMonth    = 'current'; // 'all' | 'YYYY-MM' | 'current'
 let billForms = [];
 
@@ -2077,7 +2078,13 @@ function renderAdmin() {
         <option value="unit-desc" ${sortOrder==='unit-desc'?'selected':''}>Unit &#8595;</option>
         <option value="name-asc"  ${sortOrder==='name-asc' ?'selected':''}>Name A–Z</option>
       </select>`:''}
-      ${(filterTenantId||filterMonth)?'<button class="filter-clear" onclick="clearFilters()">&#10005; Clear</button>':''}
+      ${viewMode==='table'?`<span class="filter-bar-label" style="margin-left:8px;margin-right:0">Status</span>
+      <select class="filter-select${tableStatusFilter!=='all'?' active':''}" onchange="tableStatusFilter=this.value;this.classList.toggle('active',this.value!=='all');renderRows()">
+        <option value="unpaid" ${tableStatusFilter==='unpaid'?'selected':''}>Unpaid Only</option>
+        <option value="paid" ${tableStatusFilter==='paid'?'selected':''}>Paid Only</option>
+        <option value="all" ${tableStatusFilter==='all'?'selected':''}>All</option>
+      </select>`:''}
+      ${(filterTenantId||filterMonth||tableStatusFilter!=='unpaid')?'<button class="filter-clear" onclick="clearFilters()">&#10005; Clear</button>':''}
     </div>
     <div id="filter-result-note" class="filter-result-note"></div>
     ${viewMode==='card'?`<div class="tenant-table">
@@ -2271,7 +2278,7 @@ function renderRows() {
 }
 
 // ── TABLE DATABASE VIEW ──
-function setViewMode(mode) { viewMode = mode; renderAdmin(); }
+function setViewMode(mode) { viewMode = mode; tableRowLimit = 50; renderAdmin(); }
 
 function sortTable(col) {
   if (tableSortCol === col) { tableSortDir = tableSortDir === 'asc' ? 'desc' : 'asc'; }
@@ -2279,11 +2286,15 @@ function sortTable(col) {
   renderRows();
 }
 
+let tableRowLimit = 50; // initial cap for table rows
+
 function renderTableView(c, filtered) {
-  // Flatten all tenants' bills into individual rows
+  // Flatten all tenants' bills into individual rows, applying status filter
   const rows = [];
   filtered.forEach(t => {
     t.bills.forEach((b, bi) => {
+      if (tableStatusFilter === 'unpaid' && b.status === 'paid') return;
+      if (tableStatusFilter === 'paid' && b.status !== 'paid') return;
       const origTenant = tenants.find(ot => ot.id === t.id) || t;
       rows.push({ tenant: origTenant, bill: b, bi: origTenant.bills.indexOf(b) });
     });
@@ -2319,7 +2330,10 @@ function renderTableView(c, filtered) {
   const dueStatusLabel = { overdue:'Overdue', 'due-today':'Due Today', 'due-soon':'Due Soon', upcoming:'Upcoming', paid:'Paid' };
   const dueStatusClass = { overdue:'status-unpaid', 'due-today':'status-overdue', 'due-soon':'status-overdue', upcoming:'status-unpaid', paid:'status-paid' };
 
-  const tbody = rows.map(r => {
+  const totalRows = rows.length;
+  const capped = rows.slice(0, tableRowLimit);
+
+  const tbody = capped.map(r => {
     const b = r.bill, t = r.tenant;
     const ds = b.status === 'paid' ? 'paid' : getDueStatus(b);
     const remaining = Math.max(0, billRemaining(b));
@@ -2336,7 +2350,12 @@ function renderTableView(c, filtered) {
     '</tr>';
   }).join('');
 
-  c.innerHTML = '<div class="db-table-wrap"><table class="db-table">' +
+  const showMoreBtn = totalRows > tableRowLimit
+    ? '<div style="text-align:center;padding:12px;"><button class="btn-generate" onclick="tableRowLimit+=50;renderRows()">Show more (' + (totalRows - tableRowLimit) + ' remaining)</button></div>'
+    : '';
+  const countNote = '<div style="font-size:11px;color:var(--muted);padding:8px 12px;">Showing ' + capped.length + ' of ' + totalRows + ' bills</div>';
+
+  c.innerHTML = countNote + '<div class="db-table-wrap"><table class="db-table">' +
     '<thead><tr>' +
       thHtml('status','Status') +
       thHtml('tenant','Tenant') +
@@ -2349,7 +2368,7 @@ function renderTableView(c, filtered) {
       thHtml('remark','Remarks') +
     '</tr></thead>' +
     '<tbody>'+tbody+'</tbody>' +
-  '</table></div>';
+  '</table></div>' + showMoreBtn;
 }
 
 // Pending paid-date action
@@ -3275,6 +3294,7 @@ async function confirmGenerateBills() {
 function clearFilters() {
   filterTenantId = '';
   filterMonth    = '';
+  tableStatusFilter = 'unpaid';
   renderAdmin();
 }
 
