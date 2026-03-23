@@ -488,7 +488,7 @@
   .action-items { padding: 4px 0; }
   .action-item {
     display: flex; align-items: center; gap: 10px; padding: 10px 18px;
-    border-bottom: 1px solid var(--border); flex-wrap: wrap; row-gap: 6px;
+    border-bottom: 1px solid var(--border);
   }
   .action-item:last-child { border-bottom: none; }
   .action-badge {
@@ -497,10 +497,10 @@
   }
   .action-badge.overdue { background: #fdecea; color: var(--rust); }
   .action-badge.due-soon { background: #fff3e0; color: var(--orange); }
-  .action-info { flex: 1; min-width: 100px; overflow: hidden; }
+  .action-info { flex: 1; min-width: 0; overflow: hidden; }
   .action-bill-name { font-size: 13px; font-weight: 600; color: var(--ink); }
   .action-tenant { font-size: 11px; color: var(--muted); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .action-amount { font-family: 'Source Serif 4', serif; font-size: 14px; font-weight: 600; color: var(--ink); flex-shrink: 0; }
+  .action-amount { font-family: 'Source Serif 4', serif; font-size: 14px; font-weight: 600; color: var(--ink); flex-shrink: 0; white-space: nowrap; }
   .btn-action-pay {
     font-size: 11px; font-weight: 600; padding: 6px 14px;
     background: var(--blue); color: white; border: none; border-radius: 6px;
@@ -1064,7 +1064,7 @@
     .filter-select { flex: 1 1 100%; max-width: 100%; }
     .filter-month, .filter-sort { width: 100%; flex: 1 1 calc(50% - 3px); }
     .action-item { padding: 10px 14px; }
-    .action-info { min-width: 100px; }
+    .action-info { min-width: 0; }
     .admin-paid-section { padding: 0 14px 12px; }
     .tenant-row-footer { padding: 8px 14px 12px; }
     .row-total-label { font-size: 10px; }
