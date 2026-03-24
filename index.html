@@ -950,72 +950,93 @@
   .btn-statement:hover { border-color:var(--blue); color:var(--blue); }
 
   /* FILTER BAR */
-  .filter-bar {
+  /* ── NOTION-STYLE FILTER TOOLBAR ── */
+  .filter-toolbar {
     display: flex;
     align-items: center;
     gap: 6px;
     flex-wrap: wrap;
     margin-bottom: 14px;
-    padding: 10px 14px;
-    background: var(--white);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    box-shadow: var(--shadow-sm);
-    box-sizing: border-box;
-    width: 100%;
   }
-  .filter-bar-label {
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
+  .filter-toolbar-btn {
+    font-family: 'Inter', sans-serif;
+    font-size: 12px;
+    font-weight: 500;
     color: var(--muted);
-    flex-shrink: 0;
-    margin-right: 4px;
-  }
-  .filter-select {
-    font-family: 'Inter', sans-serif;
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--ink);
-    background: var(--bg);
+    background: var(--white);
     border: 1.5px solid var(--border);
     border-radius: 7px;
-    padding: 6px 10px;
+    padding: 5px 10px;
     cursor: pointer;
-    transition: border-color 0.15s;
-    outline: none;
-    flex: 1;
-    min-width: 0;
-    max-width: 180px;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    transition: all 0.15s;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    white-space: nowrap;
   }
-  .filter-month {
-    font-family: 'Inter', sans-serif;
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--ink);
-    background: var(--bg);
-    border: 1.5px solid var(--border);
-    border-radius: 7px;
-    padding: 6px 10px;
-    cursor: pointer;
-    transition: border-color 0.15s;
-    outline: none;
-    flex-shrink: 0;
-    width: 140px;
-    min-width: 0;
-    box-sizing: border-box;
-  }
-  .filter-select:focus, .filter-month:focus { border-color: var(--blue); }
-  .filter-select.active, .filter-month.active {
+  .filter-toolbar-btn:hover { border-color: var(--blue); color: var(--blue); }
+  .filter-toolbar-btn.active {
     border-color: var(--blue);
     background: #eef2ff;
     color: var(--blue);
     font-weight: 600;
   }
-  .filter-sort {
+  .filter-chip {
+    font-family: 'Inter', sans-serif;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--blue);
+    background: #eef2ff;
+    border: 1.5px solid rgba(65,105,225,0.25);
+    border-radius: 20px;
+    padding: 4px 8px 4px 10px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    cursor: default;
+    white-space: nowrap;
+  }
+  .filter-chip-x {
+    font-size: 10px;
+    color: var(--blue);
+    cursor: pointer;
+    opacity: 0.6;
+    padding: 0 2px;
+    border: none;
+    background: none;
+    font-family: 'Inter', sans-serif;
+    line-height: 1;
+  }
+  .filter-chip-x:hover { opacity: 1; }
+  .filter-popover {
+    position: absolute;
+    z-index: 100;
+    top: 100%;
+    left: 0;
+    margin-top: 4px;
+    background: var(--white);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.12);
+    padding: 12px;
+    min-width: 260px;
+    max-width: 340px;
+    display: none;
+  }
+  .filter-popover.open { display: block; }
+  .filter-popover-label {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+  .filter-popover-row {
+    margin-bottom: 10px;
+  }
+  .filter-popover-row:last-child { margin-bottom: 0; }
+  .filter-popover select {
     font-family: 'Inter', sans-serif;
     font-size: 13px;
     font-weight: 500;
@@ -1025,29 +1046,127 @@
     border-radius: 7px;
     padding: 6px 10px;
     cursor: pointer;
-    transition: border-color 0.15s;
     outline: none;
-    flex-shrink: 0;
-    width: 110px;
-    min-width: 0;
+    width: 100%;
     box-sizing: border-box;
   }
-  .filter-sort:focus { border-color: var(--blue); }
-  .filter-clear {
+  .filter-popover select:focus { border-color: var(--blue); }
+  .filter-popover input[type="month"] {
+    font-family: 'Inter', sans-serif;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--ink);
+    background: var(--bg);
+    border: 1.5px solid var(--border);
+    border-radius: 7px;
+    padding: 6px 10px;
+    cursor: pointer;
+    outline: none;
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .filter-popover input[type="month"]:focus { border-color: var(--blue); }
+  .filter-status-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .filter-status-opt {
+    font-family: 'Inter', sans-serif;
     font-size: 11px;
     font-weight: 600;
-    color: var(--muted);
-    background: none;
+    letter-spacing: 0.03em;
+    padding: 4px 10px;
+    border-radius: 20px;
     border: 1.5px solid var(--border);
+    background: var(--white);
     cursor: pointer;
-    padding: 5px 10px;
-    border-radius: 6px;
     transition: all 0.15s;
-    font-family: 'Inter', sans-serif;
-    flex-shrink: 0;
-    white-space: nowrap;
+    color: var(--ink);
   }
-  .filter-clear:hover { color: var(--rust); border-color: var(--rust); background: #fdecea; }
+  .filter-status-opt:hover { border-color: var(--blue); }
+  .filter-status-opt.selected { border-color: var(--blue); background: #eef2ff; color: var(--blue); }
+  .filter-status-opt.s-overdue.selected  { background: #fff3e0; color: var(--orange); border-color: var(--orange); }
+  .filter-status-opt.s-due-soon.selected { background: #fff3e0; color: var(--orange); border-color: var(--orange); }
+  .filter-status-opt.s-upcoming.selected { background: #fdecea; color: var(--rust); border-color: var(--rust); }
+  .filter-status-opt.s-paid.selected     { background: #e8f5e9; color: var(--green); border-color: var(--green); }
+  .filter-popover-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+  }
+  .filter-popover-actions button {
+    font-family: 'Inter', sans-serif;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 5px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    border: 1.5px solid var(--border);
+    background: var(--white);
+    color: var(--muted);
+    transition: all 0.15s;
+  }
+  .filter-popover-actions button:hover { border-color: var(--blue); color: var(--blue); }
+  .filter-popover-actions .btn-apply {
+    background: var(--blue);
+    color: var(--white);
+    border-color: var(--blue);
+  }
+  .filter-popover-actions .btn-apply:hover { opacity: 0.9; }
+  .sort-toolbar-btn {
+    font-family: 'Inter', sans-serif;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--muted);
+    background: var(--white);
+    border: 1.5px solid var(--border);
+    border-radius: 7px;
+    padding: 5px 10px;
+    cursor: pointer;
+    transition: all 0.15s;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    white-space: nowrap;
+    position: relative;
+  }
+  .sort-toolbar-btn:hover { border-color: var(--blue); color: var(--blue); }
+  .sort-popover {
+    position: absolute;
+    z-index: 100;
+    top: 100%;
+    left: 0;
+    margin-top: 4px;
+    background: var(--white);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.12);
+    padding: 4px;
+    min-width: 160px;
+    display: none;
+  }
+  .sort-popover.open { display: block; }
+  .sort-option {
+    display: block;
+    width: 100%;
+    text-align: left;
+    font-family: 'Inter', sans-serif;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--ink);
+    background: none;
+    border: none;
+    border-radius: 6px;
+    padding: 7px 10px;
+    cursor: pointer;
+    transition: background 0.1s;
+  }
+  .sort-option:hover { background: var(--bg); }
+  .sort-option.active { color: var(--blue); font-weight: 600; }
   .filter-result-note {
     font-size: 12px;
     color: var(--muted);
@@ -1127,6 +1246,8 @@
       display: flex !important;
       flex-direction: column !important;
       grid-template-columns: unset !important;
+      align-items: stretch !important;
+      text-align: left;
       gap: 0;
       padding: 0;
       min-height: unset;
@@ -1151,10 +1272,10 @@
     .tenant-row-meta {
       display: flex;
       align-items: center;
+      justify-content: flex-start;
       gap: 8px;
       padding: 0 14px 8px;
       flex-wrap: wrap;
-      text-align: left;
     }
     .row-code { font-size: 11px; padding: 3px 8px; }
 
@@ -1163,15 +1284,17 @@
       display: flex;
       flex-wrap: wrap;
       gap: 6px;
+      justify-content: flex-start;
     }
     .mini-status { padding: 5px 10px; font-size: 11px; border-radius: 20px; }
 
     .tenant-row-footer {
       padding: 10px 14px 14px;
       display: flex;
-      align-items: center;
+      align-items: baseline;
       justify-content: space-between;
       border-top: 1px solid var(--border);
+      gap: 8px;
     }
     .row-total-label {
       font-size: 11px;
@@ -1833,11 +1956,11 @@ let tenants = [];
 let editingId = null;
 let filterTenantId = '';   // '' = all
 let filterMonth    = '';   // '' = all, else 'YYYY-MM'
+let filterStatuses = [];   // [] = show all; else subset of ['overdue','due-soon','due-today','upcoming','paid']
 let sortOrder      = 'unit-asc'; // 'unit-asc' | 'unit-desc' | 'name-asc'
 let viewMode       = 'card';     // 'card' | 'table'
 let tableSortCol   = 'due';      // column to sort table by
 let tableSortDir   = 'asc';      // 'asc' | 'desc'
-let tableStatusFilter = 'unpaid'; // 'all' | 'unpaid' | 'paid'
 let portalMonth    = 'current'; // 'all' | 'YYYY-MM' | 'current'
 let billForms = [];
 
@@ -2065,26 +2188,46 @@ function renderAdmin() {
         <button class="btn-add" onclick="openAddModal()">+ Add Tenant</button>
       </div>
     </div>
-    <div class="filter-bar">
-      <span class="filter-bar-label">Filter</span>
-      <select class="filter-select${filterTenantId?' active':''}" id="filter-tenant-sel" onchange="filterTenantId=this.value;this.classList.toggle('active',!!this.value);renderRows()">
-        <option value="">All Tenants</option>
-        ${tenants.map(t=>`<option value="${t.id}" ${filterTenantId===t.id?'selected':''}>${esc(t.name)} · Unit ${esc(t.unit)}</option>`).join('')}
-      </select>
-      <input type="month" class="filter-month${filterMonth?' active':''}" id="filter-month-inp" value="${filterMonth}" onchange="filterMonth=this.value;this.classList.toggle('active',!!this.value);renderRows()" title="Filter by bill due month">
-      ${viewMode==='card'?`<span class="filter-bar-label" style="margin-left:8px;margin-right:0">Sort</span>
-      <select class="filter-sort" id="filter-sort-sel" onchange="sortOrder=this.value;renderRows()">
-        <option value="unit-asc"  ${sortOrder==='unit-asc' ?'selected':''}>Unit &#8593;</option>
-        <option value="unit-desc" ${sortOrder==='unit-desc'?'selected':''}>Unit &#8595;</option>
-        <option value="name-asc"  ${sortOrder==='name-asc' ?'selected':''}>Name A–Z</option>
-      </select>`:''}
-      ${viewMode==='table'?`<span class="filter-bar-label" style="margin-left:8px;margin-right:0">Status</span>
-      <select class="filter-select${tableStatusFilter!=='all'?' active':''}" onchange="tableStatusFilter=this.value;this.classList.toggle('active',this.value!=='all');renderRows()">
-        <option value="unpaid" ${tableStatusFilter==='unpaid'?'selected':''}>Unpaid Only</option>
-        <option value="paid" ${tableStatusFilter==='paid'?'selected':''}>Paid Only</option>
-        <option value="all" ${tableStatusFilter==='all'?'selected':''}>All</option>
-      </select>`:''}
-      ${(filterTenantId||filterMonth||tableStatusFilter!=='unpaid')?'<button class="filter-clear" onclick="clearFilters()">&#10005; Clear</button>':''}
+    <div class="filter-toolbar" id="filter-toolbar">
+      <div style="position:relative;display:inline-block;" id="filter-popover-wrap">
+        <button class="filter-toolbar-btn${hasActiveFilters()?' active':''}" onclick="toggleFilterPopover()">&#9881; Filter${hasActiveFilters()?' ('+activeFilterCount()+')':''}</button>
+        <div class="filter-popover" id="filter-popover">
+          <div class="filter-popover-row">
+            <div class="filter-popover-label">Tenant</div>
+            <select id="fp-tenant" onchange="filterTenantId=this.value;applyFilters()">
+              <option value="">All Tenants</option>
+              ${tenants.map(t=>`<option value="${t.id}" ${filterTenantId===t.id?'selected':''}>${esc(t.name)} · Unit ${esc(t.unit)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="filter-popover-row">
+            <div class="filter-popover-label">Month</div>
+            <input type="month" id="fp-month" value="${filterMonth}" onchange="filterMonth=this.value;applyFilters()">
+          </div>
+          <div class="filter-popover-row">
+            <div class="filter-popover-label">Status</div>
+            <div class="filter-status-chips" id="fp-status-chips">
+              ${['overdue','due-today','due-soon','upcoming','paid'].map(s => {
+                const labels = {overdue:'Overdue','due-today':'Due Today','due-soon':'Due Soon',upcoming:'Upcoming',paid:'Paid'};
+                const sel = filterStatuses.includes(s) ? ' selected' : '';
+                return '<button class="filter-status-opt s-'+s+sel+'" onclick="toggleFilterStatus(\''+s+'\')">'+labels[s]+'</button>';
+              }).join('')}
+            </div>
+          </div>
+          <div class="filter-popover-actions">
+            <button onclick="clearFilters()">Clear all</button>
+            <button class="btn-apply" onclick="closeFilterPopover()">Done</button>
+          </div>
+        </div>
+      </div>
+      <div style="position:relative;display:inline-block;" id="sort-popover-wrap">
+        <button class="sort-toolbar-btn" onclick="toggleSortPopover()">&#8645; Sort</button>
+        <div class="sort-popover" id="sort-popover">
+          <button class="sort-option${sortOrder==='unit-asc'?' active':''}" onclick="setSortOrder('unit-asc')">Unit &#8593;</button>
+          <button class="sort-option${sortOrder==='unit-desc'?' active':''}" onclick="setSortOrder('unit-desc')">Unit &#8595;</button>
+          <button class="sort-option${sortOrder==='name-asc'?' active':''}" onclick="setSortOrder('name-asc')">Name A–Z</button>
+        </div>
+      </div>
+      ${renderFilterChips()}
     </div>
     <div id="filter-result-note" class="filter-result-note"></div>
     ${viewMode==='card'?`<div class="tenant-table">
@@ -2178,19 +2321,23 @@ function renderRows() {
     }).filter(Boolean);
   }
 
+  // Apply status filter — filter bills within each tenant by due status
+  if (filterStatuses.length) {
+    filtered = filtered.map(t => {
+      const bills = t.bills.filter(b => {
+        const ds = b.status === 'paid' ? 'paid' : getDueStatus(b);
+        // 'no-date' bills match when 'upcoming' is selected
+        if (ds === 'no-date') return filterStatuses.includes('upcoming');
+        return filterStatuses.includes(ds);
+      });
+      return bills.length ? {...t, bills} : null;
+    }).filter(Boolean);
+  }
+
   // Result note
   const noteEl = document.getElementById('filter-result-note');
   if (noteEl) {
-    if (filterTenantId || filterMonth) {
-      const monthLabel = filterMonth ? new Date(filterMonth+'-02').toLocaleString('default',{month:'long',year:'numeric'}) : '';
-      const tenantLabel = filterTenantId ? (tenants.find(t=>t.id===filterTenantId)||{}).name : '';
-      const parts = [tenantLabel, monthLabel].filter(Boolean);
-      noteEl.textContent = filtered.length
-        ? 'Showing results for: '+parts.join(' · ')
-        : 'No bills found for: '+parts.join(' · ');
-    } else {
-      noteEl.textContent = '';
-    }
+    noteEl.textContent = hasActiveFilters() && !filtered.length ? 'No results match your filters.' : '';
   }
 
   // Apply sort
@@ -2289,12 +2436,10 @@ function sortTable(col) {
 let tableRowLimit = 50; // initial cap for table rows
 
 function renderTableView(c, filtered) {
-  // Flatten all tenants' bills into individual rows, applying status filter
+  // Flatten all tenants' bills into individual rows (status already filtered by renderRows)
   const rows = [];
   filtered.forEach(t => {
     t.bills.forEach((b, bi) => {
-      if (tableStatusFilter === 'unpaid' && b.status === 'paid') return;
-      if (tableStatusFilter === 'paid' && b.status !== 'paid') return;
       const origTenant = tenants.find(ot => ot.id === t.id) || t;
       rows.push({ tenant: origTenant, bill: b, bi: origTenant.bills.indexOf(b) });
     });
@@ -3291,12 +3436,86 @@ async function confirmGenerateBills() {
 // ─────────────────────────────────────────────
 // FILTER CONTROLS
 // ─────────────────────────────────────────────
+// ── NOTION-STYLE FILTER HELPERS ──
+function hasActiveFilters() { return !!(filterTenantId || filterMonth || filterStatuses.length); }
+function activeFilterCount() {
+  let n = 0;
+  if (filterTenantId) n++;
+  if (filterMonth) n++;
+  if (filterStatuses.length) n += filterStatuses.length;
+  return n;
+}
+function renderFilterChips() {
+  const chips = [];
+  const statusLabels = {overdue:'Overdue','due-today':'Due Today','due-soon':'Due Soon',upcoming:'Upcoming',paid:'Paid'};
+  if (filterTenantId) {
+    const t = tenants.find(t=>t.id===filterTenantId);
+    if (t) chips.push('<span class="filter-chip">'+esc(t.name)+'<button class="filter-chip-x" onclick="filterTenantId=\'\';applyFilters()">&#10005;</button></span>');
+  }
+  if (filterMonth) {
+    const lbl = new Date(filterMonth+'-02').toLocaleString('default',{month:'short',year:'numeric'});
+    chips.push('<span class="filter-chip">'+lbl+'<button class="filter-chip-x" onclick="filterMonth=\'\';applyFilters()">&#10005;</button></span>');
+  }
+  filterStatuses.forEach(s => {
+    chips.push('<span class="filter-chip">'+(statusLabels[s]||s)+'<button class="filter-chip-x" onclick="removeFilterStatus(\''+s+'\')">&#10005;</button></span>');
+  });
+  return chips.join('');
+}
+function toggleFilterPopover() {
+  const el = document.getElementById('filter-popover');
+  el.classList.toggle('open');
+  // Close sort popover
+  const sp = document.getElementById('sort-popover');
+  if (sp) sp.classList.remove('open');
+}
+function closeFilterPopover() {
+  document.getElementById('filter-popover').classList.remove('open');
+}
+function toggleSortPopover() {
+  const el = document.getElementById('sort-popover');
+  el.classList.toggle('open');
+  // Close filter popover
+  const fp = document.getElementById('filter-popover');
+  if (fp) fp.classList.remove('open');
+}
+function setSortOrder(order) {
+  sortOrder = order;
+  document.getElementById('sort-popover').classList.remove('open');
+  renderAdmin();
+}
+function toggleFilterStatus(s) {
+  const idx = filterStatuses.indexOf(s);
+  if (idx >= 0) filterStatuses.splice(idx, 1);
+  else filterStatuses.push(s);
+  applyFilters();
+}
+function removeFilterStatus(s) {
+  filterStatuses = filterStatuses.filter(x => x !== s);
+  applyFilters();
+}
+function applyFilters() {
+  tableRowLimit = 50;
+  renderAdmin();
+}
 function clearFilters() {
   filterTenantId = '';
   filterMonth    = '';
-  tableStatusFilter = 'unpaid';
+  filterStatuses = [];
   renderAdmin();
 }
+// Close popovers when clicking outside
+document.addEventListener('click', function(e) {
+  const fpWrap = document.getElementById('filter-popover-wrap');
+  const spWrap = document.getElementById('sort-popover-wrap');
+  if (fpWrap && !fpWrap.contains(e.target)) {
+    const fp = document.getElementById('filter-popover');
+    if (fp) fp.classList.remove('open');
+  }
+  if (spWrap && !spWrap.contains(e.target)) {
+    const sp = document.getElementById('sort-popover');
+    if (sp) sp.classList.remove('open');
+  }
+});
 
 
 // ─────────────────────────────────────────────
