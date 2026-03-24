@@ -524,7 +524,7 @@
   .db-table tbody tr:last-child td { border-bottom: none; }
   .db-table tbody tr:hover { background: #fafbff; }
   .db-table .td-amount { text-align: right; font-family: 'Source Serif 4', serif; font-weight: 600; white-space: nowrap; }
-  .db-table .td-remark { max-width: 150px; font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .db-table .td-remark { min-width: 140px; max-width: 240px; font-size: 11px; color: var(--muted); line-height: 1.4; white-space: normal; word-break: break-word; }
   .db-table .td-date { white-space: nowrap; font-size: 12px; }
   .db-empty { text-align: center; padding: 48px 24px; color: var(--muted); font-size: 13px; }
 
@@ -1200,18 +1200,14 @@
 
   /* ── MOBILE-FIRST RESPONSIVE ── */
   @media (max-width: 768px) {
-    .filter-select { flex: 1 1 100%; max-width: 100%; }
-    .filter-month, .filter-sort { width: 100%; flex: 1 1 calc(50% - 3px); }
+    .filter-popover { left: 0; right: 0; min-width: unset; max-width: unset; margin-top: 6px; }
     .action-item { padding: 10px 14px; flex-wrap: wrap; row-gap: 6px; }
     .action-info { min-width: 0; flex: 1 1 calc(100% - 110px); }
     .action-amount { margin-left: auto; }
     .admin-paid-section { padding: 0 14px 12px; }
-    .tenant-row-footer { padding: 8px 14px 12px; }
-    .row-total-label { font-size: 10px; }
-    .row-total { font-size: 15px; }
     .pay-inst-card { padding: 12px 14px; }
     .db-table-wrap { margin: 0 -16px; border-radius: 0; }
-    .db-table { font-size: 12px; min-width: 700px; }
+    .db-table { font-size: 12px; min-width: 800px; }
     /* Layout */
     main { padding: 28px 16px; }
     header { padding: 0 16px; height: 52px; }
@@ -1240,7 +1236,7 @@
 
     /* ── TENANT TABLE → CARDS on mobile ── */
     .table-head { display: none; }
-    .tenant-table { border-radius: 10px; }
+    .tenant-table { border-radius: 0; border: none; box-shadow: none; background: transparent; margin-bottom: 24px; }
 
     .tenant-row {
       display: flex !important;
@@ -1251,22 +1247,28 @@
       gap: 0;
       padding: 0;
       min-height: unset;
-      border-bottom: 1px solid var(--border);
+      border-bottom: none;
+      margin-bottom: 10px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: var(--white);
+      box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+      overflow: hidden;
     }
-    .tenant-row:last-child { border-bottom: none; }
-    .tenant-row:hover { background: none; }
+    .tenant-row:last-child { border-bottom: none; margin-bottom: 0; }
+    .tenant-row:hover { background: var(--white); }
 
     /* Card top: name left, buttons right */
     .tenant-row-top {
       display: flex;
       align-items: flex-start;
       justify-content: space-between;
-      padding: 14px 14px 8px;
+      padding: 14px 14px 6px;
       width: 100%;
       text-align: left;
     }
     .tenant-row-top > div:first-child { flex: 1; text-align: left; }
-    .tenant-row-top .row-name { font-size: 15px; text-align: left; }
+    .tenant-row-top .row-name { font-size: 16px; text-align: left; }
     .tenant-row-top .row-unit { font-size: 11px; margin-top: 2px; text-align: left; }
 
     .tenant-row-meta {
@@ -1274,13 +1276,13 @@
       align-items: center;
       justify-content: flex-start;
       gap: 8px;
-      padding: 0 14px 8px;
+      padding: 4px 0 0;
       flex-wrap: wrap;
     }
-    .row-code { font-size: 11px; padding: 3px 8px; }
+    .row-code { font-size: 10px; padding: 2px 7px; }
 
     .tenant-row-bills {
-      padding: 0 14px 10px;
+      padding: 4px 14px 12px;
       display: flex;
       flex-wrap: wrap;
       gap: 6px;
@@ -1289,15 +1291,16 @@
     .mini-status { padding: 5px 10px; font-size: 11px; border-radius: 20px; }
 
     .tenant-row-footer {
-      padding: 10px 14px 14px;
+      padding: 10px 14px 12px;
       display: flex;
       align-items: baseline;
       justify-content: space-between;
+      background: var(--bg);
       border-top: 1px solid var(--border);
       gap: 8px;
     }
     .row-total-label {
-      font-size: 11px;
+      font-size: 10px;
       font-weight: 600;
       letter-spacing: 0.08em;
       text-transform: uppercase;
@@ -1306,8 +1309,9 @@
     .row-total { font-size: 16px; }
 
     /* Action buttons — compact, pinned right */
-    .row-actions { display: flex; gap: 6px; align-items: center; flex-shrink: 0; margin-left: 10px; }
-    .btn-icon { width: 34px; height: 34px; font-size: 14px; flex-shrink: 0; }
+    .row-actions { display: flex; gap: 4px; align-items: center; flex-shrink: 0; margin-left: 8px; }
+    .btn-icon { width: 30px; height: 30px; font-size: 13px; flex-shrink: 0; }
+    .btn-statement { font-size: 9px !important; padding: 3px 8px !important; }
 
     /* Modal — full-screen sheet on mobile */
     .modal-overlay { align-items: flex-end; }
@@ -2398,10 +2402,10 @@ function renderRows() {
             <div class="row-name">${esc(t.name)}</div>
             <div class="row-unit">Unit ${esc(t.unit)}${t.move_in_date?' · Since '+formatDate(t.move_in_date):''}</div>
             ${t.phone||t.email?`<div style="font-size:11px;color:var(--muted);margin-top:2px;">${t.phone?`<a href="tel:${esc(t.phone)}" style="color:var(--muted);text-decoration:none;">&#128222; ${esc(t.phone)}</a>`:''} ${t.phone&&t.email?' · ':''} ${t.email?`<a href="mailto:${esc(t.email)}" style="color:var(--muted);text-decoration:none;">&#9993; ${esc(t.email)}</a>`:''}</div>`:''}
+            <div class="tenant-row-meta"><span class="row-code">${esc(t.code)}</span></div>
           </div>
           ${actions}
         </div>
-        <div class="tenant-row-meta"><span class="row-code">${esc(t.code)}</span></div>
         <div class="tenant-row-bills">${activeBadges}</div>
         <div class="tenant-row-footer"><div class="row-total-label">Balance Due</div><div class="row-total" style="text-align:right;">${total}</div></div>
         ${paidSection}
