@@ -1807,6 +1807,7 @@ If you cannot determine the amount, set amount to null.`
     let extracted;
     try { extracted = JSON.parse(raw); }
     catch(e) { throw new Error('Could not parse AI response. Try a clearer photo.'); }
+    if(!extracted||typeof extracted!=='object') throw new Error('Could not parse AI response. Try a clearer photo.');
 
     if(!extracted.amount){ throw new Error('Could not read an amount from the receipt. Try a clearer photo.'); }
 
@@ -1887,7 +1888,7 @@ async function applyReceipt(){
 function fileToBase64(file){
   return new Promise((res,rej)=>{
     const r = new FileReader();
-    r.onload = ()=> res(r.result.split(',')[1]);
+    r.onload = ()=> { const parts=r.result.split(','); res(parts.length>1?parts[1]:''); };
     r.onerror = ()=> rej(new Error('Could not read file'));
     r.readAsDataURL(file);
   });
@@ -2190,9 +2191,8 @@ function renderAdmin() {
           </div>
           <div class="filter-popover-row">
             <div class="filter-popover-label">Month</div>
-            <select id="fp-month" onchange="filterMonth=this.value;applyFilters()">
-              <option value="">All Months</option>
-              ${getAvailableMonths().map(m => '<option value="'+m.value+'" '+(filterMonth===m.value?'selected':'')+'>'+m.label+'</option>').join('')}
+            <select id="fp-month" onchange="if(this.value==='__more__'){renderMonthDropdown(true);return;}filterMonth=this.value;applyFilters()">
+              ${renderMonthOptions()}
             </select>
           </div>
           <div class="filter-popover-row">
@@ -2632,7 +2632,7 @@ function openAddModal(){
   document.getElementById('tenant-modal').classList.add('open');
 }
 function openEditModal(tid){
-  const t=tenants.find(t=>t.id===tid); editingId=tid;
+  const t=tenants.find(t=>t.id===tid); if(!t) return; editingId=tid;
   document.getElementById('modal-eyebrow').textContent='Edit Tenant';
   document.getElementById('modal-title').textContent=esc(t.name);
   document.getElementById('m-name').value=t.name;
@@ -2692,7 +2692,7 @@ function billListItemHtml(b, i, extraClass) {
 
 function renderBillListItems(showAllPaid){
   const t=tenants.find(t=>t.id===editingId); if(!t) return;
-  const c=document.getElementById('bill-list-items');
+  const c=document.getElementById('bill-list-items'); if(!c) return;
   if(!t.bills.length){ c.innerHTML='<div style="text-align:center;padding:24px 0;font-size:13px;color:var(--muted);">No bills yet. Add one below.</div>'; return; }
 
   const unpaid = t.bills.map((b,i)=>({b,i})).filter(({b})=>b.status!=='paid');
@@ -2912,7 +2912,7 @@ function buildTimeline(bills, showAll) {
 
 
 function renderTenant(){
-  const t=currentUser;
+  const t=currentUser; if(!t) return;
 
   // All unpaid bills (for summary stats)
   const allActiveBills = t.bills.filter(b=>b.status!=='paid');
@@ -2960,7 +2960,7 @@ function renderTenant(){
   const billRow = b => {
     const dm = dueMeta(b);
     const isPendingRemark = b.remark && b.remark.toLowerCase().includes('pending amount');
-    const amountHtml = (b.amount==0&&isPendingRemark)
+    const amountHtml = (Number(b.amount)===0&&isPendingRemark)
       ? '<span class="pbill-pending-inline">TBD</span>'
       : '&#8369;'+Number(b.amount).toLocaleString();
     const chipHtml = b.due
@@ -3433,15 +3433,33 @@ async function confirmGenerateBills() {
 // FILTER CONTROLS
 // ─────────────────────────────────────────────
 // ── NOTION-STYLE FILTER HELPERS ──
-function getAvailableMonths() {
+function getAvailableMonths(showAll) {
   const months = new Set();
   tenants.forEach(t => t.bills.forEach(b => {
     if (b.due) months.add(b.due.slice(0, 7));
   }));
-  return Array.from(months).sort().reverse().map(v => ({
-    value: v,
-    label: new Date(v + '-02').toLocaleString('default', { month: 'long', year: 'numeric' })
-  }));
+  const sorted = Array.from(months).sort().reverse();
+  const limit = showAll ? sorted.length : 12;
+  let visible = sorted.slice(0, limit);
+  // Always include the currently selected month even if it's older
+  if (filterMonth && !visible.includes(filterMonth) && sorted.includes(filterMonth)) {
+    visible.push(filterMonth);
+    visible.sort().reverse();
+  }
+  return { months: visible.map(v => ({ value: v, label: new Date(v + '-02').toLocaleString('default', { month: 'long', year: 'numeric' }) })), hasMore: sorted.length > limit };
+}
+let _showAllMonths = false;
+function renderMonthOptions(showAll) {
+  const data = getAvailableMonths(showAll || _showAllMonths);
+  let html = '<option value="">All Months</option>';
+  html += data.months.map(m => '<option value="'+m.value+'" '+(filterMonth===m.value?'selected':'')+'>'+m.label+'</option>').join('');
+  if (data.hasMore) html += '<option value="__more__">Show older months\u2026</option>';
+  return html;
+}
+function renderMonthDropdown(showAll) {
+  _showAllMonths = !!showAll;
+  const sel = document.getElementById('fp-month');
+  if (sel) { sel.innerHTML = renderMonthOptions(showAll); sel.value = filterMonth; }
 }
 function hasActiveFilters() { return !!(filterTenantId || filterMonth || filterStatuses.length); }
 function activeFilterCount() {
@@ -3507,6 +3525,7 @@ function clearFilters() {
   filterTenantId = '';
   filterMonth    = '';
   filterStatuses = [];
+  _showAllMonths = false;
   renderAdmin();
 }
 // Close popovers when clicking outside
