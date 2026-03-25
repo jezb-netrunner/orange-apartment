@@ -1051,21 +1051,6 @@
     box-sizing: border-box;
   }
   .filter-popover select:focus { border-color: var(--blue); }
-  .filter-popover input[type="month"] {
-    font-family: 'Inter', sans-serif;
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--ink);
-    background: var(--bg);
-    border: 1.5px solid var(--border);
-    border-radius: 7px;
-    padding: 6px 10px;
-    cursor: pointer;
-    outline: none;
-    width: 100%;
-    box-sizing: border-box;
-  }
-  .filter-popover input[type="month"]:focus { border-color: var(--blue); }
   .filter-status-chips {
     display: flex;
     flex-wrap: wrap;
@@ -1854,7 +1839,7 @@ If you cannot determine the amount, set amount to null.`
       <div class="receipt-row"><span class="receipt-row-label">Amount on Receipt</span><span class="receipt-row-value">&#8369;${paidAmt.toLocaleString()}</span></div>
       <div class="receipt-row"><span class="receipt-row-label">Bill Total</span><span class="receipt-row-value">&#8369;${billAmt.toLocaleString()}</span></div>
       <div class="receipt-row"><span class="receipt-row-label">Date Paid</span><span class="receipt-row-value">${formatDate(paidDate)}</span></div>
-      ${extracted.confidence?`<div class="receipt-row"><span class="receipt-row-label">Confidence</span><span class="receipt-row-value" style="font-size:12px;font-family:Inter,sans-serif;color:var(--muted)">${extracted.confidence}</span></div>`:''}
+      ${extracted.confidence?`<div class="receipt-row"><span class="receipt-row-label">Confidence</span><span class="receipt-row-value" style="font-size:12px;font-family:Inter,sans-serif;color:var(--muted)">${esc(String(extracted.confidence))}</span></div>`:''}
     `;
     const noteEl = document.getElementById('receipt-note');
     noteEl.className = 'receipt-note '+noteType;
@@ -2205,7 +2190,10 @@ function renderAdmin() {
           </div>
           <div class="filter-popover-row">
             <div class="filter-popover-label">Month</div>
-            <input type="month" id="fp-month" value="${filterMonth}" onchange="filterMonth=this.value;applyFilters()">
+            <select id="fp-month" onchange="filterMonth=this.value;applyFilters()">
+              <option value="">All Months</option>
+              ${getAvailableMonths().map(m => '<option value="'+m.value+'" '+(filterMonth===m.value?'selected':'')+'>'+m.label+'</option>').join('')}
+            </select>
           </div>
           <div class="filter-popover-row">
             <div class="filter-popover-label">Status</div>
@@ -2525,6 +2513,7 @@ let _pendingPaid = null;
 
 async function toggleStatus(tid,bi){
   const t=tenants.find(t=>t.id===tid);
+  if(!t||!t.bills[bi]) return;
   const cy=['unpaid','overdue','paid'];
   const next=cy[(cy.indexOf(t.bills[bi].status)+1)%cy.length];
   if(next==='paid'){
@@ -2550,6 +2539,7 @@ async function confirmPaid(){
   if(!_pendingPaid) return;
   const {tid,bi}=_pendingPaid;
   const t=tenants.find(t=>t.id===tid);
+  if(!t||!t.bills[bi]){closePaidModal();return;}
   const dateVal=document.getElementById('paiddate-input').value;
   t.bills[bi].status='paid';
   t.bills[bi].paidDate=dateVal||new Date().toISOString().slice(0,10);
@@ -2560,6 +2550,7 @@ async function confirmPaid(){
 
 async function revertToPending(tid,bi){
   const t=tenants.find(t=>t.id===tid);
+  if(!t||!t.bills[bi]) return;
   t.bills[bi].status='unpaid';
   t.bills[bi].paidDate='';
   try { await dbUpdate(t.id,{bills:t.bills}); tenants=tenants.map(x=>x.id===t.id?t:x); renderAdmin(); showToast('Bill moved back to unpaid.'); }
@@ -2729,7 +2720,7 @@ function renderBillListItems(showAllPaid){
 
 function editBillInline(i){
   document.querySelectorAll('[id^="bill-edit-inline-"]').forEach(el=>el.style.display='none');
-  const t=tenants.find(t=>t.id===editingId); const b=t.bills[i];
+  const t=tenants.find(t=>t.id===editingId); if(!t||!t.bills[i]) return; const b=t.bills[i];
   const el=document.getElementById('bill-edit-inline-'+i); el.style.display='block';
   el.innerHTML=`<div class="bill-edit-form">
     <div class="form-grid">
@@ -2755,7 +2746,7 @@ function editBillInline(i){
 }
 
 async function saveBillEdit(i){
-  const t=tenants.find(t=>t.id===editingId);
+  const t=tenants.find(t=>t.id===editingId); if(!t||!t.bills[i]) return;
   const _amt=Number(document.getElementById('bi-amount-'+i).value);
   if(_amt===0){ showToast('Note: amount is set to ₱0.',true); }
   const newStatus=document.getElementById('bi-status-'+i).value;
@@ -2771,7 +2762,7 @@ async function saveBillEdit(i){
 
 async function deleteBillFromList(i){
   if(!confirm('Delete this bill? This cannot be undone.')) return;
-  const t=tenants.find(t=>t.id===editingId); t.bills.splice(i,1);
+  const t=tenants.find(t=>t.id===editingId); if(!t) return; t.bills.splice(i,1);
   try{ await dbUpdate(t.id,{bills:t.bills}); tenants=tenants.map(x=>x.id===t.id?t:x); showToast('Bill deleted.'); renderBillListItems(); renderAdmin(); }
   catch(e){ showToast('Delete failed: '+e.message,false); }
 }
@@ -2815,7 +2806,7 @@ async function saveNewBill(){
   const status=document.getElementById('nb-status').value;
   const paidDate=status==='paid'?(document.getElementById('nb-paidDate').value||new Date().toISOString().slice(0,10)):'';
   const bill={label,amount:normalizeAmount(document.getElementById('nb-amount').value),due:document.getElementById('nb-due').value,status,remark:document.getElementById('nb-remark').value.trim(),scanLink:(function(v){return /^https:\/\//i.test(v)?v:'';})(document.getElementById('nb-scanLink').value.trim()),paidDate,payments:[]};
-  const t=tenants.find(t=>t.id===editingId); t.bills.push(bill);
+  const t=tenants.find(t=>t.id===editingId); if(!t){showToast('Tenant not found.',false);return;} t.bills.push(bill);
   try{ await dbUpdate(t.id,{bills:t.bills}); tenants=tenants.map(x=>x.id===t.id?t:x); showToast('Bill added.'); cancelNewBill(); renderBillListItems(); renderAdmin(); }
   catch(e){ showToast('Save failed: '+e.message,false); }
 }
@@ -3183,8 +3174,9 @@ window.addEventListener('resize',()=>{
 // QUICK MARK PAID (from Action Required)
 // ─────────────────────────────────────────────
 function quickMarkPaid(tid, bi) {
-  _pendingPaid = {tid, bi};
   const t = tenants.find(t=>t.id===tid);
+  if(!t||!t.bills[bi]) return;
+  _pendingPaid = {tid, bi};
   document.getElementById('paiddate-bill-name').textContent = t.bills[bi].label + ' — ' + t.name;
   document.getElementById('paiddate-input').value = new Date().toISOString().slice(0,10);
   document.getElementById('paiddate-modal').classList.add('open');
@@ -3224,7 +3216,7 @@ function renderTemplateList() {
 
 function editTemplateInline(i) {
   document.querySelectorAll('[id^="tmpl-edit-inline-"]').forEach(el=>el.style.display='none');
-  const t = tenants.find(t=>t.id===editingId);
+  const t = tenants.find(t=>t.id===editingId); if(!t||!t.templates||!t.templates[i]) return;
   const tmpl = t.templates[i];
   const el = document.getElementById('tmpl-edit-inline-'+i);
   el.style.display = 'block';
@@ -3257,7 +3249,7 @@ async function saveTemplateEdit(i) {
   if(!_isPending&&amt===0){if(!confirm('The amount is currently set to ₱0. Save anyway?')) return;}
   const day = Number(document.getElementById('te-day-'+i).value);
   if(!day||day<1||day>31){showToast('Due day must be between 1 and 31.',false);return;}
-  const t = tenants.find(t=>t.id===editingId);
+  const t = tenants.find(t=>t.id===editingId); if(!t||!t.templates||!t.templates[i]) return;
   t.templates[i] = {
     ...t.templates[i],
     label:  document.getElementById('te-label-'+i).value.trim(),
@@ -3274,7 +3266,7 @@ async function saveTemplateEdit(i) {
 
 async function deleteTemplate(i) {
   if(!confirm('Delete this template?')) return;
-  const t = tenants.find(t=>t.id===editingId);
+  const t = tenants.find(t=>t.id===editingId); if(!t||!t.templates) return;
   t.templates.splice(i,1);
   try {
     await dbUpdate(t.id,{templates:t.templates});
@@ -3318,7 +3310,7 @@ async function saveNewTemplate() {
   if(!_ntPending&&amt===0){ showToast('Note: amount is set to ₱0.',true); }
   const day = Number(document.getElementById('nt-day').value);
   if(!day||day<1||day>31){showToast('Due day must be between 1 and 31.',false);return;}
-  const t = tenants.find(t=>t.id===editingId);
+  const t = tenants.find(t=>t.id===editingId); if(!t) return;
   if(!t.templates) t.templates=[];
   t.templates.push({id:uid(), label, amount:_ntPending?0:amt, dayOfMonth:day, pendingAmount:_ntPending});
   try {
@@ -3441,6 +3433,16 @@ async function confirmGenerateBills() {
 // FILTER CONTROLS
 // ─────────────────────────────────────────────
 // ── NOTION-STYLE FILTER HELPERS ──
+function getAvailableMonths() {
+  const months = new Set();
+  tenants.forEach(t => t.bills.forEach(b => {
+    if (b.due) months.add(b.due.slice(0, 7));
+  }));
+  return Array.from(months).sort().reverse().map(v => ({
+    value: v,
+    label: new Date(v + '-02').toLocaleString('default', { month: 'long', year: 'numeric' })
+  }));
+}
 function hasActiveFilters() { return !!(filterTenantId || filterMonth || filterStatuses.length); }
 function activeFilterCount() {
   let n = 0;
