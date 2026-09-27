@@ -522,6 +522,16 @@ main { flex: 1; padding: 52px 40px; max-width: 1120px; margin: 0 auto; width: 10
   justify-content: center;
 }
 #paiddate-modal.open { display: flex !important; }
+#moveout-modal { display: none; position: fixed; inset: 0; background: rgba(17,17,17,0.5); backdrop-filter: blur(4px); z-index: 2000; align-items: center; justify-content: center; padding: 16px; }
+#moveout-modal.open { display: flex !important; }
+#moveout-modal .paiddate-box { max-width: 440px; max-height: calc(100vh - 32px); overflow-y: auto; }
+#moveout-modal .paiddate-title { margin-bottom: 14px; }
+.mo-summary { font-size: 13px; line-height: 1.5; color: var(--ink); margin-top: 10px; }
+.mo-summary ul { margin: 0 0 8px 18px; padding: 0; }
+.mo-summary li { margin-bottom: 4px; }
+.mo-choice { display: flex; gap: 8px; align-items: flex-start; margin: 8px 0 4px; font-size: 13px; cursor: pointer; }
+.mo-choice input { margin-top: 3px; accent-color: var(--blue); }
+#mo-refund-wrap { margin: 4px 0 8px 24px; }
 .paiddate-box {
   background: var(--white);
   border-radius: 12px;

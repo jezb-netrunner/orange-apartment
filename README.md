@@ -65,9 +65,25 @@ Insights and Settings sit under *More*):
   rent amount) count as that month's rent; balances, deposits and
   penalties don't. Changing a charge's amount keeps the old amount for
   earlier cycles, and a cycle that has a bill falls due on that bill's date.
-- **Mark as unpaid** on a bill its logged payments settle also removes
-  those payments (the way to undo a payment recorded by mistake);
-  changing a bill's amount re-syncs its paid status with what was received.
+- **Undo a payment recorded by mistake:** *Undo* next to it under
+  Payments received (tenant page) takes a Receive-payment receipt off every
+  bill it paid and removes the bills it posted early for later months, which
+  then post normally when due. *Mark as unpaid* removes a bill's most recent
+  payment only (earlier genuine payments stay); individual entries can be
+  removed with ✕. Changing a bill's amount re-syncs its paid status.
+  Payments dated in the future ask for confirmation.
+- **Metered charges** (pending amount) post a placeholder with no amount;
+  it shows as *Needs amount* on Home, the tenant page and Billing (never as
+  overdue to the tenant). Adding the real bill through *Add bill* offers to
+  fill the placeholder instead of creating a second bill.
+- **Move out & archive** asks for the tenant's last day: unpaid bills for
+  cycles after it are removed, money paid ahead for them is refunded (a
+  dated refund) or kept as forfeited income on the last day, and reports
+  stop earning rent after that day. Restoring asks whether it's a new stay
+  (move-in becomes today).
+- **Several devices:** every write targets the current row (a tab can't
+  write onto a tenant archived or changed elsewhere); a tab that stays open
+  re-reads tenants and the automatic-billing settings before each daily run.
 - Tenants **without a move-in date** keep working exactly as before —
   their bills still post on their due dates; reconciliation simply stays
   off (and nothing is written) until a move-in date is set.

@@ -500,6 +500,28 @@
   </div>
 </div>
 
+<!-- MOVE-OUT / ARCHIVE MODAL -->
+<div id="moveout-modal" role="dialog" aria-modal="true" aria-labelledby="mo-title">
+  <div class="paiddate-box">
+    <div class="paiddate-eyebrow">Move out &amp; archive</div>
+    <div class="paiddate-title" id="mo-title">Tenant</div>
+    <div class="field">
+      <label for="mo-date">Last day in the unit</label>
+      <input type="date" id="mo-date" onchange="renderMoveOut()">
+    </div>
+    <div id="mo-summary" class="mo-summary"></div>
+    <div id="mo-prepaid" style="display:none">
+      <label class="mo-choice"><input type="radio" name="mo-prepaid" value="refund" checked onchange="renderMoveOut()"><span>Refund it to the tenant</span></label>
+      <div class="field" id="mo-refund-wrap"><label for="mo-refund-date">Date refunded</label><input type="date" id="mo-refund-date"></div>
+      <label class="mo-choice"><input type="radio" name="mo-prepaid" value="keep" onchange="renderMoveOut()"><span>Keep it (forfeited) &mdash; counted as income on their last day</span></label>
+    </div>
+    <div class="paiddate-actions">
+      <button class="btn-cancel" onclick="closeMoveOut()">Cancel</button>
+      <button class="btn-save" id="mo-confirm" onclick="confirmMoveOut()">Archive tenant</button>
+    </div>
+  </div>
+</div>
+
 <!-- PAYMENT INSTRUCTIONS EDIT MODAL -->
 <div id="payinst-modal" role="dialog" aria-modal="true" aria-labelledby="payinst-modal-title">
   <div class="payinst-box">

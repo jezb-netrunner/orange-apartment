@@ -470,3 +470,71 @@ test('floors match regardless of case and spacing', () => {
   assert.deepEqual(is.floors.slice().sort(), ['2nd Floor', '3rd Floor']);
   assert.equal(is.columns['3rd Floor'].net, 10000);
 });
+
+// ── Round-3 review regressions ──
+test('move-out: unpaid later cycles are removed; prepaid ones are refunded (dated) or kept', () => {
+  const t = tenant({ move_in_date: '2026-03-01', templates: [rentT({ dayOfMonth: 1 })], bills: [
+    bill({ due: '2026-09-01', tmplId: 'T1', period: '2026-09' }),                                   // owed
+    bill({ due: '2026-10-01', tmplId: 'T1', period: '2026-10' }),                                   // after move-out, unpaid
+    bill({ due: '2026-11-01', tmplId: 'T1', period: '2026-11', status: 'paid', paidDate: '2026-09-10',
+      payments: [{ amount: 6000, date: '2026-09-10', note: 'adv' }] }),                             // prepaid
+    bill({ label: 'Electricity', amount: 0, due: '2026-10-20', tmplId: 'E', period: '2026-10' })   // placeholder
+  ] });
+  t.templates.push({ id: 'E', label: 'Electricity', amount: 0, pendingAmount: true, dayOfMonth: 20 });
+  const keep = BC.planMoveOut(t, '2026-09-30', { prepaid: 'keep' });
+  assert.equal(keep.removed.length, 2);
+  assert.equal(keep.owed, 6000);
+  assert.equal(keep.prepaidTotal, 6000);
+  const refund = BC.planMoveOut(t, '2026-09-30', { prepaid: 'refund', refundDate: '2026-09-30' });
+  const nov = refund.bills.find(b => b.period === '2026-11');
+  assert.equal(nov.amount, 0);
+  assert.equal(BC.billOpen(nov), 0);
+  const ev = BC.billCashEvents(nov);
+  assert.deepEqual(ev.map(e => [e.date, e.amount]), [['2026-09-10', 6000], ['2026-09-30', -6000]]);
+});
+
+test('nothing is earned after move-out: kept prepaid rent lands on the last day, cycles are clipped', () => {
+  const t = tenant({ move_in_date: '2026-03-15', archived_at: '2026-09-30T12:00:00', templates: [rentT({ dayOfMonth: 15 })] });
+  const kept = bill({ due: '2026-11-15', tmplId: 'T1', period: '2026-11', status: 'paid', paidDate: '2026-09-10' });
+  assert.deepEqual(BC.billRecognition(t, kept, true), [{ ym: '2026-09', amount: 6000 }]);
+  assert.deepEqual(BC.billRecognition(t, kept, false), [{ ym: '2026-09', amount: 6000 }]);
+  const sep = bill({ due: '2026-09-15', tmplId: 'T1', period: '2026-09', status: 'paid', paidDate: '2026-09-15' });
+  const segs = BC.billRecognition(t, sep, true);
+  assert.deepEqual(segs.map(s => s.ym), ['2026-09']);
+  assert.equal(segs.reduce((a, s) => a + s.amount, 0), 6000);
+});
+
+test('undoing a receipt removes it everywhere and drops the early bills it created', () => {
+  const t = tenant({ move_in_date: '2026-09-05', templates: [rentT({ postedThrough: '2026-09' })],
+    bills: [bill({ due: '2026-09-05', tmplId: 'T1', period: '2026-09', payments: [{ amount: 3000, date: '2026-09-05', note: 'cash' }] })] });
+  const plan = BC.allocatePayment(t, [{ amount: 21000, date: '2026-09-20', note: 'typo' }], { today: '2026-09-20', uid, rid: 'R1' });
+  assert.equal(plan.bills.length, 4);                       // Sep settled + Oct, Nov, Dec in advance
+  assert.ok(plan.bills.slice(1).every(b => b.rid === 'R1'));
+  const after = Object.assign({}, t, { bills: plan.bills, templates: plan.templates });
+  const u = BC.undoReceipt(after, 'R1', { today: '2026-09-20' });
+  assert.equal(u.amount, 21000);
+  assert.equal(u.removed, 3);
+  assert.equal(u.bills.length, 1);
+  assert.deepEqual(u.bills[0].payments.map(p => p.amount), [3000]); // the genuine partial payment stays
+  assert.equal(u.bills[0].status, 'unpaid');
+  assert.equal(u.templates[0].postedThrough, '2026-09');
+});
+
+test('a bill named after a charge ("Water - Sept") is that charge\'s bill; placeholders need an amount', () => {
+  const t = tenant({ templates: [rentT(), { id: 'W', label: 'Water', amount: 0, pendingAmount: true, dayOfMonth: 20, postedThrough: '2026-08' }],
+    bills: [bill({ label: 'Water - September', amount: 380, due: '2026-09-20' })] });
+  assert.equal(BC.templateBillExists(t, t.templates[1], '2026-09'), true);
+  assert.equal(BC.templateOfBill(t, { label: 'Water deposit' }), null);
+  assert.equal(BC.templateOfBill(t, { label: 'Waterfront fee' }), null);
+  const plan = BC.planAutoPost(t, { today: '2026-09-15', leadDays: 7, uid });
+  assert.equal(plan.bills.filter(b => b.label === 'Water').length, 0);
+  assert.equal(BC.billAwaitingAmount({ amount: 0, status: 'unpaid' }), true);
+  assert.equal(BC.billAwaitingAmount({ amount: 0, status: 'paid' }), false);
+});
+
+test('a new metered charge is reckoned from the month it was set up', () => {
+  const t = tenant({ move_in_date: '2026-01-10', templates: [rentT({ dayOfMonth: 10 }), { id: 'E', label: 'Electricity', amount: 0, pendingAmount: true, dayOfMonth: 20, since: '2026-10' }],
+    bills: months('2026-01', '2026-09').map(ym => paidBill(ym, { due: ym + '-10', paidDate: ym + '-10' })) });
+  const e = BC.reconcileTenant(t, { today: '2026-09-27', leadDays: 3 }).charges.find(c => c.tmplId === 'E');
+  assert.equal(e.missing.length, 0);
+});

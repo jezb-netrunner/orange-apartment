@@ -102,6 +102,9 @@ function billSettled(b) {
   return b.status === 'paid' ? Math.max(_num(b.amount), logged) : logged;
 }
 function billOpen(b) { return b.status === 'paid' ? 0 : Math.max(0, r2(billRemaining(b))); }
+// An unpaid bill with no amount yet — a metered charge's placeholder
+// waiting for its reading. Not owed, not late: it needs the admin.
+function billAwaitingAmount(b) { return !!b && b.status !== 'paid' && !(_num(b.amount) > 0); }
 function billPeriod(b) { return isYM(b && b.period) ? b.period : ymOf(b && b.due); }
 function normLabel(s) { return String(s == null ? '' : s).trim().toLowerCase().replace(/\s+/g, ' '); }
 
@@ -179,43 +182,55 @@ function primaryTemplate(t) {
 // deleted template's id is treated like an untagged legacy bill, so
 // deleting a charge and re-adding it (same name) keeps its history.
 function _liveIds(t) { return new Set(((t && t.templates) || []).map(x => x && x.id).filter(Boolean)); }
-// A template's current label plus the labels it had before a rename.
-function _labelsOf(tmpl) {
-  return [tmpl.label].concat(Array.isArray(tmpl.aliases) ? tmpl.aliases : []).map(normLabel).filter(Boolean);
+// Which template an untagged bill belongs to, by its label: the charge
+// with that CURRENT name; else one that had it as an old name (never one
+// another charge uses now); else the charge whose name begins the label
+// ("Water - Sept" → "Water"; the longest name wins). Deposits, balances,
+// penalties and fees never match by prefix. Returns fn(bill) → template.
+function _labelOwner(t) {
+  const list = ((t && t.templates) || []).filter(x => x && normLabel(x.label));
+  const cur = new Map();
+  list.forEach(x => { const n = normLabel(x.label); if(!cur.has(n)) cur.set(n, x); });
+  return b => {
+    const l = normLabel(b && b.label);
+    if(!l) return null;
+    if(cur.has(l)) return cur.get(l);
+    const al = list.find(x => Array.isArray(x.aliases) && x.aliases.some(a => normLabel(a) === l));
+    if(al) return al;
+    if(_NOT_MONTHLY_RENT.test(l)) return null;
+    let best = null, len = 0;
+    list.forEach(x => {
+      const n = normLabel(x.label);
+      if(n.length > len && l.startsWith(n) && /[^a-z0-9]/.test(l.charAt(n.length))) { best = x; len = n.length; }
+    });
+    return best;
+  };
 }
-// Current labels of every template on the tenant.
-function _curLabels(t) {
-  return new Set(((t && t.templates) || []).map(x => x && normLabel(x.label)).filter(Boolean));
-}
+const _sameTmpl = (a, b) => !!a && !!b && (a === b || (!!a.id && a.id === b.id));
 // Does bill `b` belong to template `tmpl`? Bills tagged with a live
-// template follow their tag; everything else matches by label. A label
-// that is another charge's CURRENT name belongs to that charge only — an
-// old name (alias) never lets one charge claim another charge's bills.
-function billOfTemplate(b, tmpl, liveIds, curLabels) {
+// template follow their tag; everything else by label (see _labelOwner).
+function billOfTemplate(b, tmpl, liveIds, owner) {
   if(!b) return false;
   if(b.tmplId && liveIds.has(b.tmplId)) return b.tmplId === tmpl.id;
-  const l = normLabel(b.label);
-  if(!l) return false;
-  if(l === normLabel(tmpl.label)) return true;
-  if(curLabels && curLabels.has(l)) return false;
-  return _labelsOf(tmpl).includes(l);
+  return _sameTmpl((owner || _labelOwner({ templates: [tmpl] }))(b), tmpl);
+}
+// The recurring charge a bill belongs to (tag or label), or null.
+function templateOfBill(t, b) {
+  const list = (t && t.templates) || [];
+  if(b && b.tmplId) { const x = list.find(y => y && y.id === b.tmplId); if(x) return x; }
+  return _labelOwner(t)(b);
 }
 const _NOT_MONTHLY_RENT = /deposit|advance|penalt|late|fee|surcharge|interest|reserv|balance|arrear|carr(y|ied)|previous|back ?rent|past ?due|utang/i;
 // A hand-typed bill that stands for the main rent in its month: untagged,
 // named after no charge, not a deposit/penalty/fee — and either labelled
 // as rent ("Rent - March", "Upa - March") or, when it isn't a utility,
 // for exactly an amount the rent has had ("Monthly Bill - March" ₱6,000).
-function _isLooseRent(b, t, liveIds, labels, rates) {
-  if(!b || (b.tmplId && liveIds.has(b.tmplId)) || labels.has(normLabel(b.label))) return false;
+function _isLooseRent(b, t, liveIds, owner, rates) {
+  if(!b || (b.tmplId && liveIds.has(b.tmplId)) || owner(b)) return false;
   if(_NOT_MONTHLY_RENT.test(b.label || '')) return false;
   const cat = billCategory(b);
   if(cat === 'rent') return true;
   return cat !== 'utilities' && !!rates && rates.includes(r2(b.amount));
-}
-function _allLabels(t) {
-  const set = new Set();
-  ((t && t.templates) || []).forEach(x => { if(x) _labelsOf(x).forEach(l => set.add(l)); });
-  return set;
 }
 
 // Bills that belong to a template (see billOfTemplate). With `fallback`, a
@@ -225,7 +240,7 @@ function _allLabels(t) {
 function templateBills(t, tmpl, fallback) {
   const bills = (t && t.bills) || [];
   const liveIds = _liveIds(t);
-  const cur = _curLabels(t);
+  const owner = _labelOwner(t);
   const byPeriod = new Map();
   const all = [];
   const add = (b, i) => {
@@ -234,12 +249,11 @@ function templateBills(t, tmpl, fallback) {
     if(!byPeriod.has(p)) byPeriod.set(p, []);
     byPeriod.get(p).push(i);
   };
-  bills.forEach((b, i) => { if(billOfTemplate(b, tmpl, liveIds, cur)) add(b, i); });
+  bills.forEach((b, i) => { if(billOfTemplate(b, tmpl, liveIds, owner)) add(b, i); });
   if(fallback) {
-    const labels = _allLabels(t);
     const rates = _tmplRates(tmpl);
     bills.forEach((b, i) => {
-      if(!_isLooseRent(b, t, liveIds, labels, rates)) return;
+      if(!_isLooseRent(b, t, liveIds, owner, rates)) return;
       const p = billPeriod(b);
       if(p && !byPeriod.has(p)) add(b, i);
     });
@@ -255,13 +269,12 @@ function templateBills(t, tmpl, fallback) {
 function templateBillExists(t, tmpl, ym) {
   const bills = (t && t.bills) || [];
   const liveIds = _liveIds(t);
-  const cur = _curLabels(t);
-  if(bills.some(b => b && billPeriod(b) === ym && billOfTemplate(b, tmpl, liveIds, cur))) return true;
+  const owner = _labelOwner(t);
+  if(bills.some(b => b && billPeriod(b) === ym && billOfTemplate(b, tmpl, liveIds, owner))) return true;
   const prim = primaryTemplate(t);
   if(!prim || prim.id !== tmpl.id) return false;
-  const labels = _allLabels(t);
   const rates = _tmplRates(tmpl);
-  return bills.some(b => billPeriod(b) === ym && _isLooseRent(b, t, liveIds, labels, rates));
+  return bills.some(b => billPeriod(b) === ym && _isLooseRent(b, t, liveIds, owner, rates));
 }
 
 // Raise postedThrough only across cycles that really are billed (or
@@ -369,7 +382,7 @@ function cycleWindow(moveIn, ym) {
 function _reckonFrom(tmpl, byPeriod, isPrimary, miYM, today) {
   if(isPrimary) return miYM;
   const first = Array.from(byPeriod.keys()).filter(isYM).sort()[0];
-  const cands = [first, tmplRate(tmpl) > 0 && isYM(tmpl.since) ? tmpl.since : ''].filter(isYM).sort();
+  const cands = [first, isYM(tmpl.since) ? tmpl.since : ''].filter(isYM).sort();
   const from = cands.length ? cands[0] : ymOf(today);
   return from < miYM ? miYM : from;
 }
@@ -389,7 +402,6 @@ function reconcileCharge(t, tmpl, opts) {
   // (the reckoning date). Any other charge didn't necessarily exist then,
   // so: its first bill or the cycle it was set up in, whichever is
   // earlier — never before move-in; with neither, the current cycle.
-  // A variable charge (pending amount) only from its first bill.
   const startYM = _reckonFrom(tmpl, byPeriod, isPrimary, miYM, today);
 
   // A real bill always sets the cycle's cost (even in a waived month);
@@ -527,7 +539,9 @@ function allocatePayment(t, chunks, opts) {
   const bills = _clone((t && t.bills) || []);
   const templates = _clone((t && t.templates) || []);
   const lines = [];
-  const queue = (chunks || []).map(c => ({ amount: r2(c.amount), date: isoOrEmpty(c.date), note: String(c.note || ''), src: c.src }))
+  // Every entry a receipt writes carries its receipt id (`rid`), so the
+  // whole payment can be undone as one unit (see undoReceipt).
+  const queue = (chunks || []).map(c => ({ amount: r2(c.amount), date: isoOrEmpty(c.date), note: String(c.note || ''), src: c.src, rid: c.rid || opts.rid || '' }))
     .filter(c => c.amount > EPS);
   const take = (bill, maxAmt, label) => {
     let applied = 0;
@@ -535,7 +549,9 @@ function allocatePayment(t, chunks, opts) {
       const c = queue[0];
       const amt = r2(Math.min(c.amount, maxAmt - applied));
       bill.payments = bill.payments || [];
-      bill.payments.push({ amount: amt, date: c.date, note: c.note || label || '' });
+      const entry = { amount: amt, date: c.date, note: c.note || label || '' };
+      if(c.rid) { entry.rid = c.rid; if(!bill.rid && bill._new) bill.rid = c.rid; }
+      bill.payments.push(entry);
       applied = r2(applied + amt);
       c.amount = r2(c.amount - amt);
       if(c.amount <= EPS) queue.shift();
@@ -571,7 +587,9 @@ function allocatePayment(t, chunks, opts) {
       if(skip.has(ym) || templateBillExists(holder, tmpl, ym)) continue;
       const due = templateDueDate(t, tmpl, ym);
       const bill = makeTemplateBill(tmpl, ym, due);
+      bill._new = true; // lets take() stamp the receipt that created it
       const applied = take(bill, rate, 'Advance payment');
+      delete bill._new;
       bill.remark = billOpen(bill) <= EPS ? 'Paid in advance' : 'Partly paid in advance';
       bills.push(bill);
       bumpPostedThrough(holder, tmpl);
@@ -610,7 +628,7 @@ function applyCredit(t, tmplId, opts) {
       const cut = r2(Math.min(v, over));
       if(cut <= EPS) continue;
       const ref = String(pays[k].note || '').trim();
-      chunks.push({ amount: cut, date: isoOrEmpty(pays[k].date), note: (ref ? ref + ' · ' : '') + 'credit from ' + b.label + (billPeriod(b) ? ' (' + billPeriod(b) + ')' : ''), src: i, origNote: pays[k].note || '' });
+      chunks.push({ amount: cut, date: isoOrEmpty(pays[k].date), note: (ref ? ref + ' · ' : '') + 'credit from ' + b.label + (billPeriod(b) ? ' (' + billPeriod(b) + ')' : ''), src: i, origNote: pays[k].note || '', rid: pays[k].rid || '' });
       pays[k].amount = r2(v - cut);
       over = r2(over - cut);
       if(pays[k].amount <= EPS) pays.splice(k, 1);
@@ -630,9 +648,50 @@ function applyCredit(t, tmplId, opts) {
     if(!home) return;
     const orig = byKey.get(r.src + '|' + r.date + '|' + r.note);
     home.payments = home.payments || [];
-    home.payments.push({ amount: r.amount, date: r.date, note: orig ? orig.origNote : '' });
+    const back = { amount: r.amount, date: r.date, note: orig ? orig.origNote : '' };
+    if(r.rid) back.rid = r.rid;
+    home.payments.push(back);
   });
   return Object.assign(moved, { movedTotal: r2(chunks.reduce((s, c) => s + c.amount, 0) - moved.leftover) });
+}
+
+// Undo one Receive-payment receipt (rid): its entries leave every bill,
+// bills it had settled reopen, and bills it posted early for cycles not
+// yet due — now empty — are removed (not waived), with postedThrough
+// rolled back so those cycles post normally when due. Pure.
+function undoReceipt(t, rid, opts) {
+  opts = opts || {};
+  if(!rid || !t) return null;
+  const today = isISODate(opts.today) ? String(opts.today).slice(0, 10) : '';
+  const bills = _clone(t.bills || []);
+  const templates = _clone(t.templates || []);
+  let amount = 0, touched = 0;
+  bills.forEach(b => {
+    const pays = b.payments || [];
+    const keep = pays.filter(p => p.rid !== rid);
+    if(keep.length === pays.length) return;
+    touched++;
+    amount = r2(amount + pays.filter(p => p.rid === rid).reduce((s, p) => s + _num(p.amount), 0));
+    const settledByPayments = b.status === 'paid' && billTotalPaid(b) >= _num(b.amount) - EPS;
+    b.payments = keep;
+    if(settledByPayments && billTotalPaid(b) < _num(b.amount) - EPS) { b.status = 'unpaid'; b.paidDate = ''; }
+    if(/paid in advance/i.test(b.remark || '') && billTotalPaid(b) <= EPS) b.remark = '';
+  });
+  if(!touched) return null;
+  const drop = new Set();
+  bills.forEach((b, i) => {
+    if(b.rid === rid && b.status !== 'paid' && billTotalPaid(b) <= EPS && isISODate(b.due) && (!today || b.due > today)) drop.add(i);
+  });
+  drop.forEach(i => {
+    const b = bills[i];
+    const tm = templates.find(x => x && x.id === b.tmplId);
+    if(tm && isYM(b.period) && isYM(tm.postedThrough) && b.period <= tm.postedThrough) tm.postedThrough = addYM(b.period, -1);
+  });
+  const kept = bills.filter((b, i) => !drop.has(i));
+  kept.forEach(b => { if(b.rid === rid) delete b.rid; });
+  const holder = { bills: kept, templates, billing_model: t.billing_model };
+  templates.forEach(tm => { if(tm) bumpPostedThrough(holder, tm); });
+  return { bills: kept, templates, amount, touched, removed: drop.size };
 }
 
 // Create bills for the given (missing) cycles of a template. Pure.
@@ -665,6 +724,54 @@ function waiveCycles(t, tmplId, periods) {
   return { templates };
 }
 
+// ── MOVE-OUT ──────────────────────────────────────────────────────────────
+// What archiving a tenant does to their bills. `lastDay` = last day in the
+// unit. A bill for a cycle that starts after it (rent and other fixed
+// charges; an unfilled metered placeholder for a later month):
+//   nothing received  → removed (never owed)
+//   money received    → opts.prepaid 'refund': amount ₱0 and the money paid
+//                       back on opts.refundDate (a dated negative payment,
+//                       so cash reports show the receipt and the refund);
+//                       'keep': left as is — forfeited, and recognized at
+//                       move-out (see billRecognition)
+// Everything else stays; whatever is unpaid is still owed. Pure.
+function _billStart(t, b) {
+  const w = billCoverageWindow(t, b);
+  if(w) return w.start;
+  // A metered placeholder (no amount yet) for a month after move-out.
+  if(b.tmplId && isYM(b.period) && !(_num(b.amount) > 0) && b.status !== 'paid') return dateInMonth(b.period, 1);
+  return '';
+}
+function planMoveOut(t, lastDay, opts) {
+  opts = opts || {};
+  const out = { bills: [], removed: [], prepaid: [], prepaidTotal: 0, owed: 0 };
+  if(!isISODate(lastDay)) return out;
+  const refundDate = isISODate(opts.refundDate) ? String(opts.refundDate).slice(0, 10) : lastDay;
+  _clone((t && t.bills) || []).forEach(b => {
+    if(!b) return;
+    const start = _billStart(t, b);
+    if(start && start > lastDay) {
+      const got = r2(billSettled(b));
+      if(got <= EPS) { out.removed.push(b); return; }
+      out.prepaid.push({ label: b.label, period: billPeriod(b), amount: got });
+      out.prepaidTotal = r2(out.prepaidTotal + got);
+      if(opts.prepaid === 'refund') {
+        // Any receipt implied by "marked paid" stays on its paid date (see
+        // billCashEvents), so receipt − refund nets to zero.
+        b.payments = (b.payments || []).concat([{ amount: -got, date: refundDate, note: 'Refunded on move-out' }]);
+        b.amount = 0;
+        b.status = 'paid';
+        b.paidDate = b.paidDate || refundDate;
+        b.remark = 'Refunded on move-out (' + got.toFixed(2).replace(/\.00$/, '') + ')';
+      } else if(opts.prepaid === 'keep') {
+        b.remark = 'Forfeited on move-out';
+      }
+    } else out.owed = r2(out.owed + billOpen(b));
+    out.bills.push(b);
+  });
+  return out;
+}
+
 // ── REVENUE RECOGNITION ───────────────────────────────────────────────────
 // Rent and fixed recurring charges are earned over the cycle they pay
 // for; with `prorate` their amount is spread over that cycle's days
@@ -686,11 +793,22 @@ function billCoverageWindow(t, b) {
   return { start: due, end: dateInMonth(nextYM, Number(due.slice(8, 10))) };
 }
 
+// A former tenant's last day in the unit (archived_at, local date).
+function moveOutOf(t) { return t && t.archived_at ? _localDate(t.archived_at) : ''; }
 function billRecognition(t, b, prorate) {
   const amt = r2(b && b.amount);
   if(!amt) return [];
+  // Nothing is earned after a tenant moves out: a cycle running past the
+  // last day is earned by then, and one starting after it (kept, i.e.
+  // forfeited, prepaid rent) is earned on the day they leave.
+  const out = moveOutOf(t);
   if(prorate) {
-    const w = billCoverageWindow(t, b);
+    let w = billCoverageWindow(t, b);
+    if(w && out) {
+      const cap = addDaysISO(out, 1);
+      if(w.start >= cap) return [{ ym: ymOf(out), amount: amt }];
+      if(w.end > cap) w = { start: w.start, end: cap };
+    }
     const total = w ? diffDays(w.start, w.end) : 0;
     if(total > 0) {
       const segs = [];
@@ -709,7 +827,8 @@ function billRecognition(t, b, prorate) {
       return segs;
     }
   }
-  const ym = billPeriod(b) || (b.status === 'paid' ? ymOf(b.paidDate) : '');
+  let ym = billPeriod(b) || (b.status === 'paid' ? ymOf(b.paidDate) : '');
+  if(out && ym && ym > ymOf(out) && billCoverageWindow(t, b)) ym = ymOf(out);
   return [{ ym, amount: amt }];
 }
 
@@ -999,10 +1118,10 @@ function paymentReliability(tenants, fromYM, toYM, today) {
 
 const BillingCore = {
   isYM, isISODate, isoOrEmpty, ymOf, addYM, daysInMonth, dateInMonth, lastDayOf, diffDays, addDaysISO, ymRange, r2,
-  BILL_CATEGORIES, billCategory, billTotalPaid, billRemaining, billSettled, billOpen, billPeriod, normLabel, billCashEvents,
+  BILL_CATEGORIES, billCategory, billTotalPaid, billRemaining, billSettled, billOpen, billAwaitingAmount, billPeriod, normLabel, billCashEvents,
   tmplDay, tmplRate, tmplRateAt, isAutoTemplate, moveInOf, templateDueDate, primaryTemplate, templateBills, templateBillExists, makeTemplateBill,
-  billOfTemplate, bumpPostedThrough, planAutoPost, cycleWindow, reconcileCharge, reconcileTenant, allocatePayment, applyCredit, backfillCycles, waiveCycles,
-  billCoverageWindow, billRecognition, occupiedInMonth, floorKey, floorNorm, floorCanon, computeIncomeStatement, agingBuckets, paymentReliability,
+  billOfTemplate, templateOfBill, bumpPostedThrough, planAutoPost, cycleWindow, reconcileCharge, reconcileTenant, allocatePayment, applyCredit, undoReceipt, backfillCycles, waiveCycles,
+  planMoveOut, moveOutOf, billCoverageWindow, billRecognition, occupiedInMonth, floorKey, floorNorm, floorCanon, computeIncomeStatement, agingBuckets, paymentReliability,
   EXPENSE_CATEGORY_KEYS
 };
 if(typeof module !== 'undefined' && module.exports) module.exports = BillingCore;
