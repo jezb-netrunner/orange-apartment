@@ -1,0 +1,820 @@
+// ─────────────────────────────────────────────────────────────────────────
+// BILLING CORE — pure billing & accounting logic. No DOM, no network.
+//
+// Loaded as a classic script before app.js (its function declarations are
+// globals the app calls directly) and require()-able from Node for tests.
+//
+// Data model additions (all optional and additive — rows written before
+// this file existed keep working unchanged):
+//   bill.tmplId        id of the recurring template that produced the bill
+//   bill.period        'YYYY-MM' billing cycle the bill belongs to
+//   template.auto      false = never auto-post (default: auto-post)
+//   template.postedThrough  last cycle auto-posted/generated ('YYYY-MM');
+//                      auto-post never goes at or before it, so a bill the
+//                      admin deletes is never silently recreated
+//   template.skip      ['YYYY-MM', …] cycles the admin waived
+//
+// Recurring bills follow an ANNUITY-DUE schedule: each cycle's bill falls
+// due at the START of the cycle it pays for (rent in advance, consumed
+// forward). Due dates are the admin's (template day of month). For
+// reconciliation the tenant's move-in date is the reckoning date: cycle k
+// runs from move-in + k months to move-in + k+1 months.
+// ─────────────────────────────────────────────────────────────────────────
+
+const RE_YM  = /^\d{4}-(0[1-9]|1[0-2])$/;
+const RE_ISO = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
+const MAX_CYCLES = 600; // 50 years — backstop against malformed dates
+
+// ── Dates (all string math on 'YYYY-MM-DD' / 'YYYY-MM', UTC-safe) ──
+function _pad2(n) { return String(n).padStart(2, '0'); }
+function isYM(s) { return RE_YM.test(String(s == null ? '' : s)); }
+function isISODate(s) {
+  const v = String(s == null ? '' : s).slice(0, 10);
+  if(!RE_ISO.test(v)) return false;
+  const [y, m, d] = v.split('-').map(Number);
+  return d <= daysInMonth(y, m);
+}
+function isoOrEmpty(s) { return isISODate(s) ? String(s).slice(0, 10) : ''; }
+function ymOf(iso) { const v = String(iso == null ? '' : iso).slice(0, 7); return isYM(v) ? v : ''; }
+function daysInMonth(y, m) { return new Date(Date.UTC(y, m, 0)).getUTCDate(); }
+function addYM(ym, n) {
+  let [y, m] = ym.split('-').map(Number);
+  const t = y * 12 + (m - 1) + n;
+  return Math.floor(t / 12) + '-' + _pad2((t % 12 + 12) % 12 + 1);
+}
+// Day `day` of month `ym`, capped to the month's last day.
+function dateInMonth(ym, day) {
+  const [y, m] = ym.split('-').map(Number);
+  const d = Math.min(Math.max(1, Math.floor(Number(day) || 1)), daysInMonth(y, m));
+  return ym + '-' + _pad2(d);
+}
+function lastDayOf(ym) { return dateInMonth(ym, 31); }
+function _utc(iso) { const [y, m, d] = iso.split('-').map(Number); return Date.UTC(y, m - 1, d); }
+function diffDays(a, b) { return Math.round((_utc(b) - _utc(a)) / 86400000); } // b − a
+function addDaysISO(iso, n) {
+  const dt = new Date(_utc(iso) + n * 86400000);
+  return dt.getUTCFullYear() + '-' + _pad2(dt.getUTCMonth() + 1) + '-' + _pad2(dt.getUTCDate());
+}
+// Inclusive list of 'YYYY-MM' keys between two months (order-tolerant).
+function ymRange(from, to) {
+  const out = [];
+  if(!isYM(from) || !isYM(to)) return out;
+  if(from > to) { const s = from; from = to; to = s; }
+  for(let ym = from, i = 0; i < MAX_CYCLES; i++, ym = addYM(ym, 1)) {
+    out.push(ym);
+    if(ym === to) break;
+  }
+  return out;
+}
+
+// ── Money ──
+function _num(v) { const n = Number(v); return isFinite(n) ? n : 0; }
+function r2(v) { return Math.round(_num(v) * 100) / 100; }
+const EPS = 0.005;
+
+// ── Bills ──
+const BILL_CATEGORIES = [
+  { key:'rent',      label:'Monthly Rent'  },
+  { key:'utilities', label:'Utilities'     },
+  { key:'other',     label:'Other Charges' }
+];
+// Categories are inferred from the label so existing data just works.
+function billCategory(b) {
+  const l = String((b && b.label) || '').toLowerCase();
+  if(/rent/.test(l)) return 'rent';
+  if(/electric|kuryente|power|beneco|meralco|water|tubig|internet|wi-?fi|gas\b|cable|utilit/.test(l)) return 'utilities';
+  return 'other';
+}
+function billTotalPaid(b) {
+  if(!b || !b.payments || !b.payments.length) return 0;
+  return b.payments.reduce((s, p) => s + _num(p.amount), 0);
+}
+function billRemaining(b) { return _num(b.amount) - billTotalPaid(b); }
+// Cash that has gone toward a bill. A bill marked paid is settled in full
+// even when its payments weren't logged; logged overpayments still count.
+function billSettled(b) {
+  const logged = billTotalPaid(b);
+  return b.status === 'paid' ? Math.max(_num(b.amount), logged) : logged;
+}
+function billOpen(b) { return b.status === 'paid' ? 0 : Math.max(0, r2(billRemaining(b))); }
+function billPeriod(b) { return isYM(b && b.period) ? b.period : ymOf(b && b.due); }
+function normLabel(s) { return String(s == null ? '' : s).trim().toLowerCase().replace(/\s+/g, ' '); }
+
+// Every cash receipt on a bill as {date, amount}; date '' = unknown. The
+// residual of a bill marked paid beyond its logged payments lands on the
+// paid date (this also covers legacy bills with no payment log at all).
+function billCashEvents(b) {
+  const ev = [];
+  let logged = 0;
+  (b.payments || []).forEach(p => {
+    const v = _num(p.amount);
+    logged += v;
+    if(v) ev.push({ date: isoOrEmpty(p.date), amount: v });
+  });
+  if(b.status === 'paid') {
+    const resid = r2(_num(b.amount) - logged);
+    if(resid > 0) ev.push({ date: isoOrEmpty(b.paidDate), amount: resid });
+  }
+  return ev;
+}
+
+// ── Templates ──
+function tmplDay(tmpl) {
+  const d = Math.floor(Number(tmpl && tmpl.dayOfMonth));
+  return d >= 1 && d <= 31 ? d : 1;
+}
+function tmplRate(tmpl) { return (!tmpl || tmpl.pendingAmount) ? 0 : r2(tmpl.amount); }
+function isAutoTemplate(tmpl) { return !!tmpl && tmpl.auto !== false; }
+function moveInOf(t) { return isoOrEmpty(t && t.move_in_date); }
+
+// The admin's due date for a template in a month. A cycle can't fall due
+// before the tenancy starts, so in the move-in month an earlier template
+// day moves to the move-in date itself.
+function templateDueDate(t, tmpl, ym) {
+  const due = dateInMonth(ym, tmplDay(tmpl));
+  const mi = moveInOf(t);
+  return (mi && ymOf(mi) === ym && due < mi) ? mi : due;
+}
+
+// The tenant's main recurring charge — the one advance payments roll into.
+function primaryTemplate(t) {
+  const list = ((t && t.templates) || []).filter(x => x && tmplRate(x) > 0);
+  return list.find(x => billCategory(x) === 'rent')
+      || (t && t.billing_model === 'inclusive' ? list[0] : null)
+      || null;
+}
+
+// Bills that belong to a template: tagged with its id, or (legacy bills,
+// never tagged) carrying the same label. With `fallback`, a period that has
+// no such bill also accepts one untagged rent-category bill whose label
+// matches no template — so "Rent - March" typed by hand still counts as
+// March's rent when reconciling the primary charge.
+function templateBills(t, tmpl, fallback) {
+  const bills = (t && t.bills) || [];
+  const labels = new Set(((t && t.templates) || []).map(x => normLabel(x && x.label)));
+  const want = normLabel(tmpl.label);
+  const byPeriod = new Map();
+  const all = [];
+  const add = (b, i) => {
+    const p = billPeriod(b);
+    all.push(i);
+    if(!byPeriod.has(p)) byPeriod.set(p, []);
+    byPeriod.get(p).push(i);
+  };
+  bills.forEach((b, i) => {
+    if(!b) return;
+    if(b.tmplId ? b.tmplId === tmpl.id : normLabel(b.label) === want) add(b, i);
+  });
+  if(fallback) {
+    bills.forEach((b, i) => {
+      if(!b || b.tmplId || labels.has(normLabel(b.label)) || billCategory(b) !== 'rent') return;
+      const p = billPeriod(b);
+      if(p && !byPeriod.has(p)) add(b, i);
+    });
+  }
+  return { byPeriod, all };
+}
+
+// Exact match only (id or label) — used to decide whether a cycle is posted.
+function templateBillExists(bills, tmpl, ym) {
+  const want = normLabel(tmpl.label);
+  return (bills || []).some(b => b && billPeriod(b) === ym &&
+    (b.tmplId ? b.tmplId === tmpl.id : normLabel(b.label) === want));
+}
+
+function makeTemplateBill(tmpl, ym, due) {
+  const pending = !!tmpl.pendingAmount;
+  return {
+    label: String(tmpl.label || ''),
+    amount: pending ? 0 : tmplRate(tmpl),
+    due,
+    status: 'unpaid',
+    remark: pending ? 'Pending amount — to be updated' : '',
+    scanLink: '',
+    paidDate: '',
+    payments: [],
+    tmplId: tmpl.id,
+    period: ym
+  };
+}
+
+function _clone(v) { return JSON.parse(JSON.stringify(v == null ? null : v)); }
+function _defaultUid() {
+  return 'x' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+}
+
+// ── AUTO-POST ─────────────────────────────────────────────────────────────
+// Which recurring bills should exist by now. Annuity due: a cycle's bill
+// posts `leadDays` before its due date so the tenant sees it in advance.
+// Only the current and next cycle are considered — past months are NEVER
+// created here (the reconciliation checker lists them for the admin).
+// On a template's first activation (no postedThrough yet) an already
+// overdue current cycle is also left to the checker rather than appearing
+// out of nowhere as an overdue bill.
+// Returns { bills: [new bills], templates: updated copy, changed }.
+function planAutoPost(t, opts) {
+  opts = opts || {};
+  const out = { bills: [], templates: _clone((t && t.templates) || []), changed: false };
+  if(!t || t.archived_at || !isISODate(opts.today)) return out;
+  const today = String(opts.today).slice(0, 10);
+  const lead = Math.min(27, Math.max(0, Math.floor(Number(opts.leadDays) || 0)));
+  const uid = opts.uid || _defaultUid;
+  const cur = ymOf(today);
+  const mi = moveInOf(t);
+  const existing = (t.bills || []).slice();
+  out.templates.forEach(tmpl => {
+    if(!tmpl || !isAutoTemplate(tmpl) || !normLabel(tmpl.label)) return;
+    if(!tmpl.id) { tmpl.id = uid(); out.changed = true; }
+    const firstRun = !isYM(tmpl.postedThrough);
+    const skip = new Set(Array.isArray(tmpl.skip) ? tmpl.skip : []);
+    [cur, addYM(cur, 1)].forEach(ym => {
+      if(mi && ym < ymOf(mi)) return;                         // before the tenancy
+      if(isYM(tmpl.postedThrough) && ym <= tmpl.postedThrough) return;
+      if(skip.has(ym)) return;
+      const due = templateDueDate(t, tmpl, ym);
+      if(diffDays(today, due) > lead) return;                  // not in the posting window yet
+      const mark = () => {
+        if(!isYM(tmpl.postedThrough) || ym > tmpl.postedThrough) { tmpl.postedThrough = ym; out.changed = true; }
+      };
+      if(templateBillExists(existing.concat(out.bills), tmpl, ym)) { mark(); return; }
+      if(firstRun && due < today) return;
+      out.bills.push(makeTemplateBill(tmpl, ym, due));
+      mark();
+    });
+  });
+  if(out.bills.length) out.changed = true;
+  return out;
+}
+
+// ── RECONCILIATION (move-in reckoning, annuity due) ───────────────────────
+// Cycle for month `ym`: starts on the move-in day of that month (capped),
+// ends where the next one starts.
+function cycleWindow(moveIn, ym) {
+  const day = Number(moveIn.slice(8, 10));
+  return { start: dateInMonth(ym, day), end: dateInMonth(addYM(ym, 1), day) };
+}
+
+// One recurring charge, reconciled from the move-in date:
+//   cyclesStarted  cycles whose start has arrived (annuity due: payable then)
+//   covered        cycles fully paid, consuming all cash toward the charge
+//                  forward from the first cycle (advances included)
+//   paidThrough    last day covered ('' if nothing is)
+//   arrears        unpaid amount on cycles already past their due date
+//   credit         cash beyond every started cycle (paid in advance)
+//   missing        started cycles with no bill that aren't waived
+//   excess         logged overpayment sitting on individual bills
+// Returns null when the tenant has no move-in date (reconciliation off).
+function reconcileCharge(t, tmpl, opts) {
+  const mi = moveInOf(t);
+  if(!mi || !tmpl) return null;
+  opts = opts || {};
+  const today = String(opts.today).slice(0, 10);
+  const bills = t.bills || [];
+  const isPrimary = !!(opts.primary && opts.primary === tmpl);
+  const { byPeriod, all } = templateBills(t, tmpl, isPrimary);
+  const skip = new Set(Array.isArray(tmpl.skip) ? tmpl.skip : []);
+  const rate = tmplRate(tmpl);
+  const miYM = ymOf(mi);
+
+  const cycleCost = ym => {
+    if(skip.has(ym)) return 0;
+    const idx = byPeriod.get(ym);
+    return idx && idx.length ? r2(idx.reduce((s, i) => s + _num(bills[i].amount), 0)) : rate;
+  };
+
+  const cycles = [];
+  for(let ym = miYM, i = 0; i < MAX_CYCLES; i++, ym = addYM(ym, 1)) {
+    if(cycleWindow(mi, ym).start > today) break;
+    const idx = byPeriod.get(ym) || [];
+    cycles.push({ ym, due: templateDueDate(t, tmpl, ym), cost: cycleCost(ym), billed: idx.length > 0, waived: skip.has(ym) });
+  }
+
+  // A cycle is "missing" once its bill should have been posted: due date
+  // within the posting lead window (or already past). Fixed charges are
+  // reckoned from move-in; a variable charge (utility with a pending
+  // amount) only from its first bill — it has no amount to reconcile and
+  // is often set up long after the tenant moved in.
+  const lead = Math.max(0, Math.floor(Number(opts.leadDays) || 0));
+  let checkFrom = miYM;
+  if(rate <= 0) {
+    const periods = Array.from(byPeriod.keys()).filter(isYM).sort();
+    checkFrom = periods.length ? (periods[0] > miYM ? periods[0] : miYM) : ymOf(today);
+  }
+  const missing = cycles
+    .filter(c => c.ym >= checkFrom && !c.billed && !c.waived && diffDays(today, c.due) <= lead)
+    .map(c => ({ period: c.ym, due: c.due, amount: rate }));
+
+  // Overpayments logged on individual bills of this charge.
+  let excess = 0;
+  const excessBills = [];
+  all.forEach(i => {
+    const b = bills[i];
+    const over = r2(billTotalPaid(b) - _num(b.amount));
+    if(over > EPS) { excess = r2(excess + over); excessBills.push(i); }
+  });
+
+  const res = {
+    tmplId: tmpl.id, label: tmpl.label, rate, moveIn: mi,
+    variable: rate <= 0, cyclesStarted: cycles.length,
+    missing, excess, excessBills,
+    covered: 0, remainder: 0, paidThrough: '', arrears: 0, credit: 0, pool: 0,
+    nextDue: '', nextAmount: 0, aheadCycles: 0, status: 'variable',
+    openCovered: []
+  };
+  if(res.variable) return res; // pending-amount charges vary monthly: gap check only
+
+  const pool = r2(all.reduce((s, i) => s + billSettled(bills[i]), 0));
+  res.pool = pool;
+
+  // Consume the pool forward, cycle by cycle (advances roll into future cycles).
+  let rem = pool, covered = 0, ym = miYM;
+  const cap = cycles.length + 240;
+  for(let i = 0; i < cap; i++, ym = addYM(ym, 1)) {
+    const cost = cycleCost(ym);
+    if(cost <= EPS) { if(i >= cycles.length && !skip.has(ym)) break; covered++; continue; }
+    if(rem + EPS < cost) break;
+    rem = r2(rem - cost);
+    covered++;
+  }
+  res.covered = covered;
+  res.remainder = rem;
+  const firstOpen = addYM(miYM, covered);
+  res.paidThrough = covered > 0 ? addDaysISO(cycleWindow(mi, firstOpen).start, -1) : '';
+  res.nextDue = templateDueDate(t, tmpl, firstOpen);
+  res.nextAmount = r2(Math.max(0, cycleCost(firstOpen) - rem));
+  res.aheadCycles = covered - cycles.length;
+
+  const owedStarted = r2(cycles.reduce((s, c) => s + c.cost, 0));
+  const owedPastDue = r2(cycles.filter(c => c.due <= today).reduce((s, c) => s + c.cost, 0));
+  res.arrears = r2(Math.max(0, owedPastDue - pool));
+  res.credit = r2(Math.max(0, pool - owedStarted));
+  res.status = res.arrears > EPS ? 'behind' : (res.aheadCycles > 0 ? 'advance' : 'current');
+
+  // Open bills whose cycle the pooled cash already covers — "Apply credit"
+  // settles them by moving the overpayment onto them.
+  for(let i = 0; i < covered; i++) {
+    const p = addYM(miYM, i);
+    (byPeriod.get(p) || []).forEach(bi => { if(billOpen(bills[bi]) > EPS) res.openCovered.push(bi); });
+  }
+  return res;
+}
+
+function reconcileTenant(t, opts) {
+  opts = opts || {};
+  const mi = moveInOf(t);
+  const templates = ((t && t.templates) || []).filter(x => x && normLabel(x.label));
+  if(!templates.length) return { enabled: false, reason: 'no-templates', charges: [] };
+  if(!mi) return { enabled: false, reason: 'no-move-in', charges: [] };
+  const primary = primaryTemplate(t);
+  const charges = templates.map(tmpl => reconcileCharge(t, tmpl, Object.assign({}, opts, { primary })))
+    .filter(Boolean);
+  // Primary charge first, then fixed charges, then variable ones.
+  charges.sort((a, b) => (b.tmplId === (primary && primary.id)) - (a.tmplId === (primary && primary.id))
+    || (a.variable - b.variable));
+  return { enabled: true, reason: '', charges, primaryId: primary ? primary.id : null };
+}
+
+// ── PAYMENT ALLOCATION ────────────────────────────────────────────────────
+// Apply cash `chunks` ([{amount, date, note}], in order) to the tenant's
+// open bills — oldest due date first, rent before other charges on the same
+// day, undated bills last — then, if cash remains and `advance` is on, roll
+// it into future cycles of the primary recurring charge (annuity due: the
+// next unposted cycle is posted early and paid). Pure: works on copies.
+// Returns { bills, templates, lines, leftover, changed }.
+function _openOrder(bills) {
+  const rank = { rent: 0, utilities: 1, other: 2 };
+  return bills.map((b, i) => ({ b, i }))
+    .filter(x => x.b && billOpen(x.b) > EPS)
+    .sort((x, y) => (x.b.due || '9999-99-99').localeCompare(y.b.due || '9999-99-99')
+      || rank[billCategory(x.b)] - rank[billCategory(y.b)] || x.i - y.i)
+    .map(x => x.i);
+}
+
+function allocatePayment(t, chunks, opts) {
+  opts = opts || {};
+  const bills = _clone((t && t.bills) || []);
+  const templates = _clone((t && t.templates) || []);
+  const lines = [];
+  const queue = (chunks || []).map(c => ({ amount: r2(c.amount), date: isoOrEmpty(c.date), note: String(c.note || '') }))
+    .filter(c => c.amount > EPS);
+  const take = (bill, maxAmt, label) => {
+    let applied = 0;
+    while(queue.length && maxAmt - applied > EPS) {
+      const c = queue[0];
+      const amt = r2(Math.min(c.amount, maxAmt - applied));
+      bill.payments = bill.payments || [];
+      bill.payments.push({ amount: amt, date: c.date, note: c.note || label || '' });
+      applied = r2(applied + amt);
+      c.amount = r2(c.amount - amt);
+      if(c.amount <= EPS) queue.shift();
+      if(billOpen(bill) <= EPS) { bill.status = 'paid'; bill.paidDate = c.date || bill.paidDate || ''; }
+    }
+    return applied;
+  };
+
+  for(const i of _openOrder(bills)) {
+    if(!queue.length) break;
+    const b = bills[i];
+    const before = billOpen(b);
+    const applied = take(b, before);
+    if(applied > EPS) lines.push({ kind: 'bill', index: i, label: b.label, due: b.due || '', period: billPeriod(b),
+      apply: applied, settles: billOpen(b) <= EPS, remaining: billOpen(b) });
+  }
+
+  // Advance into future cycles of the primary charge.
+  let tmpl = null;
+  if(queue.length && opts.advance !== false) {
+    tmpl = primaryTemplate({ templates, billing_model: t && t.billing_model });
+  }
+  if(tmpl && isISODate(opts.today)) {
+    const uid = opts.uid || _defaultUid;
+    if(!tmpl.id) tmpl.id = uid();
+    const rate = tmplRate(tmpl);
+    const skip = new Set(Array.isArray(tmpl.skip) ? tmpl.skip : []);
+    const mi = moveInOf(t);
+    let ym = ymOf(opts.today);
+    if(mi && ymOf(mi) > ym) ym = ymOf(mi);
+    for(let n = 0; queue.length && n < 240; n++, ym = addYM(ym, 1)) {
+      if(skip.has(ym) || templateBillExists(bills, tmpl, ym)) continue;
+      const due = templateDueDate(t, tmpl, ym);
+      const bill = makeTemplateBill(tmpl, ym, due);
+      bill.remark = 'Paid in advance';
+      const applied = take(bill, rate, 'Advance payment');
+      bills.push(bill);
+      if(!isYM(tmpl.postedThrough) || ym > tmpl.postedThrough) tmpl.postedThrough = ym;
+      lines.push({ kind: 'advance', index: bills.length - 1, label: bill.label, due, period: ym,
+        window: mi ? cycleWindow(mi, ym) : null, apply: applied, settles: billOpen(bill) <= EPS, remaining: billOpen(bill) });
+    }
+  }
+  const leftover = r2(queue.reduce((s, c) => s + c.amount, 0));
+  return { bills, templates, lines, leftover, changed: lines.length > 0 };
+}
+
+// Move overpayments sitting on a charge's bills onto the tenant's open
+// bills (then future cycles when it's the primary charge). Payment dates
+// travel with the money, so cash-basis figures are unchanged. Whatever
+// can't be placed goes back onto the bill it came from — nothing is lost.
+function applyCredit(t, tmplId, opts) {
+  opts = opts || {};
+  const tmpl = ((t && t.templates) || []).find(x => x && x.id === tmplId);
+  if(!tmpl) return null;
+  const primary = primaryTemplate(t);
+  const src = { bills: _clone(t.bills || []), templates: t.templates, billing_model: t.billing_model, move_in_date: t.move_in_date };
+  const { all } = templateBills(src, tmpl, primary === tmpl);
+  const chunks = [];
+  const sources = [];
+  all.forEach(i => {
+    const b = src.bills[i];
+    let over = r2(billTotalPaid(b) - _num(b.amount));
+    if(over <= EPS) return;
+    const pays = b.payments;
+    for(let k = pays.length - 1; k >= 0 && over > EPS; k--) {
+      const v = _num(pays[k].amount);
+      const cut = r2(Math.min(v, over));
+      if(cut <= EPS) continue;
+      chunks.push({ amount: cut, date: isoOrEmpty(pays[k].date), note: 'Credit from ' + b.label + (billPeriod(b) ? ' (' + billPeriod(b) + ')' : '') });
+      sources.push(i);
+      pays[k].amount = r2(v - cut);
+      over = r2(over - cut);
+      if(pays[k].amount <= EPS) pays.splice(k, 1);
+    }
+    if(b.status !== 'paid' && billOpen(b) <= EPS) {
+      b.status = 'paid';
+      b.paidDate = b.paidDate || (pays.length ? isoOrEmpty(pays[pays.length - 1].date) : '') || '';
+    }
+  });
+  if(!chunks.length) return null;
+  const moved = allocatePayment(src, chunks, Object.assign({}, opts, { advance: primary === tmpl }));
+  if(moved.leftover > EPS) {
+    // Put what couldn't be placed back on the first source bill.
+    const home = moved.bills[sources[0]];
+    home.payments = home.payments || [];
+    home.payments.push({ amount: moved.leftover, date: chunks[0].date, note: 'Unapplied credit' });
+  }
+  return Object.assign(moved, { movedTotal: r2(chunks.reduce((s, c) => s + c.amount, 0) - moved.leftover) });
+}
+
+// Create bills for the given (missing) cycles of a template. Pure.
+function backfillCycles(t, tmplId, periods, opts) {
+  opts = opts || {};
+  const bills = _clone((t && t.bills) || []);
+  const templates = _clone((t && t.templates) || []);
+  const tmpl = templates.find(x => x && x.id === tmplId);
+  if(!tmpl) return null;
+  const added = [];
+  (periods || []).filter(isYM).sort().forEach(ym => {
+    if(templateBillExists(bills, tmpl, ym)) return;
+    const b = makeTemplateBill(tmpl, ym, templateDueDate(t, tmpl, ym));
+    bills.push(b);
+    added.push(b);
+  });
+  return { bills, templates, added };
+}
+
+// Mark cycles as waived so the checker stops listing them. Pure.
+function waiveCycles(t, tmplId, periods) {
+  const templates = _clone((t && t.templates) || []);
+  const tmpl = templates.find(x => x && x.id === tmplId);
+  if(!tmpl) return null;
+  const set = new Set(Array.isArray(tmpl.skip) ? tmpl.skip : []);
+  (periods || []).filter(isYM).forEach(p => set.add(p));
+  tmpl.skip = Array.from(set).sort();
+  return { templates };
+}
+
+// ── REVENUE RECOGNITION ───────────────────────────────────────────────────
+// Rent and fixed recurring charges are earned over the cycle they pay
+// for; with `prorate` their amount is spread over that cycle's days
+// (straight-line). Utilities, one-off charges — and every charge when
+// prorate is off — are recognized in their billing period. Returns [{ym, amount}], ym '' when
+// the bill carries no date at all.
+function billCoverageWindow(t, b) {
+  // Rent and other fixed recurring charges accrue over their cycle.
+  // Utilities are billed for consumption already used — point in time.
+  const cat = billCategory(b);
+  if(!(cat === 'rent' || (b.tmplId && cat !== 'utilities'))) return null;
+  const period = billPeriod(b);
+  if(!period) return null;
+  const mi = moveInOf(t);
+  if(mi && period >= ymOf(mi)) return cycleWindow(mi, period); // move-in is the reckoning date
+  const due = isoOrEmpty(b.due);
+  if(!due) return null;
+  const nextYM = addYM(ymOf(due), 1);
+  return { start: due, end: dateInMonth(nextYM, Number(due.slice(8, 10))) };
+}
+
+function billRecognition(t, b, prorate) {
+  const amt = r2(b && b.amount);
+  if(!amt) return [];
+  if(prorate) {
+    const w = billCoverageWindow(t, b);
+    const total = w ? diffDays(w.start, w.end) : 0;
+    if(total > 0) {
+      const segs = [];
+      let cur = w.start, left = amt, daysLeft = total;
+      while(daysLeft > 0) {
+        const ym = ymOf(cur);
+        const monthEnd = addDaysISO(lastDayOf(ym), 1);
+        const segEnd = monthEnd < w.end ? monthEnd : w.end;
+        const days = diffDays(cur, segEnd);
+        const part = segEnd === w.end ? left : r2(amt * days / total);
+        segs.push({ ym, amount: part });
+        left = r2(left - part);
+        daysLeft -= days;
+        cur = segEnd;
+      }
+      return segs;
+    }
+  }
+  const ym = billPeriod(b) || (b.status === 'paid' ? ymOf(b.paidDate) : '');
+  return [{ ym, amount: amt }];
+}
+
+// ── REPORTS ───────────────────────────────────────────────────────────────
+const EXPENSE_CATEGORY_KEYS = ['electricity', 'water', 'internet', 'maintenance', 'taxes', 'other'];
+function _expCat(k) { return EXPENSE_CATEGORY_KEYS.includes(k) ? k : 'other'; }
+function floorKey(t) { return String((t && t.floor) || '').trim(); }
+function _emptyRev() { return { rent: 0, utilities: 0, other: 0, total: 0 }; }
+function _emptyExp() { const o = { total: 0 }; EXPENSE_CATEGORY_KEYS.forEach(k => { o[k] = 0; }); return o; }
+function _addRev(o, cat, v) { o[cat] = r2(o[cat] + v); o.total = r2(o.total + v); }
+function _addExp(o, cat, v) { o[cat] = r2(o[cat] + v); o.total = r2(o.total + v); }
+
+// Was the tenant in the building during month `ym`? From the move-in date
+// (else their earliest bill) to the archive date.
+function occupiedInMonth(t, ym) {
+  let start = moveInOf(t);
+  if(!start) {
+    let first = '';
+    (t.bills || []).forEach(b => { const p = billPeriod(b); if(p && (!first || p < first)) first = p; });
+    if(!first) return false;
+    start = first + '-01';
+  }
+  const end = isoOrEmpty(String(t.archived_at || '').slice(0, 10));
+  return start <= lastDayOf(ym) && (!end || end >= ym + '-01');
+}
+
+// Cash received toward a bill up to and including `endISO` (unknown dates
+// count as received). Amount recognized as revenue through month `endYM`.
+function _cashThrough(b, endISO) {
+  return r2(billCashEvents(b).reduce((s, e) => s + ((!e.date || e.date <= endISO) ? e.amount : 0), 0));
+}
+function _recognizedThrough(t, b, endYM, prorate) {
+  return r2(billRecognition(t, b, prorate).reduce((s, g) => s + ((!g.ym || g.ym <= endYM) ? g.amount : 0), 0));
+}
+
+// The whole income statement as numbers. params:
+//   tenants     every tenant row, archived included (past income counts)
+//   expenses    expense rows ({expense_date, category, amount, floor?})
+//   from, to    'YYYY-MM' range (ignored when allTime)
+//   allTime     include undated items too
+//   basis       'accrual' (default) | 'cash'
+//   prorate     accrual: spread recurring charges over their cycle days
+//   allocation  shared (untagged) expenses → floors: 'headcount' | 'revenue' | 'none'
+//   hasExpenses false = expenses ledger unavailable (income only)
+// Returns { months, floors, columns{key→col}, total, unallocated, perMonth, memo, undated }.
+function computeIncomeStatement(params) {
+  const P = Object.assign({ basis: 'accrual', prorate: true, allocation: 'headcount', hasExpenses: true }, params || {});
+  const tenants = P.tenants || [];
+  const expenses = P.hasExpenses ? (P.expenses || []) : [];
+  const months = ymRange(P.from, P.to);
+  const inRange = new Set(months);
+  const rFrom = months[0], rTo = months[months.length - 1];
+  const endISO = rTo ? lastDayOf(rTo) : '';
+  const accrual = P.basis !== 'cash';
+
+  // Floors: every tenant floor plus any floor an expense is tagged with.
+  const floorSet = new Set();
+  tenants.forEach(t => floorSet.add(floorKey(t)));
+  expenses.forEach(x => { const f = String(x.floor || '').trim(); if(f) floorSet.add(f); });
+  const floors = Array.from(floorSet);
+
+  const col = () => ({ revenue: _emptyRev(), direct: _emptyExp(), shared: _emptyExp(), expenses: 0, net: 0 });
+  const columns = {}; floors.forEach(f => { columns[f] = col(); });
+  const revByMonth = {}; floors.forEach(f => { revByMonth[f] = {}; months.forEach(m => { revByMonth[f][m] = 0; }); });
+  const undated = {}; floors.forEach(f => { undated[f] = _emptyRev(); });
+
+  // Revenue
+  tenants.forEach(t => {
+    const f = floorKey(t);
+    (t.bills || []).forEach(b => {
+      if(!b) return;
+      const cat = billCategory(b);
+      if(accrual) {
+        billRecognition(t, b, P.prorate).forEach(g => {
+          if(g.ym ? inRange.has(g.ym) : P.allTime) {
+            _addRev(columns[f].revenue, cat, g.amount);
+            if(g.ym) revByMonth[f][g.ym] = r2(revByMonth[f][g.ym] + g.amount);
+            else _addRev(undated[f], cat, g.amount);
+          }
+        });
+      } else {
+        billCashEvents(b).forEach(e => {
+          const ym = ymOf(e.date);
+          if(ym ? inRange.has(ym) : P.allTime) {
+            _addRev(columns[f].revenue, cat, e.amount);
+            if(ym) revByMonth[f][ym] = r2(revByMonth[f][ym] + e.amount);
+            else _addRev(undated[f], cat, e.amount);
+          }
+        });
+      }
+    });
+  });
+
+  // Expenses: floor-tagged = direct; untagged = shared, allocated per month.
+  const unallocated = _emptyExp();
+  const periodRev = {}; floors.forEach(f => { periodRev[f] = columns[f].revenue.total; });
+  const weightsFor = ym => {
+    const w = {};
+    if(P.allocation === 'headcount') {
+      floors.forEach(f => { w[f] = 0; });
+      tenants.forEach(t => { if(occupiedInMonth(t, ym)) w[floorKey(t)] += 1; });
+    } else if(P.allocation === 'revenue') {
+      floors.forEach(f => { w[f] = Math.max(0, revByMonth[f][ym] || 0); });
+      if(!floors.some(f => w[f] > 0)) floors.forEach(f => { w[f] = Math.max(0, periodRev[f]); });
+    } else return null;
+    const sum = floors.reduce((s, f) => s + w[f], 0);
+    return sum > 0 ? { w, sum } : null;
+  };
+  const wCache = {};
+  const expByMonth = {}; floors.forEach(f => { expByMonth[f] = {}; months.forEach(m => { expByMonth[f][m] = 0; }); });
+  const totalExpByMonth = {}; months.forEach(m => { totalExpByMonth[m] = 0; });
+  const total = col();
+  expenses.forEach(x => {
+    const ym = ymOf(x.expense_date);
+    if(!inRange.has(ym)) return;
+    const amt = r2(x.amount);
+    if(!amt) return;
+    const cat = _expCat(x.category);
+    const tag = String(x.floor || '').trim();
+    totalExpByMonth[ym] = r2(totalExpByMonth[ym] + amt);
+    if(tag) {
+      _addExp(total.direct, cat, amt);
+      _addExp(columns[tag].direct, cat, amt);
+      expByMonth[tag][ym] = r2(expByMonth[tag][ym] + amt);
+      return;
+    }
+    _addExp(total.shared, cat, amt);
+    if(!(ym in wCache)) wCache[ym] = weightsFor(ym);
+    const W = wCache[ym];
+    if(!W) { _addExp(unallocated, cat, amt); return; }
+    let left = amt;
+    const live = floors.filter(f => W.w[f] > 0);
+    live.forEach((f, i) => {
+      const part = i === live.length - 1 ? left : r2(amt * W.w[f] / W.sum);
+      left = r2(left - part);
+      _addExp(columns[f].shared, cat, part);
+      expByMonth[f][ym] = r2(expByMonth[f][ym] + part);
+    });
+  });
+
+  floors.forEach(f => {
+    const c = columns[f];
+    c.expenses = r2(c.direct.total + c.shared.total);
+    c.net = r2(c.revenue.total - c.expenses);
+  });
+  floors.forEach(f => {
+    ['rent', 'utilities', 'other'].forEach(k => _addRev(total.revenue, k, columns[f].revenue[k]));
+  });
+  total.expenses = r2(total.direct.total + total.shared.total);
+  total.net = r2(total.revenue.total - total.expenses);
+
+  // Month-by-month rows per floor and for the whole building.
+  const perMonth = { __total: months.map(m => {
+    const rev = r2(floors.reduce((s, f) => s + revByMonth[f][m], 0));
+    return { ym: m, revenue: rev, expenses: totalExpByMonth[m], net: r2(rev - totalExpByMonth[m]) };
+  }) };
+  floors.forEach(f => {
+    perMonth[f] = months.map(m => ({ ym: m, revenue: revByMonth[f][m], expenses: expByMonth[f][m], net: r2(revByMonth[f][m] - expByMonth[f][m]) }));
+  });
+
+  // Memo: collections (cash) and balance-sheet items at period end (accrual).
+  const memo = {};
+  const memoFor = list => {
+    let billed = 0, collected = 0, outstanding = 0, receivable = 0, unearned = 0;
+    list.forEach(t => (t.bills || []).forEach(b => {
+      if(!b) return;
+      const p = billPeriod(b);
+      if(p ? inRange.has(p) : P.allTime) billed = r2(billed + r2(b.amount));
+      billCashEvents(b).forEach(e => {
+        const ym = ymOf(e.date);
+        if(ym ? inRange.has(ym) : P.allTime) collected = r2(collected + e.amount);
+      });
+      if(b.status !== 'paid' && (P.allTime || (p && inRange.has(p)))) outstanding = r2(outstanding + billOpen(b));
+      if(endISO) {
+        const R = _recognizedThrough(t, b, rTo, P.prorate && accrual);
+        const C = _cashThrough(b, endISO);
+        if(R > C) receivable = r2(receivable + R - C); else unearned = r2(unearned + C - R);
+      }
+    }));
+    return { billed, collected, outstanding, receivable, unearned,
+      rate: billed > 0 ? Math.round(collected / billed * 100) : null };
+  };
+  floors.forEach(f => { memo[f] = memoFor(tenants.filter(t => floorKey(t) === f)); });
+  memo.__total = memoFor(tenants);
+
+  const undatedTotal = _emptyRev();
+  floors.forEach(f => ['rent', 'utilities', 'other'].forEach(k => _addRev(undatedTotal, k, undated[f][k])));
+  undated.__total = undatedTotal;
+
+  // Floors in building order: numbered floors ascending, ground first,
+  // unassigned last (the caller supplies a ranker for label-aware order).
+  const rank = P.floorRank || (s => s);
+  floors.sort((a, b) => { if(!a) return 1; if(!b) return -1; const r = rank(a) - rank(b); return (isNaN(r) ? 0 : r) || a.localeCompare(b); });
+
+  return { months, from: rFrom, to: rTo, basis: accrual ? 'accrual' : 'cash', prorate: !!(accrual && P.prorate),
+    floors, columns, total, unallocated, perMonth, memo, undated };
+}
+
+// ── ANALYTICS HELPERS (Insights module) ───────────────────────────────────
+// Receivables aging by days past due, on the given `today`.
+function agingBuckets(tenants, today) {
+  const buckets = [
+    { key: 'current', label: 'Not yet due', amount: 0, count: 0 },
+    { key: 'd30', label: '1–30 days', amount: 0, count: 0 },
+    { key: 'd60', label: '31–60 days', amount: 0, count: 0 },
+    { key: 'd90', label: '61–90 days', amount: 0, count: 0 },
+    { key: 'd90p', label: '90+ days', amount: 0, count: 0 }
+  ];
+  (tenants || []).forEach(t => (t.bills || []).forEach(b => {
+    const open = b ? billOpen(b) : 0;
+    if(open <= EPS) return;
+    const due = isoOrEmpty(b.due);
+    const late = due ? diffDays(due, today) : 0;
+    const k = late <= 0 ? 0 : late <= 30 ? 1 : late <= 60 ? 2 : late <= 90 ? 3 : 4;
+    buckets[k].amount = r2(buckets[k].amount + open);
+    buckets[k].count++;
+  }));
+  return buckets;
+}
+
+// Per-tenant punctuality over bills DUE in the window [fromYM, toYM]:
+// on-time share and average days late. Future paid dates are typos → skipped.
+function paymentReliability(tenants, fromYM, toYM, today) {
+  const out = [];
+  (tenants || []).forEach(t => {
+    let n = 0, late = 0, lateDays = 0;
+    (t.bills || []).forEach(b => {
+      if(!b || b.status !== 'paid') return;
+      const due = isoOrEmpty(b.due), pd = isoOrEmpty(b.paidDate);
+      if(!due || !pd || pd > today) return;
+      const p = ymOf(due);
+      if(p < fromYM || p > toYM) return;
+      const d = diffDays(due, pd);
+      n++;
+      if(d > 0) { late++; lateDays += d; }
+    });
+    if(n) out.push({ id: t.id, name: t.name, unit: t.unit, floor: floorKey(t), n, late,
+      onTimePct: Math.round((n - late) / n * 100), avgLate: late ? Math.round(lateDays / late) : 0 });
+  });
+  return out;
+}
+
+const BillingCore = {
+  isYM, isISODate, isoOrEmpty, ymOf, addYM, daysInMonth, dateInMonth, lastDayOf, diffDays, addDaysISO, ymRange, r2,
+  BILL_CATEGORIES, billCategory, billTotalPaid, billRemaining, billSettled, billOpen, billPeriod, normLabel, billCashEvents,
+  tmplDay, tmplRate, isAutoTemplate, moveInOf, templateDueDate, primaryTemplate, templateBills, templateBillExists, makeTemplateBill,
+  planAutoPost, cycleWindow, reconcileCharge, reconcileTenant, allocatePayment, applyCredit, backfillCycles, waiveCycles,
+  billCoverageWindow, billRecognition, occupiedInMonth, floorKey, computeIncomeStatement, agingBuckets, paymentReliability,
+  EXPENSE_CATEGORY_KEYS
+};
+if(typeof module !== 'undefined' && module.exports) module.exports = BillingCore;

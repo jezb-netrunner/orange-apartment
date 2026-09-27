@@ -22,14 +22,18 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v5
+      # Billing/accounting engine tests gate every deploy (no dependencies:
+      # Node's built-in test runner, preinstalled on the runner).
+      - name: Run unit tests
+        run: node --test tests/*.test.js
       # Cache-busting: stamp asset URLs with the commit SHA so browsers fetch
       # fresh app.js/app.css after every deploy instead of a stale cached copy.
       - name: Stamp asset version
         run: sed -i "s/__ASSET_V__/${GITHUB_SHA::7}/g" index.html
       # Server-side files have no business on the public site — the SQL
-      # documents the schema and rate-limit internals.
+      # documents the schema and rate-limit internals; tests are dev-only.
       - name: Strip non-site files
-        run: rm -f supabase-migration*.sql
+        run: rm -rf supabase-migration*.sql tests
       - uses: actions/upload-pages-artifact@v3
         with:
           path: '.'
