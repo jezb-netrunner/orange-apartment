@@ -112,7 +112,7 @@
         <div class="field"><label for="m-phone">Phone <span style="font-weight:400;color:var(--muted)">(optional)</span></label><input type="text" id="m-phone" maxlength="30" placeholder="e.g. 0917 123 4567"></div>
         <div class="field"><label for="m-email">Email <span style="font-weight:400;color:var(--muted)">(optional)</span></label><input type="email" id="m-email" maxlength="120" placeholder="e.g. tenant@email.com"></div>
         <div class="field"><label for="m-movein">Move-in Date <span style="font-weight:400;color:var(--muted)">(optional)</span></label><input type="date" id="m-movein"><div class="field-hint">Reckoning date for billing cycles and paid-through dates.</div></div>
-        <div class="field"><label for="m-floor">Floor / Group <span style="font-weight:400;color:var(--muted)">(optional)</span></label><input type="text" id="m-floor" maxlength="40" placeholder="e.g. 3rd Floor"></div>
+        <div class="field"><label for="m-floor">Floor / Group <span style="font-weight:400;color:var(--muted)">(optional)</span></label><input type="text" id="m-floor" maxlength="40" placeholder="e.g. 3rd Floor" list="m-floor-list" autocomplete="off"><datalist id="m-floor-list"></datalist></div>
         <div class="field full">
           <label for="m-billing">Billing Model</label>
           <select id="m-billing" onchange="onBillingModelChange()">

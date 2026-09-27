@@ -381,3 +381,92 @@ test('primary template is order-independent; waived-but-billed cycles count; due
   const d = tenant({ move_in_date: '2026-09-20', templates: [rentT({ dayOfMonth: 20 })], bills: [bill({ due: '2026-09-20', tmplId: 'T1', period: '2026-09' })] });
   assert.equal(BC.reconcileTenant(d, { today: '2026-09-20' }).charges[0].status, 'current');
 });
+
+// ── Round-2 review regressions ──
+const paidBill = (ym, over) => bill(Object.assign({ due: ym + '-05', status: 'paid', paidDate: ym + '-05' }, over || {}));
+const months = (from, to) => BC.ymRange(from, to);
+
+test('a charge added mid-tenancy is reckoned from when it was set up, not from move-in', () => {
+  const t = tenant({ move_in_date: '2026-01-10',
+    templates: [rentT({ dayOfMonth: 10 }), { id: 'P', label: 'Parking', amount: 500, dayOfMonth: 10, since: '2026-09' }],
+    bills: months('2026-01', '2026-09').map(ym => paidBill(ym, { due: ym + '-10', paidDate: ym + '-10' })) });
+  const r = BC.reconcileTenant(t, { today: '2026-09-27', leadDays: 3 });
+  const park = r.charges.find(c => c.tmplId === 'P');
+  assert.equal(park.startYM, '2026-09');
+  assert.deepEqual(park.missing.map(m => m.period), ['2026-09']);
+  assert.equal(park.arrears, 500);
+  // A legacy template with no `since` and no bills: nothing before today's cycle.
+  delete t.templates[1].since;
+  const park2 = BC.reconcileTenant(t, { today: '2026-09-27', leadDays: 3 }).charges.find(c => c.tmplId === 'P');
+  assert.equal(park2.startYM, '2026-09');
+  // The main rent is still reckoned from move-in.
+  assert.equal(r.charges.find(c => c.tmplId === 'T1').startYM, '2026-01');
+});
+
+test('hand-typed history under other labels counts as the rent cycle; balances do not', () => {
+  const t = tenant({ move_in_date: '2026-03-01', templates: [rentT({ dayOfMonth: 1 })],
+    bills: months('2026-03', '2026-05').map(ym => paidBill(ym, { label: 'Upa - ' + ym, due: ym + '-01' }))
+      .concat(months('2026-06', '2026-09').map(ym => paidBill(ym, { label: 'Monthly Bill ' + ym, due: ym + '-01' }))) });
+  const c = BC.reconcileTenant(t, { today: '2026-09-15', leadDays: 3 }).charges[0];
+  assert.equal(c.status, 'current');
+  assert.equal(c.missing.length, 0);
+  assert.equal(c.arrears, 0);
+  // A carried-over balance is not "the rent" for its month.
+  const t2 = tenant({ move_in_date: '2026-09-01', templates: [rentT({ dayOfMonth: 1, postedThrough: '2026-08' })],
+    bills: [bill({ label: 'Rent balance from August', amount: 1500, due: '2026-09-03' })] });
+  assert.equal(BC.templateBillExists(t2, t2.templates[0], '2026-09'), false);
+});
+
+test('a rate change keeps past cycles at the old price and never double-posts a hand-typed rent', () => {
+  const tmpl = rentT({ amount: 7000, rates: [{ until: '2026-08', amount: 6000 }] });
+  assert.equal(BC.tmplRateAt(tmpl, '2026-07'), 6000);
+  assert.equal(BC.tmplRateAt(tmpl, '2026-09'), 7000);
+  const t = tenant({ move_in_date: '2026-03-05', templates: [tmpl],
+    bills: months('2026-03', '2026-09').filter(ym => ym !== '2026-07').map(ym => paidBill(ym)) });
+  const c = BC.reconcileTenant(t, { today: '2026-09-20', leadDays: 3 }).charges[0];
+  assert.deepEqual(c.missing.map(m => [m.period, m.amount]), [['2026-07', 6000]]);
+  assert.equal(c.arrears, 6000);
+  const fill = BC.backfillCycles(t, 'T1', ['2026-07']);
+  assert.equal(fill.added[0].amount, 6000);
+  // "Rent - October" ₱6,000 typed before the raise counts as October's rent.
+  const t3 = tenant({ templates: [rentT({ amount: 7000, dayOfMonth: 1, postedThrough: '2026-09', rates: [{ until: '2026-09', amount: 6000 }] })],
+    bills: [bill({ label: 'Rent - October', amount: 6000, due: '2026-10-01', status: 'paid', paidDate: '2026-09-15' })] });
+  assert.equal(BC.planAutoPost(t3, { today: '2026-09-28', leadDays: 5, uid }).bills.length, 0);
+});
+
+test('a billed cycle falls due on its bill\'s date, not the template\'s current day', () => {
+  const t = tenant({ move_in_date: '2026-09-01', templates: [rentT({ dayOfMonth: 28 })],
+    bills: [bill({ due: '2026-09-05', tmplId: 'T1', period: '2026-09' })] });
+  const c = BC.reconcileTenant(t, { today: '2026-09-27', leadDays: 0 }).charges[0];
+  assert.equal(c.status, 'behind');
+  assert.equal(c.arrears, 6000);
+});
+
+test('an old name never lets one charge claim another charge\'s bills', () => {
+  const t = tenant({ move_in_date: '2026-03-05',
+    templates: [rentT({ aliases: ['Parking'] }), { id: 'P', label: 'Parking', amount: 500, dayOfMonth: 5 }],
+    bills: months('2026-03', '2026-09').filter(ym => ym !== '2026-07').map(ym => paidBill(ym))
+      .concat(months('2026-03', '2026-09').map(ym => paidBill(ym, { label: 'Parking', amount: 500 }))) });
+  const rent = BC.reconcileTenant(t, { today: '2026-09-20', leadDays: 3 }).charges.find(c => c.tmplId === 'T1');
+  assert.deepEqual(rent.missing.map(m => m.period), ['2026-07']);
+  assert.equal(BC.templateBillExists(t, t.templates[0], '2026-07'), false);
+});
+
+test('a pending/₱0 rent never hands the advance role to another charge', () => {
+  const t = { billing_model: 'inclusive', templates: [
+    { id: 'R', label: 'Monthly Rent (All-Inclusive)', amount: 0, pendingAmount: true, dayOfMonth: 1 },
+    { id: 'P', label: 'Parking', amount: 500, dayOfMonth: 1 }] };
+  assert.equal(BC.primaryTemplate(t), null);
+  // With no rent-labelled charge at all, the all-inclusive charge still leads.
+  assert.equal(BC.primaryTemplate({ billing_model: 'inclusive', templates: [{ id: 'X', label: 'Room + utilities', amount: 7000 }] }).id, 'X');
+});
+
+test('floors match regardless of case and spacing', () => {
+  const mk = (id, floor) => tenant({ id, floor, move_in_date: '2026-01-01', bills: [paidBill('2026-07', { amount: 10000 })] });
+  const is = BC.computeIncomeStatement({ tenants: [mk('a', '3rd Floor'), mk('b', '3rd Floor'), mk('c', '2nd Floor')],
+    expenses: [{ expense_date: '2026-07-10', category: 'repairs', amount: 8000, floor: '3rd floor' },
+               { expense_date: '2026-07-11', category: 'repairs', amount: 2000, floor: ' 3RD  FLOOR ' }],
+    from: '2026-07', to: '2026-07', basis: 'accrual', prorate: false, allocation: 'headcount' });
+  assert.deepEqual(is.floors.slice().sort(), ['2nd Floor', '3rd Floor']);
+  assert.equal(is.columns['3rd Floor'].net, 10000);
+});

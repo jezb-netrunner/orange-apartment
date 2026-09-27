@@ -13,6 +13,11 @@
 //                      auto-post never goes at or before it, so a bill the
 //                      admin deletes is never silently recreated
 //   template.skip      ['YYYY-MM', …] cycles the admin waived
+//   template.aliases   labels the charge had before a rename
+//   template.since     'YYYY-MM' cycle a charge was set up in (a charge
+//                      that isn't the main rent is reckoned from then)
+//   template.rates     [{until:'YYYY-MM', amount}] earlier amounts, so a
+//                      rate change never reprices past cycles
 //
 // Recurring bills follow an ANNUITY-DUE schedule: each cycle's bill falls
 // due at the START of the cycle it pays for (rent in advance, consumed
@@ -81,7 +86,7 @@ const BILL_CATEGORIES = [
 // Categories are inferred from the label so existing data just works.
 function billCategory(b) {
   const l = String((b && b.label) || '').toLowerCase();
-  if(/rent/.test(l)) return 'rent';
+  if(/rent|\bupa\b/.test(l)) return 'rent';
   if(/electric|kuryente|power|beneco|meralco|water|tubig|internet|wi-?fi|gas\b|cable|utilit/.test(l)) return 'utilities';
   return 'other';
 }
@@ -124,6 +129,22 @@ function tmplDay(tmpl) {
   return d >= 1 && d <= 31 ? d : 1;
 }
 function tmplRate(tmpl) { return (!tmpl || tmpl.pendingAmount) ? 0 : r2(tmpl.amount); }
+// The amount in force for cycle `ym`: an earlier rate from the template's
+// history when the cycle predates a rate change, else the current rate.
+function tmplRateAt(tmpl, ym) {
+  if(!tmpl || tmpl.pendingAmount) return 0;
+  let best = null;
+  (Array.isArray(tmpl.rates) ? tmpl.rates : []).forEach(r => {
+    if(r && isYM(r.until) && ym <= r.until && (!best || r.until < best.until)) best = r;
+  });
+  return best ? r2(best.amount) : tmplRate(tmpl);
+}
+// Every amount the charge has had (current first).
+function _tmplRates(tmpl) {
+  const out = [tmplRate(tmpl)];
+  (Array.isArray(tmpl && tmpl.rates) ? tmpl.rates : []).forEach(r => { if(r && _num(r.amount) > 0) out.push(r2(r.amount)); });
+  return out.filter(v => v > 0);
+}
 function isAutoTemplate(tmpl) { return !!tmpl && tmpl.auto !== false; }
 function moveInOf(t) { return isoOrEmpty(t && t.move_in_date); }
 
@@ -139,13 +160,19 @@ function templateDueDate(t, tmpl, ym) {
 // The tenant's main recurring charge — the one advance payments roll into.
 // Order-independent: among rent charges the one labelled like monthly rent,
 // then the highest rate (a "Parking" or "Rent penalty" listed first can't
-// take over); all-inclusive tenants fall back to their highest charge.
+// take over). An all-inclusive tenant with no rent-labelled charge at all
+// ("Room + utilities") falls back to their highest charge — but a rent
+// charge that is merely pending or ₱0 never hands its role to another
+// charge (a rent payment must not turn into months of prepaid parking).
 function primaryTemplate(t) {
-  const list = ((t && t.templates) || []).filter(x => x && tmplRate(x) > 0);
+  const all = ((t && t.templates) || []).filter(Boolean);
+  const list = all.filter(x => tmplRate(x) > 0);
   const score = x => (/^\s*(monthly\s+)?rent\b/i.test(x.label || '') ? 1 : 0);
   const best = arr => arr.slice().sort((a, b) => score(b) - score(a) || tmplRate(b) - tmplRate(a))[0] || null;
-  return best(list.filter(x => billCategory(x) === 'rent'))
-      || (t && t.billing_model === 'inclusive' ? best(list) : null);
+  const rent = best(list.filter(x => billCategory(x) === 'rent'));
+  if(rent) return rent;
+  if(all.some(x => billCategory(x) === 'rent')) return null;
+  return t && t.billing_model === 'inclusive' ? best(list) : null;
 }
 
 // Template ids that still exist on the tenant. A bill tagged with a
@@ -156,17 +183,34 @@ function _liveIds(t) { return new Set(((t && t.templates) || []).map(x => x && x
 function _labelsOf(tmpl) {
   return [tmpl.label].concat(Array.isArray(tmpl.aliases) ? tmpl.aliases : []).map(normLabel).filter(Boolean);
 }
+// Current labels of every template on the tenant.
+function _curLabels(t) {
+  return new Set(((t && t.templates) || []).map(x => x && normLabel(x.label)).filter(Boolean));
+}
 // Does bill `b` belong to template `tmpl`? Bills tagged with a live
-// template follow their tag; everything else matches by label.
-function billOfTemplate(b, tmpl, liveIds) {
+// template follow their tag; everything else matches by label. A label
+// that is another charge's CURRENT name belongs to that charge only — an
+// old name (alias) never lets one charge claim another charge's bills.
+function billOfTemplate(b, tmpl, liveIds, curLabels) {
   if(!b) return false;
   if(b.tmplId && liveIds.has(b.tmplId)) return b.tmplId === tmpl.id;
-  return _labelsOf(tmpl).includes(normLabel(b.label));
+  const l = normLabel(b.label);
+  if(!l) return false;
+  if(l === normLabel(tmpl.label)) return true;
+  if(curLabels && curLabels.has(l)) return false;
+  return _labelsOf(tmpl).includes(l);
 }
-const _NOT_MONTHLY_RENT = /deposit|advance|penalt|late|fee|surcharge|interest|reserv/i;
-function _isLooseRent(b, t, liveIds, labels) {
-  return !!b && !(b.tmplId && liveIds.has(b.tmplId)) && !labels.has(normLabel(b.label))
-    && billCategory(b) === 'rent' && !_NOT_MONTHLY_RENT.test(b.label || '');
+const _NOT_MONTHLY_RENT = /deposit|advance|penalt|late|fee|surcharge|interest|reserv|balance|arrear|carr(y|ied)|previous|back ?rent|past ?due|utang/i;
+// A hand-typed bill that stands for the main rent in its month: untagged,
+// named after no charge, not a deposit/penalty/fee — and either labelled
+// as rent ("Rent - March", "Upa - March") or, when it isn't a utility,
+// for exactly an amount the rent has had ("Monthly Bill - March" ₱6,000).
+function _isLooseRent(b, t, liveIds, labels, rates) {
+  if(!b || (b.tmplId && liveIds.has(b.tmplId)) || labels.has(normLabel(b.label))) return false;
+  if(_NOT_MONTHLY_RENT.test(b.label || '')) return false;
+  const cat = billCategory(b);
+  if(cat === 'rent') return true;
+  return cat !== 'utilities' && !!rates && rates.includes(r2(b.amount));
 }
 function _allLabels(t) {
   const set = new Set();
@@ -175,12 +219,13 @@ function _allLabels(t) {
 }
 
 // Bills that belong to a template (see billOfTemplate). With `fallback`, a
-// period that has no such bill also accepts one untagged rent-category
-// bill whose label matches no template — so "Rent - March" typed by hand
-// still counts as March's rent when reconciling the primary charge.
+// period that has no such bill also accepts one hand-typed rent bill (see
+// _isLooseRent) — so "Rent - March" typed by hand still counts as March's
+// rent when reconciling the primary charge.
 function templateBills(t, tmpl, fallback) {
   const bills = (t && t.bills) || [];
   const liveIds = _liveIds(t);
+  const cur = _curLabels(t);
   const byPeriod = new Map();
   const all = [];
   const add = (b, i) => {
@@ -189,11 +234,12 @@ function templateBills(t, tmpl, fallback) {
     if(!byPeriod.has(p)) byPeriod.set(p, []);
     byPeriod.get(p).push(i);
   };
-  bills.forEach((b, i) => { if(billOfTemplate(b, tmpl, liveIds)) add(b, i); });
+  bills.forEach((b, i) => { if(billOfTemplate(b, tmpl, liveIds, cur)) add(b, i); });
   if(fallback) {
     const labels = _allLabels(t);
+    const rates = _tmplRates(tmpl);
     bills.forEach((b, i) => {
-      if(!_isLooseRent(b, t, liveIds, labels)) return;
+      if(!_isLooseRent(b, t, liveIds, labels, rates)) return;
       const p = billPeriod(b);
       if(p && !byPeriod.has(p)) add(b, i);
     });
@@ -203,17 +249,19 @@ function templateBills(t, tmpl, fallback) {
 
 // Is cycle `ym` of `tmpl` already billed? Used before creating a bill
 // (auto-post, generate, advance, backfill) so nothing is billed twice.
-// For the primary rent charge a hand-typed untagged rent bill of the same
-// amount in that month also counts ("Rent – September" ₱6,000).
+// For the primary rent charge a hand-typed rent bill in that month also
+// counts, whatever its amount — the same rule reconciliation uses, so a
+// month the checker counts as billed is never billed a second time.
 function templateBillExists(t, tmpl, ym) {
   const bills = (t && t.bills) || [];
   const liveIds = _liveIds(t);
-  if(bills.some(b => b && billPeriod(b) === ym && billOfTemplate(b, tmpl, liveIds))) return true;
+  const cur = _curLabels(t);
+  if(bills.some(b => b && billPeriod(b) === ym && billOfTemplate(b, tmpl, liveIds, cur))) return true;
   const prim = primaryTemplate(t);
   if(!prim || prim.id !== tmpl.id) return false;
   const labels = _allLabels(t);
-  const rate = tmplRate(tmpl);
-  return bills.some(b => billPeriod(b) === ym && _isLooseRent(b, t, liveIds, labels) && r2(b.amount) === rate);
+  const rates = _tmplRates(tmpl);
+  return bills.some(b => billPeriod(b) === ym && _isLooseRent(b, t, liveIds, labels, rates));
 }
 
 // Raise postedThrough only across cycles that really are billed (or
@@ -234,7 +282,7 @@ function makeTemplateBill(tmpl, ym, due) {
   const pending = !!tmpl.pendingAmount;
   return {
     label: String(tmpl.label || ''),
-    amount: pending ? 0 : tmplRate(tmpl),
+    amount: pending ? 0 : tmplRateAt(tmpl, ym),
     due,
     status: 'unpaid',
     remark: pending ? 'Pending amount — to be updated' : '',
@@ -318,6 +366,13 @@ function cycleWindow(moveIn, ym) {
 //   missing        started cycles with no bill that aren't waived
 //   excess         logged overpayment sitting on individual bills
 // Returns null when the tenant has no move-in date (reconciliation off).
+function _reckonFrom(tmpl, byPeriod, isPrimary, miYM, today) {
+  if(isPrimary) return miYM;
+  const first = Array.from(byPeriod.keys()).filter(isYM).sort()[0];
+  const cands = [first, tmplRate(tmpl) > 0 && isYM(tmpl.since) ? tmpl.since : ''].filter(isYM).sort();
+  const from = cands.length ? cands[0] : ymOf(today);
+  return from < miYM ? miYM : from;
+}
 function reconcileCharge(t, tmpl, opts) {
   const mi = moveInOf(t);
   if(!mi || !tmpl) return null;
@@ -330,41 +385,51 @@ function reconcileCharge(t, tmpl, opts) {
   const rate = tmplRate(tmpl);
   const miYM = ymOf(mi);
 
+  // Where the charge is reckoned from. The main rent: the move-in cycle
+  // (the reckoning date). Any other charge didn't necessarily exist then,
+  // so: its first bill or the cycle it was set up in, whichever is
+  // earlier — never before move-in; with neither, the current cycle.
+  // A variable charge (pending amount) only from its first bill.
+  const startYM = _reckonFrom(tmpl, byPeriod, isPrimary, miYM, today);
+
   // A real bill always sets the cycle's cost (even in a waived month);
-  // only an unbilled waived cycle is free.
+  // only an unbilled waived cycle is free, and an unbilled one costs the
+  // rate in force back then.
   const cycleCost = ym => {
     const idx = byPeriod.get(ym);
     if(idx && idx.length) return r2(idx.reduce((s, i) => s + _num(bills[i].amount), 0));
-    return skip.has(ym) ? 0 : rate;
+    return skip.has(ym) ? 0 : tmplRateAt(tmpl, ym);
+  };
+  // A billed cycle falls due when its bill does (the admin may have moved
+  // it); an unbilled one on the template's day.
+  const cycleDue = ym => {
+    const idx = byPeriod.get(ym) || [];
+    const dues = idx.map(i => bills[i]).filter(b => isISODate(b.due));
+    const open = dues.filter(b => billOpen(b) > EPS);
+    const pick = (open.length ? open : dues).map(b => String(b.due).slice(0, 10)).sort()[0];
+    return pick || templateDueDate(t, tmpl, ym);
   };
 
   const cycles = [];
-  for(let ym = miYM, i = 0; i < MAX_CYCLES; i++, ym = addYM(ym, 1)) {
-    const due = templateDueDate(t, tmpl, ym);
+  for(let ym = startYM, i = 0; i < MAX_CYCLES; i++, ym = addYM(ym, 1)) {
+    const due = cycleDue(ym);
     if(cycleWindow(mi, ym).start > today && due > today) break;
     const idx = byPeriod.get(ym) || [];
     cycles.push({ ym, due, cost: cycleCost(ym), billed: idx.length > 0, waived: skip.has(ym) && !idx.length });
   }
 
   // A cycle is "missing" once its bill should have been posted: due date
-  // within the posting lead window (or already past). Fixed charges are
-  // reckoned from move-in; a variable charge (utility with a pending
-  // amount) only from its first bill — it has no amount to reconcile and
-  // is often set up long after the tenant moved in.
+  // within the posting lead window (or already past).
   const lead = Math.max(0, Math.floor(Number(opts.leadDays) || 0));
-  let checkFrom = miYM;
-  if(rate <= 0) {
-    const periods = Array.from(byPeriod.keys()).filter(isYM).sort();
-    checkFrom = periods.length ? (periods[0] > miYM ? periods[0] : miYM) : ymOf(today);
-  }
   const missing = cycles
-    .filter(c => c.ym >= checkFrom && !c.billed && !c.waived && diffDays(today, c.due) <= lead)
-    .map(c => ({ period: c.ym, due: c.due, amount: rate }));
+    .filter(c => !c.billed && !c.waived && diffDays(today, c.due) <= lead)
+    .map(c => ({ period: c.ym, due: c.due, amount: tmplRateAt(tmpl, c.ym) }));
 
-  // Only bills that fall in a move-in cycle count toward coverage: bills
-  // dated before the move-in month, or with no date at all, can't be placed
-  // on the cycle timeline (they're reported, not silently counted).
-  const inScope = all.filter(i => { const p = billPeriod(bills[i]); return p && p >= miYM; });
+  // Only bills that fall in a counted cycle go toward coverage: bills dated
+  // before it (before move-in, or before the charge was reckoned from), or
+  // with no date at all, can't be placed on the cycle timeline (they're
+  // reported, not silently counted).
+  const inScope = all.filter(i => { const p = billPeriod(bills[i]); return p && p >= startYM; });
   const outScope = all.filter(i => !inScope.includes(i));
   const ignoredCash = r2(outScope.reduce((s, i) => s + billSettled(bills[i]), 0));
 
@@ -380,20 +445,21 @@ function reconcileCharge(t, tmpl, opts) {
   });
 
   const res = {
-    tmplId: tmpl.id, label: tmpl.label, rate, moveIn: mi,
+    tmplId: tmpl.id, label: tmpl.label, rate, moveIn: mi, startYM,
     variable: rate <= 0, cyclesStarted: cycles.length,
     missing, excess, excessBills, ignored: outScope.length, ignoredCash,
     covered: 0, remainder: 0, paidThrough: '', arrears: 0, credit: 0, pool: 0,
     nextDue: '', nextAmount: 0, aheadCycles: 0, status: 'variable',
-    openCovered: []
+    openCovered: [], dues: {}
   };
+  cycles.forEach(c => { res.dues[c.ym] = c.due; });
   if(res.variable) return res; // pending-amount charges vary monthly: gap check only
 
   const pool = r2(inScope.reduce((s, i) => s + billSettled(bills[i]), 0));
   res.pool = pool;
 
   // Consume the pool forward, cycle by cycle (advances roll into future cycles).
-  let rem = pool, covered = 0, ym = miYM;
+  let rem = pool, covered = 0, ym = startYM;
   const cap = cycles.length + 240;
   for(let i = 0; i < cap; i++, ym = addYM(ym, 1)) {
     const cost = cycleCost(ym);
@@ -404,9 +470,9 @@ function reconcileCharge(t, tmpl, opts) {
   }
   res.covered = covered;
   res.remainder = rem;
-  const firstOpen = addYM(miYM, covered);
+  const firstOpen = addYM(startYM, covered);
   res.paidThrough = covered > 0 ? addDaysISO(cycleWindow(mi, firstOpen).start, -1) : '';
-  res.nextDue = templateDueDate(t, tmpl, firstOpen);
+  res.nextDue = cycleDue(firstOpen);
   res.nextAmount = r2(Math.max(0, cycleCost(firstOpen) - rem));
   res.aheadCycles = covered - cycles.length;
 
@@ -419,7 +485,7 @@ function reconcileCharge(t, tmpl, opts) {
   // Open bills whose cycle the pooled cash already covers — "Apply credit"
   // settles them by moving the overpayment onto them.
   for(let i = 0; i < covered; i++) {
-    const p = addYM(miYM, i);
+    const p = addYM(startYM, i);
     (byPeriod.get(p) || []).forEach(bi => { if(billOpen(bills[bi]) > EPS) res.openCovered.push(bi); });
   }
   return res;
@@ -527,12 +593,13 @@ function applyCredit(t, tmplId, opts) {
   if(!tmpl || tmplRate(tmpl) <= 0) return null; // variable charges have no fixed amount to be "over"
   const primary = primaryTemplate(t);
   const src = { bills: _clone(t.bills || []), templates: t.templates, billing_model: t.billing_model, move_in_date: t.move_in_date };
-  const { all } = templateBills(src, tmpl, primary === tmpl);
+  const { all, byPeriod } = templateBills(src, tmpl, primary === tmpl);
   const chunks = [];
   // Same scope as the checker: with a move-in date, only bills in a
-  // move-in cycle (the ones whose overpayment the checker reports).
+  // counted cycle (the ones whose overpayment the checker reports).
   const mi = moveInOf(t);
-  all.filter(i => !mi || (billPeriod(src.bills[i]) && billPeriod(src.bills[i]) >= ymOf(mi))).forEach(i => {
+  const from = mi && isISODate(opts.today) ? _reckonFrom(tmpl, byPeriod, primary === tmpl, ymOf(mi), String(opts.today).slice(0, 10)) : (mi ? ymOf(mi) : '');
+  all.filter(i => !mi || (billPeriod(src.bills[i]) && billPeriod(src.bills[i]) >= from)).forEach(i => {
     const b = src.bills[i];
     if(_num(b.amount) <= 0) return;
     let over = r2(billTotalPaid(b) - _num(b.amount));
@@ -650,6 +717,15 @@ function billRecognition(t, b, prorate) {
 const EXPENSE_CATEGORY_KEYS = ['electricity', 'water', 'internet', 'maintenance', 'taxes', 'other'];
 function _expCat(k) { return EXPENSE_CATEGORY_KEYS.includes(k) ? k : 'other'; }
 function floorKey(t) { return String((t && t.floor) || '').trim(); }
+// Floors compare by a folded key (case and spacing ignored), so '3rd floor',
+// '3rd  Floor' and '3RD FLOOR ' are one floor, shown by the first spelling
+// seen. floorCanon(spellings) → fn(spelling) → that canonical spelling.
+function floorNorm(s) { return String(s == null ? '' : s).trim().replace(/\s+/g, ' ').toLowerCase(); }
+function floorCanon(spellings) {
+  const m = new Map();
+  (spellings || []).forEach(s => { const k = floorNorm(s); if(k && !m.has(k)) m.set(k, String(s).trim().replace(/\s+/g, ' ')); });
+  return s => m.get(floorNorm(s)) || '';
+}
 function _emptyRev() { return { rent: 0, utilities: 0, other: 0, total: 0 }; }
 function _emptyExp() { const o = { total: 0 }; EXPENSE_CATEGORY_KEYS.forEach(k => { o[k] = 0; }); return o; }
 function _addRev(o, cat, v) { o[cat] = r2(o[cat] + v); o.total = r2(o.total + v); }
@@ -711,9 +787,11 @@ function computeIncomeStatement(params) {
   const accrual = P.basis !== 'cash';
 
   // Floors: every tenant floor plus any floor an expense is tagged with.
+  const canon = P.floorCanon || floorCanon(tenants.map(t => t && t.floor).concat(expenses.map(x => x && x.floor)));
+  const fk = t => canon(t && t.floor);
   const floorSet = new Set();
-  tenants.forEach(t => floorSet.add(floorKey(t)));
-  expenses.forEach(x => { const f = String(x.floor || '').trim(); if(f) floorSet.add(f); });
+  tenants.forEach(t => floorSet.add(fk(t)));
+  expenses.forEach(x => { const f = canon(x.floor); if(f) floorSet.add(f); });
   const floors = Array.from(floorSet);
 
   const col = () => ({ revenue: _emptyRev(), direct: _emptyExp(), shared: _emptyExp(), expenses: 0, net: 0 });
@@ -723,7 +801,7 @@ function computeIncomeStatement(params) {
 
   // Revenue
   tenants.forEach(t => {
-    const f = floorKey(t);
+    const f = fk(t);
     (t.bills || []).forEach(b => {
       if(!b) return;
       const cat = billCategory(b);
@@ -755,7 +833,7 @@ function computeIncomeStatement(params) {
     const w = {};
     if(P.allocation === 'headcount') {
       floors.forEach(f => { w[f] = 0; });
-      tenants.forEach(t => { if(occupiedInMonth(t, ym)) w[floorKey(t)] += 1; });
+      tenants.forEach(t => { if(occupiedInMonth(t, ym)) w[fk(t)] += 1; });
     } else if(P.allocation === 'revenue') {
       floors.forEach(f => { w[f] = Math.max(0, revByMonth[f][ym] || 0); });
       if(!floors.some(f => w[f] > 0)) floors.forEach(f => { w[f] = Math.max(0, periodRev[f]); });
@@ -773,7 +851,7 @@ function computeIncomeStatement(params) {
     const amt = r2(x.amount);
     if(!amt) return;
     const cat = _expCat(x.category);
-    const tag = String(x.floor || '').trim();
+    const tag = canon(x.floor);
     totalExpByMonth[ym] = r2(totalExpByMonth[ym] + amt);
     if(tag) {
       _addExp(total.direct, cat, amt);
@@ -849,7 +927,7 @@ function computeIncomeStatement(params) {
     return { billed, collected, outstanding, receivable, unearned, billedAhead, credits,
       rate: billed > 0 ? Math.round(collected / billed * 100) : null };
   };
-  floors.forEach(f => { memo[f] = memoFor(tenants.filter(t => floorKey(t) === f)); });
+  floors.forEach(f => { memo[f] = memoFor(tenants.filter(t => fk(t) === f)); });
   memo.__total = memoFor(tenants);
 
   const undatedTotal = _emptyRev();
@@ -922,9 +1000,9 @@ function paymentReliability(tenants, fromYM, toYM, today) {
 const BillingCore = {
   isYM, isISODate, isoOrEmpty, ymOf, addYM, daysInMonth, dateInMonth, lastDayOf, diffDays, addDaysISO, ymRange, r2,
   BILL_CATEGORIES, billCategory, billTotalPaid, billRemaining, billSettled, billOpen, billPeriod, normLabel, billCashEvents,
-  tmplDay, tmplRate, isAutoTemplate, moveInOf, templateDueDate, primaryTemplate, templateBills, templateBillExists, makeTemplateBill,
+  tmplDay, tmplRate, tmplRateAt, isAutoTemplate, moveInOf, templateDueDate, primaryTemplate, templateBills, templateBillExists, makeTemplateBill,
   billOfTemplate, bumpPostedThrough, planAutoPost, cycleWindow, reconcileCharge, reconcileTenant, allocatePayment, applyCredit, backfillCycles, waiveCycles,
-  billCoverageWindow, billRecognition, occupiedInMonth, floorKey, computeIncomeStatement, agingBuckets, paymentReliability,
+  billCoverageWindow, billRecognition, occupiedInMonth, floorKey, floorNorm, floorCanon, computeIncomeStatement, agingBuckets, paymentReliability,
   EXPENSE_CATEGORY_KEYS
 };
 if(typeof module !== 'undefined' && module.exports) module.exports = BillingCore;

@@ -58,6 +58,16 @@ Insights and Settings sit under *More*):
   billed (post them or waive them in one tap), and overpayments not yet
   applied (**Apply credit** moves them forward with their original payment
   dates, so cash reports don't change).
+  The main rent is reckoned from move-in; any other charge (parking, a
+  fixed utility) only from its first bill or the month it was set up, so
+  adding a charge never creates back-dated arrears. Hand-typed rent bills
+  ("Rent – March", "Upa – March", or any non-utility bill for exactly the
+  rent amount) count as that month's rent; balances, deposits and
+  penalties don't. Changing a charge's amount keeps the old amount for
+  earlier cycles, and a cycle that has a bill falls due on that bill's date.
+- **Mark as unpaid** on a bill its logged payments settle also removes
+  those payments (the way to undo a payment recorded by mistake);
+  changing a bill's amount re-syncs its paid status with what was received.
 - Tenants **without a move-in date** keep working exactly as before —
   their bills still post on their due dates; reconciliation simply stays
   off (and nothing is written) until a move-in date is set.
@@ -76,6 +86,8 @@ Insights and Settings sit under *More*):
 - **Per floor:** floor-tagged expenses are direct costs; building-wide
   expenses are split by headcount (tenants in residence each month) or by
   revenue share, or left unallocated. Archived tenants' history counts.
+  Floor labels match regardless of case and spacing ("3rd floor" =
+  "3rd Floor"); typed floors snap to the spelling already in use.
 
 **For tenants** (access code or one-tap portal link):
 - Their bills, balance, payment history, and printable statement.
