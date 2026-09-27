@@ -4139,7 +4139,8 @@ function buildTimeline(bills, showAll) {
     '<div class="timeline-month-group"><div class="timeline-month-label">'+month+'</div>'+
     groups[month].map(b=>
       '<div class="timeline-item"><div class="timeline-dot"></div><div class="timeline-info">'+
-      '<div class="timeline-label">'+esc(b.label)+'</div>'+
+      // Cycle label so several bills paid on one day (advance payments) read apart.
+      '<div class="timeline-label">'+esc(b.label)+(isYM(b.period)?' <span style="font-weight:500;color:var(--muted)">· '+fmtYM(b.period,'short')+'</span>':'')+'</div>'+
       '<div class="timeline-date">'+(b.paidDate?'Paid '+formatDate(b.paidDate):b.due?'Billed '+formatDate(b.due):'')+'</div>'+
       ((b.payments&&b.payments.length)?b.payments.map(p=>'<div style="font-size:11px;color:var(--muted);margin-top:2px;">&#8369;'+Number(p.amount).toLocaleString()+' &nbsp;&middot;&nbsp; '+formatDate(p.date)+(p.note?' &nbsp;&middot;&nbsp; '+esc(p.note):'')+' </div>').join(''):'')+
       (b.remark?'<div style="font-size:11px;color:var(--muted);margin-top:3px;font-style:italic;">'+esc(b.remark)+'</div>':'')+
