@@ -3,7 +3,15 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://bxzfqjspoyvwosmpgeof.supabase.co; img-src 'self' data:; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self';">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://bxzfqjspoyvwosmpgeof.supabase.co; img-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self';">
+<!-- Clickjacking guard. GitHub Pages can't send X-Frame-Options or a CSP
+     frame-ancestors header (browsers ignore frame-ancestors in a <meta>),
+     so refuse to render inside a frame on another site. -->
+<style id="antiframe">html{display:none !important}</style>
+<script>
+  if (window.self === window.top) { var s = document.getElementById('antiframe'); if (s) s.parentNode.removeChild(s); }
+  else { try { window.top.location = window.self.location.href; } catch (e) {} }
+</script>
 <meta name="referrer" content="no-referrer">
 <meta name="robots" content="noindex, nofollow">
 <meta name="description" content="Tenant billing portal for Orange Apartment, Baguio">

@@ -137,11 +137,15 @@ function templateDueDate(t, tmpl, ym) {
 }
 
 // The tenant's main recurring charge — the one advance payments roll into.
+// Order-independent: among rent charges the one labelled like monthly rent,
+// then the highest rate (a "Parking" or "Rent penalty" listed first can't
+// take over); all-inclusive tenants fall back to their highest charge.
 function primaryTemplate(t) {
   const list = ((t && t.templates) || []).filter(x => x && tmplRate(x) > 0);
-  return list.find(x => billCategory(x) === 'rent')
-      || (t && t.billing_model === 'inclusive' ? list[0] : null)
-      || null;
+  const score = x => (/^\s*(monthly\s+)?rent\b/i.test(x.label || '') ? 1 : 0);
+  const best = arr => arr.slice().sort((a, b) => score(b) - score(a) || tmplRate(b) - tmplRate(a))[0] || null;
+  return best(list.filter(x => billCategory(x) === 'rent'))
+      || (t && t.billing_model === 'inclusive' ? best(list) : null);
 }
 
 // Template ids that still exist on the tenant. A bill tagged with a
@@ -159,8 +163,10 @@ function billOfTemplate(b, tmpl, liveIds) {
   if(b.tmplId && liveIds.has(b.tmplId)) return b.tmplId === tmpl.id;
   return _labelsOf(tmpl).includes(normLabel(b.label));
 }
+const _NOT_MONTHLY_RENT = /deposit|advance|penalt|late|fee|surcharge|interest|reserv/i;
 function _isLooseRent(b, t, liveIds, labels) {
-  return !!b && !(b.tmplId && liveIds.has(b.tmplId)) && !labels.has(normLabel(b.label)) && billCategory(b) === 'rent';
+  return !!b && !(b.tmplId && liveIds.has(b.tmplId)) && !labels.has(normLabel(b.label))
+    && billCategory(b) === 'rent' && !_NOT_MONTHLY_RENT.test(b.label || '');
 }
 function _allLabels(t) {
   const set = new Set();
@@ -248,12 +254,17 @@ function _defaultUid() {
 // ── AUTO-POST ─────────────────────────────────────────────────────────────
 // Which recurring bills should exist by now. Annuity due: a cycle's bill
 // posts `leadDays` before its due date so the tenant sees it in advance.
-// Only the current and next cycle are considered — past months are NEVER
-// created here (the reconciliation checker lists them for the admin).
-// On a template's first activation (no postedThrough yet) an already
-// overdue current cycle is also left to the checker rather than appearing
-// out of nowhere as an overdue bill.
+//
+// An active template (postedThrough within the last two months) catches up
+// every cycle since postedThrough whose posting window has opened — so a
+// month nobody opened the portal in is still billed. A template that was
+// never active, or was paused/restored after two months or more, starts at
+// the current cycle: an already-overdue current cycle is recorded as
+// handled but NOT posted (the checker lists it), so reactivation never
+// piles overdue bills onto a tenant. Months before that are never created.
+// postedThrough only ever advances one cycle at a time.
 // Returns { bills: [new bills], templates: updated copy, changed }.
+const CATCH_UP_LIMIT = 12;
 function planAutoPost(t, opts) {
   opts = opts || {};
   const out = { bills: [], templates: _clone((t && t.templates) || []), changed: false };
@@ -267,22 +278,22 @@ function planAutoPost(t, opts) {
   out.templates.forEach(tmpl => {
     if(!tmpl || !isAutoTemplate(tmpl) || !normLabel(tmpl.label)) return;
     if(!tmpl.id) { tmpl.id = uid(); out.changed = true; }
-    const firstRun = !isYM(tmpl.postedThrough);
+    const pt = isYM(tmpl.postedThrough) ? tmpl.postedThrough : '';
+    const stale = !pt || pt < addYM(cur, -2);
     const skip = new Set(Array.isArray(tmpl.skip) ? tmpl.skip : []);
-    [cur, addYM(cur, 1)].forEach(ym => {
-      if(mi && ym < ymOf(mi)) return;                         // before the tenancy
-      if(isYM(tmpl.postedThrough) && ym <= tmpl.postedThrough) return;
-      if(skip.has(ym)) return;
+    const last = addYM(cur, 1);
+    let ym = stale ? cur : addYM(pt, 1);
+    const mark = p => { if(!isYM(tmpl.postedThrough) || p > tmpl.postedThrough) { tmpl.postedThrough = p; out.changed = true; } };
+    for(let i = 0; i < CATCH_UP_LIMIT && ym <= last; i++, ym = addYM(ym, 1)) {
+      if(mi && ym < ymOf(mi)) { if(!stale) mark(ym); continue; }   // before the tenancy
+      if(skip.has(ym)) { mark(ym); continue; }                       // waived
       const due = templateDueDate(t, tmpl, ym);
-      if(diffDays(today, due) > lead) return;                  // not in the posting window yet
-      const mark = () => {
-        if(!isYM(tmpl.postedThrough) || ym > tmpl.postedThrough) { tmpl.postedThrough = ym; out.changed = true; }
-      };
-      if(templateBillExists({ bills: existing.concat(out.bills), templates: out.templates, billing_model: t.billing_model }, tmpl, ym)) { mark(); return; }
-      if(firstRun && due < today) return;
+      if(diffDays(today, due) > lead) break;                         // posting window not open yet
+      if(templateBillExists({ bills: existing.concat(out.bills), templates: out.templates, billing_model: t.billing_model }, tmpl, ym)) { mark(ym); continue; }
+      if(stale && due < today) { mark(ym); continue; }               // (re)activation: leave overdue to the checker
       out.bills.push(makeTemplateBill(tmpl, ym, due));
-      mark();
-    });
+      mark(ym);
+    }
   });
   if(out.bills.length) out.changed = true;
   return out;
@@ -319,10 +330,12 @@ function reconcileCharge(t, tmpl, opts) {
   const rate = tmplRate(tmpl);
   const miYM = ymOf(mi);
 
+  // A real bill always sets the cycle's cost (even in a waived month);
+  // only an unbilled waived cycle is free.
   const cycleCost = ym => {
-    if(skip.has(ym)) return 0;
     const idx = byPeriod.get(ym);
-    return idx && idx.length ? r2(idx.reduce((s, i) => s + _num(bills[i].amount), 0)) : rate;
+    if(idx && idx.length) return r2(idx.reduce((s, i) => s + _num(bills[i].amount), 0));
+    return skip.has(ym) ? 0 : rate;
   };
 
   const cycles = [];
@@ -330,7 +343,7 @@ function reconcileCharge(t, tmpl, opts) {
     const due = templateDueDate(t, tmpl, ym);
     if(cycleWindow(mi, ym).start > today && due > today) break;
     const idx = byPeriod.get(ym) || [];
-    cycles.push({ ym, due, cost: cycleCost(ym), billed: idx.length > 0, waived: skip.has(ym) });
+    cycles.push({ ym, due, cost: cycleCost(ym), billed: idx.length > 0, waived: skip.has(ym) && !idx.length });
   }
 
   // A cycle is "missing" once its bill should have been posted: due date
@@ -355,10 +368,12 @@ function reconcileCharge(t, tmpl, opts) {
   const outScope = all.filter(i => !inScope.includes(i));
   const ignoredCash = r2(outScope.reduce((s, i) => s + billSettled(bills[i]), 0));
 
-  // Overpayments logged on individual bills of this charge.
+  // Overpayments logged on individual bills of a FIXED charge. A variable
+  // (pending-amount) bill paid before its reading isn't overpaid — the
+  // money waits for the real amount.
   let excess = 0;
   const excessBills = [];
-  inScope.forEach(i => {
+  if(rate > 0) inScope.forEach(i => {
     const b = bills[i];
     const over = r2(billTotalPaid(b) - _num(b.amount));
     if(over > EPS) { excess = r2(excess + over); excessBills.push(i); }
@@ -382,7 +397,7 @@ function reconcileCharge(t, tmpl, opts) {
   const cap = cycles.length + 240;
   for(let i = 0; i < cap; i++, ym = addYM(ym, 1)) {
     const cost = cycleCost(ym);
-    if(cost <= EPS) { if(i >= cycles.length && !skip.has(ym)) break; covered++; continue; }
+    if(cost <= EPS) { if(i >= cycles.length && !(skip.has(ym) && !byPeriod.get(ym))) break; covered++; continue; }
     if(rem + EPS < cost) break;
     rem = r2(rem - cost);
     covered++;
@@ -396,7 +411,7 @@ function reconcileCharge(t, tmpl, opts) {
   res.aheadCycles = covered - cycles.length;
 
   const owedStarted = r2(cycles.reduce((s, c) => s + c.cost, 0));
-  const owedPastDue = r2(cycles.filter(c => c.due <= today).reduce((s, c) => s + c.cost, 0));
+  const owedPastDue = r2(cycles.filter(c => c.due < today).reduce((s, c) => s + c.cost, 0));
   res.arrears = r2(Math.max(0, owedPastDue - pool));
   res.credit = r2(Math.max(0, pool - owedStarted));
   res.status = res.arrears > EPS ? 'behind' : (res.aheadCycles > 0 ? 'advance' : 'current');
@@ -490,8 +505,8 @@ function allocatePayment(t, chunks, opts) {
       if(skip.has(ym) || templateBillExists(holder, tmpl, ym)) continue;
       const due = templateDueDate(t, tmpl, ym);
       const bill = makeTemplateBill(tmpl, ym, due);
-      bill.remark = 'Paid in advance';
       const applied = take(bill, rate, 'Advance payment');
+      bill.remark = billOpen(bill) <= EPS ? 'Paid in advance' : 'Partly paid in advance';
       bills.push(bill);
       bumpPostedThrough(holder, tmpl);
       lines.push({ kind: 'advance', index: bills.length - 1, label: bill.label, due, period: ym,
@@ -509,7 +524,7 @@ function allocatePayment(t, chunks, opts) {
 function applyCredit(t, tmplId, opts) {
   opts = opts || {};
   const tmpl = ((t && t.templates) || []).find(x => x && x.id === tmplId);
-  if(!tmpl) return null;
+  if(!tmpl || tmplRate(tmpl) <= 0) return null; // variable charges have no fixed amount to be "over"
   const primary = primaryTemplate(t);
   const src = { bills: _clone(t.bills || []), templates: t.templates, billing_model: t.billing_model, move_in_date: t.move_in_date };
   const { all } = templateBills(src, tmpl, primary === tmpl);
@@ -519,6 +534,7 @@ function applyCredit(t, tmplId, opts) {
   const mi = moveInOf(t);
   all.filter(i => !mi || (billPeriod(src.bills[i]) && billPeriod(src.bills[i]) >= ymOf(mi))).forEach(i => {
     const b = src.bills[i];
+    if(_num(b.amount) <= 0) return;
     let over = r2(billTotalPaid(b) - _num(b.amount));
     if(over <= EPS) return;
     const pays = b.payments;
@@ -526,7 +542,8 @@ function applyCredit(t, tmplId, opts) {
       const v = _num(pays[k].amount);
       const cut = r2(Math.min(v, over));
       if(cut <= EPS) continue;
-      chunks.push({ amount: cut, date: isoOrEmpty(pays[k].date), note: 'Credit from ' + b.label + (billPeriod(b) ? ' (' + billPeriod(b) + ')' : ''), src: i, origNote: pays[k].note || '' });
+      const ref = String(pays[k].note || '').trim();
+      chunks.push({ amount: cut, date: isoOrEmpty(pays[k].date), note: (ref ? ref + ' · ' : '') + 'credit from ' + b.label + (billPeriod(b) ? ' (' + billPeriod(b) + ')' : ''), src: i, origNote: pays[k].note || '' });
       pays[k].amount = r2(v - cut);
       over = r2(over - cut);
       if(pays[k].amount <= EPS) pays.splice(k, 1);
@@ -638,6 +655,18 @@ function _emptyExp() { const o = { total: 0 }; EXPENSE_CATEGORY_KEYS.forEach(k =
 function _addRev(o, cat, v) { o[cat] = r2(o[cat] + v); o.total = r2(o.total + v); }
 function _addExp(o, cat, v) { o[cat] = r2(o[cat] + v); o.total = r2(o.total + v); }
 
+// A timestamp (archived_at is written as UTC ISO) as a LOCAL calendar date,
+// so archiving just after midnight in Manila isn't read as the day before.
+function _localDate(ts) {
+  const s = String(ts || '');
+  if(!s) return '';
+  if(/T\d/.test(s)) {
+    const d = new Date(s);
+    if(!isNaN(d.getTime())) return d.getFullYear() + '-' + _pad2(d.getMonth() + 1) + '-' + _pad2(d.getDate());
+  }
+  return isoOrEmpty(s.slice(0, 10));
+}
+
 // Was the tenant in the building during month `ym`? From the move-in date
 // (else their earliest bill) to the archive date.
 function occupiedInMonth(t, ym) {
@@ -648,7 +677,7 @@ function occupiedInMonth(t, ym) {
     if(!first) return false;
     start = first + '-01';
   }
-  const end = isoOrEmpty(String(t.archived_at || '').slice(0, 10));
+  const end = _localDate(t.archived_at);
   return start <= lastDayOf(ym) && (!end || end >= ym + '-01');
 }
 
@@ -789,7 +818,7 @@ function computeIncomeStatement(params) {
   // Memo: collections (cash) and balance-sheet items at period end (accrual).
   const memo = {};
   const memoFor = list => {
-    let billed = 0, collected = 0, outstanding = 0, receivable = 0, unearned = 0;
+    let billed = 0, collected = 0, outstanding = 0, receivable = 0, unearned = 0, billedAhead = 0, credits = 0;
     list.forEach(t => (t.bills || []).forEach(b => {
       if(!b) return;
       const p = billPeriod(b);
@@ -800,12 +829,24 @@ function computeIncomeStatement(params) {
       });
       if(b.status !== 'paid' && (P.allTime || (p && inRange.has(p)))) outstanding = r2(outstanding + billOpen(b));
       if(endISO) {
+        // Gross presentation at period end, per bill:
+        //   receivable   billed (cycle on/before period end) and not yet paid
+        //   unearned     cash received for revenue not yet earned
+        //   billedAhead  billed but neither paid nor earned yet
+        //   credits      cash beyond the bill amount (tenant credit balance)
+        // Identity: recognized − cash = receivable − unearned − billedAhead − credits.
+        const amt = r2(b.amount);
         const R = _recognizedThrough(t, b, rTo, P.prorate && accrual);
         const C = _cashThrough(b, endISO);
-        if(R > C) receivable = r2(receivable + R - C); else unearned = r2(unearned + C - R);
+        const billedByEnd = (!p || p <= rTo) ? amt : 0;
+        const paidPart = Math.min(C, amt);
+        receivable = r2(receivable + Math.max(0, billedByEnd - C));
+        unearned = r2(unearned + Math.max(0, paidPart - R));
+        billedAhead = r2(billedAhead + Math.max(0, Math.max(billedByEnd, paidPart) - Math.max(R, paidPart)));
+        credits = r2(credits + Math.max(0, C - amt));
       }
     }));
-    return { billed, collected, outstanding, receivable, unearned,
+    return { billed, collected, outstanding, receivable, unearned, billedAhead, credits,
       rate: billed > 0 ? Math.round(collected / billed * 100) : null };
   };
   floors.forEach(f => { memo[f] = memoFor(tenants.filter(t => floorKey(t) === f)); });
@@ -832,37 +873,47 @@ function agingBuckets(tenants, today) {
     { key: 'd30', label: '1–30 days', amount: 0, count: 0 },
     { key: 'd60', label: '31–60 days', amount: 0, count: 0 },
     { key: 'd90', label: '61–90 days', amount: 0, count: 0 },
-    { key: 'd90p', label: '90+ days', amount: 0, count: 0 }
+    { key: 'd90p', label: '90+ days', amount: 0, count: 0 },
+    { key: 'nodate', label: 'No due date', amount: 0, count: 0 }
   ];
   (tenants || []).forEach(t => (t.bills || []).forEach(b => {
     const open = b ? billOpen(b) : 0;
     if(open <= EPS) return;
     const due = isoOrEmpty(b.due);
     const late = due ? diffDays(due, today) : 0;
-    const k = late <= 0 ? 0 : late <= 30 ? 1 : late <= 60 ? 2 : late <= 90 ? 3 : 4;
+    const k = !due ? 5 : late <= 0 ? 0 : late <= 30 ? 1 : late <= 60 ? 2 : late <= 90 ? 3 : 4;
     buckets[k].amount = r2(buckets[k].amount + open);
     buckets[k].count++;
   }));
   return buckets;
 }
 
-// Per-tenant punctuality over bills DUE in the window [fromYM, toYM]:
-// on-time share and average days late. Future paid dates are typos → skipped.
+// Per-tenant punctuality over bills DUE in the window [fromYM, toYM] and
+// already due by `today`: paid on/before the due date = on time; paid late,
+// or still unpaid past the due date (late until today), = late. Future paid
+// dates are typos → skipped.
 function paymentReliability(tenants, fromYM, toYM, today) {
   const out = [];
   (tenants || []).forEach(t => {
-    let n = 0, late = 0, lateDays = 0;
+    let n = 0, late = 0, lateDays = 0, unpaidLate = 0;
     (t.bills || []).forEach(b => {
-      if(!b || b.status !== 'paid') return;
-      const due = isoOrEmpty(b.due), pd = isoOrEmpty(b.paidDate);
-      if(!due || !pd || pd > today) return;
+      if(!b) return;
+      const due = isoOrEmpty(b.due);
+      if(!due || due >= today) return;
       const p = ymOf(due);
       if(p < fromYM || p > toYM) return;
-      const d = diffDays(due, pd);
-      n++;
-      if(d > 0) { late++; lateDays += d; }
+      if(b.status === 'paid') {
+        const pd = isoOrEmpty(b.paidDate);
+        if(!pd || pd > today) return;
+        const d = diffDays(due, pd);
+        n++;
+        if(d > 0) { late++; lateDays += d; }
+      } else if(billOpen(b) > EPS) {
+        n++; late++; unpaidLate++;
+        lateDays += diffDays(due, today);
+      }
     });
-    if(n) out.push({ id: t.id, name: t.name, unit: t.unit, floor: floorKey(t), n, late,
+    if(n) out.push({ id: t.id, name: t.name, unit: t.unit, floor: floorKey(t), n, late, unpaidLate,
       onTimePct: Math.round((n - late) / n * 100), avgLate: late ? Math.round(lateDays / late) : 0 });
   });
   return out;

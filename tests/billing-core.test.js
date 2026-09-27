@@ -41,7 +41,8 @@ test('auto-post: first activation leaves an already-overdue cycle to the checker
   const t = tenant();
   const plan = BC.planAutoPost(t, { today: '2026-09-27', leadDays: 7, uid });
   assert.equal(plan.bills.length, 0);
-  assert.equal(plan.templates[0].postedThrough, undefined);
+  // Recorded as handled, so activation is a one-time event (checker lists September).
+  assert.equal(plan.templates[0].postedThrough, '2026-09');
   const plan2 = BC.planAutoPost(t, { today: '2026-09-29', leadDays: 7, uid });
   assert.deepEqual(plan2.bills.map(b => b.period), ['2026-10']);
 });
@@ -326,4 +327,57 @@ test('advance payment does not duplicate a hand-typed rent bill for the month', 
   const t = tenant({ templates: [rentT({ dayOfMonth: 5 })], bills: [bill({ label: 'Rent – September', due: '2026-09-05', status: 'paid', paidDate: '2026-09-05' })] });
   const res = BC.allocatePayment(t, [{ amount: 6000, date: '2026-09-20' }], { today: '2026-09-20', uid });
   assert.deepEqual(res.lines.map(l => l.period), ['2026-10']);
+});
+
+test('memo identity holds for random data: recognized − cash = receivable − unearned − billedAhead − credits', () => {
+  let seed = 7;
+  const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
+  for(let n = 0; n < 200; n++) {
+    const months = ['2026-06', '2026-07', '2026-08', '2026-09', '2026-10', '2026-11'];
+    const bills = Array.from({ length: 6 }, () => {
+      const p = months[Math.floor(rnd() * months.length)];
+      const amt = Math.round(rnd() * 8000);
+      const paidAll = rnd() < 0.4;
+      const pays = rnd() < 0.5 ? [{ amount: Math.round(rnd() * amt * 1.3), date: months[Math.floor(rnd() * 4)] + '-10' }] : [];
+      return bill({ label: rnd() < 0.7 ? 'Monthly Rent' : 'Water', amount: amt, due: p + '-05', period: p, tmplId: 'T1',
+        status: paidAll ? 'paid' : 'unpaid', paidDate: paidAll ? p + '-06' : '', payments: pays });
+    });
+    const t = tenant({ move_in_date: '2026-03-12', bills });
+    for(const prorate of [true, false]) {
+      const is = BC.computeIncomeStatement({ tenants: [t], expenses: [], from: '2026-06', to: '2026-08', basis: 'accrual', prorate });
+      const m = is.memo.__total;
+      let R = 0, C = 0;
+      bills.forEach(b => {
+        BC.billRecognition(t, b, prorate).forEach(g => { if(!g.ym || g.ym <= '2026-08') R += g.amount; });
+        BC.billCashEvents(b).forEach(e => { if(!e.date || e.date <= '2026-08-31') C += e.amount; });
+      });
+      const lhs = Math.round((R - C) * 100) / 100;
+      const rhs = Math.round((m.receivable - m.unearned - m.billedAhead - m.credits) * 100) / 100;
+      assert.ok(Math.abs(lhs - rhs) < 0.05, `case ${n} prorate=${prorate}: ${lhs} vs ${rhs}`);
+    }
+  }
+});
+
+test('auto-post catches up a missed month for an active template; stale templates never pile up overdue bills', () => {
+  const active = tenant({ templates: [rentT({ dayOfMonth: 28, postedThrough: '2026-09' })] });
+  // Nobody opened the portal Oct 21–31; on Nov 3 October is still posted.
+  const p = BC.planAutoPost(active, { today: '2026-11-03', leadDays: 7, uid });
+  assert.deepEqual(p.bills.map(b => b.period), ['2026-10']);
+  assert.equal(p.templates[0].postedThrough, '2026-10');
+  // Restored after months away: overdue current cycle is not posted.
+  const stale = tenant({ templates: [rentT({ dayOfMonth: 5, postedThrough: '2026-05' })] });
+  const s = BC.planAutoPost(stale, { today: '2026-09-27', leadDays: 7, uid });
+  assert.equal(s.bills.length, 0);
+  assert.equal(s.templates[0].postedThrough, '2026-09');
+});
+
+test('primary template is order-independent; waived-but-billed cycles count; due-today is not arrears', () => {
+  const t = tenant({ templates: [{ id: 'P', label: 'Parking rent', amount: 500, dayOfMonth: 1 }, rentT()] });
+  assert.equal(BC.primaryTemplate(t).id, 'T1');
+  const w = tenant({ move_in_date: '2026-09-01', templates: [rentT({ dayOfMonth: 1, skip: ['2026-09'] })], bills: [bill({ due: '2026-09-01', tmplId: 'T1', period: '2026-09' })] });
+  const r = BC.reconcileTenant(w, { today: '2026-09-20' }).charges[0];
+  assert.equal(r.status, 'behind');
+  assert.equal(r.arrears, 6000);
+  const d = tenant({ move_in_date: '2026-09-20', templates: [rentT({ dayOfMonth: 20 })], bills: [bill({ due: '2026-09-20', tmplId: 'T1', period: '2026-09' })] });
+  assert.equal(BC.reconcileTenant(d, { today: '2026-09-20' }).charges[0].status, 'current');
 });

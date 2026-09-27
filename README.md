@@ -40,9 +40,16 @@ Insights and Settings sit under *More*):
   automatically, *N* days before the admin-set due date (default 7) — rent
   is paid in advance and covers the cycle ahead. Posting runs whenever an
   admin opens the portal (and again on the next day if the tab stays open).
-- Only the current and next cycle are ever posted automatically. Past months
-  are never created behind your back; a deleted recurring bill is never
-  re-posted. Turn auto-posting off globally (Settings) or per charge.
+- Automatic posting covers the current and next cycle, and an active charge
+  also catches up a cycle whose posting window passed while nobody opened
+  the portal (up to two months back) — so no month silently goes unbilled.
+  History from before a charge was active is never created behind your back;
+  a charge switched back on (or a tenant restored) after a long pause
+  restarts from the current cycle without posting an overdue one. A deleted
+  recurring bill is never re-posted (its cycle is marked waived; undo it
+  under Recurring charges). Turn auto-posting off globally (Settings) or per
+  charge. Current-cycle bills that still aren't posted for tenants without a
+  move-in date are listed under Billing › Recurring & checker.
   Background posting needs migration 2's `rev` column (so two devices can't
   overwrite each other); without it only *Run now* posts.
 - The **checker** reconciles each charge from the tenant's **move-in date**
