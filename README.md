@@ -43,6 +43,8 @@ Insights and Settings sit under *More*):
 - Only the current and next cycle are ever posted automatically. Past months
   are never created behind your back; a deleted recurring bill is never
   re-posted. Turn auto-posting off globally (Settings) or per charge.
+  Background posting needs migration 2's `rev` column (so two devices can't
+  overwrite each other); without it only *Run now* posts.
 - The **checker** reconciles each charge from the tenant's **move-in date**
   (the reckoning date: cycle *k* runs from move-in + *k* months): cycles
   started, paid-through date, arrears, cash paid in advance, cycles never

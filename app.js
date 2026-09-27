@@ -557,6 +557,7 @@ function openIncStmtModal(scope) {
   if(scope) prefs.scope = scope;
   const hasFloors = _fillIncScopeOptions(prefs.scope);
   if(scope && scope!=='building' && !hasFloors) showToast('No floors yet — give tenants a floor/group label to compare floors.', false);
+  else if(_archivedLoadError) showToast('Archived tenants could not be loaded, so former tenants\' income is missing from this statement. Refresh the page to retry.', false);
   const setChk = (id,v)=>{ document.getElementById(id).checked = !!v; };
   const setVal = (id,v)=>{ document.getElementById(id).value = v; };
   setVal('incstmt-basis', prefs.basis==='cash' ? 'cash' : 'accrual');
@@ -737,8 +738,9 @@ function buildIncomeStatementHTML(o) {
   const signHtml = o.sign
     ? '<div class="signs"><div class="sign"><div class="sign-line"></div><div class="sign-label">Prepared by &middot; Date</div></div>'
       + '<div class="sign"><div class="sign-line"></div><div class="sign-label">Noted by &middot; Date</div></div></div>' : '';
-  const expNote = !hasExpenses
-    ? '<div class="warn-note">The expenses ledger is not set up yet, so this statement shows income only. Run supabase-migration-2.sql in the Supabase SQL Editor, then log expenses to get a full income statement.</div>' : '';
+  const expNote = (!hasExpenses
+    ? '<div class="warn-note">The expenses ledger is not set up yet, so this statement shows income only. Run supabase-migration-2.sql in the Supabase SQL Editor, then log expenses to get a full income statement.</div>' : '')
+    + (_archivedLoadError ? '<div class="warn-note">Archived tenants could not be loaded, so income from former tenants is missing. Refresh the page before relying on these figures.</div>' : '');
   const basisNote = accrual
     ? 'Accrual basis: revenue is recognized in the billing cycle it pays for'+(o.prorate?', spread straight-line over each cycle’s days (cycles are reckoned from the move-in date)':'')+'. Payments made ahead are held as unearned rent until their cycle arrives.'
     : 'Cash basis: revenue is counted when payment is received, whatever period it pays for.';
@@ -1789,7 +1791,7 @@ function tenantSummary(t) {
   });
   const recon = reconcileTenant(t, { today: _moneyToday(), leadDays: autoBilling.leadDays });
   const primary = recon.enabled ? (recon.charges.find(c => c.tmplId === recon.primaryId) || null) : null;
-  const issues = recon.enabled ? recon.charges.reduce((n, c) => n + c.missing.length + (c.excess > 0.005 ? 1 : 0), 0) : 0;
+  const issues = recon.enabled ? recon.charges.reduce((n, c) => n + c.missing.length + (_creditApplicable(t, c) ? 1 : 0), 0) : 0;
   s = { open: r2(open), overdue: r2(overdue), overdueCount, openCount, nextDue, recon, primary, issues };
   _sumCache.set(t.id, s);
   return s;
@@ -1904,7 +1906,7 @@ function recurringStatusCard() {
     if(!s.recon.enabled) { if(s.recon.reason === 'no-move-in') noMoveIn++; return; }
     s.recon.charges.forEach(c => {
       missing += c.missing.length;
-      if(c.excess > 0.005) credit++;
+      if(_creditApplicable(t, c)) credit++;
     });
     if(s.primary && s.primary.status === 'behind') behind++;
     if(s.primary && s.primary.status === 'advance') ahead++;
@@ -2184,8 +2186,12 @@ function cycleCardHtml(t, s) {
       + c.missing.slice(0, 4).map(m => fmtYM(m.period, 'short')).join(', ') + (c.missing.length > 4 ? ' +' + (c.missing.length - 4) + ' more' : '') + '</span>'
       + '<span class="issue-actions"><button type="button" class="btn-mini"' + a + ' onclick="reconPostMissing(this.dataset.tid,this.dataset.tmpl)">Post bills</button>'
       + '<button type="button" class="btn-mini ghost"' + a + ' onclick="reconWaive(this.dataset.tid,this.dataset.tmpl)">Waive</button></span></div>');
-    if(c.excess > 0.005) issues.push('<div class="issue"><span>' + icon('cash') + peso(c.excess) + ' overpaid on earlier bills, not yet applied</span>'
-      + '<span class="issue-actions"><button type="button" class="btn-mini"' + a + ' onclick="reconApplyCredit(this.dataset.tid,this.dataset.tmpl)">Apply credit</button></span></div>');
+    if(c.excess > 0.005) issues.push(_creditApplicable(t, c)
+      ? '<div class="issue"><span>' + icon('cash') + peso(c.excess) + ' overpaid on earlier bills, not yet applied</span>'
+        + '<span class="issue-actions"><button type="button" class="btn-mini"' + a + ' onclick="reconApplyCredit(this.dataset.tid,this.dataset.tmpl)">Apply credit</button></span></div>'
+      : '<div class="issue"><span>' + icon('cash') + peso(c.excess) + ' overpaid — kept as credit until there is an open bill to apply it to</span></div>');
+    if(c.ignored) issues.push('<div class="issue muted-issue"><span>' + icon('alert') + c.ignored + ' bill' + (c.ignored !== 1 ? 's' : '') + ' dated before the move-in month or without a date '
+      + (c.ignored !== 1 ? 'are' : 'is') + ' not counted in these cycles' + (c.ignoredCash ? ' (' + peso(c.ignoredCash) + ' paid)' : '') + '. Check the move-in date if that looks wrong.</span></div>');
     return '<div class="cyc">'
       + '<div class="cyc-head"><strong>' + esc(c.label) + '</strong>' + (c.variable ? '' : ' <span class="muted">' + peso(c.rate) + ' per cycle</span>') + '</div>'
       + '<div class="cyc-status">' + status + '</div>'
@@ -2210,7 +2216,7 @@ function nextPostInfo(t, tmpl) {
   if(mi && ymOf(mi) > ym) ym = ymOf(mi);
   for(let i = 0; i < 24; i++, ym = addYM(ym, 1)) {
     if(isYM(tmpl.postedThrough) && ym <= tmpl.postedThrough) continue;
-    if(skip.has(ym) || templateBillExists(t.bills, tmpl, ym)) continue;
+    if(skip.has(ym) || templateBillExists(t, tmpl, ym)) continue;
     const due = templateDueDate(t, tmpl, ym);
     if(!isYM(tmpl.postedThrough) && due < today) continue; // first activation: checker handles it
     const post = addDaysISO(due, -autoBilling.leadDays);
@@ -2272,6 +2278,14 @@ async function saveTenantData(tid, compute, toastMsg) {
     if(e.conflict) rerenderAdmin();
     return false;
   }
+}
+
+// Can this charge's overpayment go anywhere right now (an open bill, or
+// future cycles of the primary rent)? Dry run — nothing is saved.
+function _creditApplicable(t, c) {
+  if(!(c.excess > 0.005)) return false;
+  const res = applyCredit(t, c.tmplId, { today: todayISO(), uid });
+  return !!(res && res.movedTotal > 0.005);
 }
 
 // ── Reconciliation fixes ──
@@ -2446,7 +2460,8 @@ function renderRecurringTab() {
       const acts = [];
       if(c.missing.length) acts.push('<button type="button" class="btn-mini"' + a + ' onclick="reconPostMissing(this.dataset.tid,this.dataset.tmpl)">Post ' + c.missing.length + ' missing</button>'
         + '<button type="button" class="btn-mini ghost"' + a + ' onclick="reconWaive(this.dataset.tid,this.dataset.tmpl)">Waive</button>');
-      if(c.excess > 0.005) acts.push('<button type="button" class="btn-mini"' + a + ' onclick="reconApplyCredit(this.dataset.tid,this.dataset.tmpl)">Apply ' + peso(c.excess) + ' credit</button>');
+      if(_creditApplicable(t, c)) acts.push('<button type="button" class="btn-mini"' + a + ' onclick="reconApplyCredit(this.dataset.tid,this.dataset.tmpl)">Apply ' + peso(c.excess) + ' credit</button>');
+      else if(c.excess > 0.005) acts.push('<span class="muted">' + peso(c.excess) + ' credit held</span>');
       return '<div class="rec-row">'
         + '<div class="rec-tenant">' + (i === 0 ? '<a href="#/tenants/' + encodeURIComponent(t.id) + '">' + esc(t.name) + '</a><span class="muted"> · Unit ' + esc(t.unit) + '</span>' : '') + '</div>'
         + '<div class="rec-charge">' + esc(c.label) + (c.variable ? '' : ' <span class="muted">' + peso(c.rate) + '</span>') + '</div>'
@@ -2483,14 +2498,19 @@ function renderRecurringTab() {
 // ─────────────────────────────────────────────
 let autoBilling = { enabled: true, leadDays: 7 };
 let _autoBillLast = null;   // { day, posted:[{tid,name,label,period}], failed }
-let _autoBillRunning = false;
+let _autoBillChain = Promise.resolve();
 
-async function runAutoBilling(opts) {
-  opts = opts || {};
-  if(currentUser !== 'admin' || _autoBillRunning) return;
+// Runs are serialized: a follow-up run (a new charge, a restored tenant)
+// waits for the one in progress instead of being dropped.
+function runAutoBilling(opts) {
+  const next = _autoBillChain.then(() => _runAutoBilling(opts || {}));
+  _autoBillChain = next.catch(() => {});
+  return next;
+}
+async function _runAutoBilling(opts) {
+  if(currentUser !== 'admin') return;
   if(_settingsLoadFailed) { if(opts.manual) showToast('Settings failed to load — refresh before running automatic billing.', false); return; }
   if(!autoBilling.enabled && !opts.manual) return;
-  _autoBillRunning = true;
   const today = todayISO();
   const posted = [];
   let failed = 0;
@@ -2500,6 +2520,10 @@ async function runAutoBilling(opts) {
       for(let attempt = 0; attempt < 2; attempt++) {
         const t = tenants.find(x => x.id === id);
         if(!t) break;
+        // Without the rev column (migration 2) writes can't detect another
+        // device's concurrent change, so background runs leave such rows
+        // alone; "Run now" still works.
+        if(t.rev == null && !opts.manual) break;
         const plan = planAutoPost(t, { today, leadDays: autoBilling.leadDays, uid });
         if(!plan.changed) break;
         const patch = { templates: plan.templates };
@@ -2516,7 +2540,7 @@ async function runAutoBilling(opts) {
         }
       }
     }
-  } finally { _autoBillRunning = false; }
+  } catch(e) { failed++; }
   if(!opts.only) _autoBillLast = { day: today, posted, failed };
   else if(_autoBillLast && posted.length) _autoBillLast.posted = _autoBillLast.posted.concat(posted);
   if(posted.length) {
@@ -2990,7 +3014,8 @@ function renderInsightsModule() {
     + tile('Billed & paid', eff === null ? '&mdash;' : eff + '%', billedWin ? peso(paidWin) + ' of ' + peso(billedWin) + ' billed' : 'nothing billed yet', eff !== null && eff < 80 ? 'bad' : '')
     + '</div>';
 
-  return pageHead('Insights', 'How the building is doing') + win + kpis
+  const archNote = _archivedLoadError ? '<div class="hint-note">' + icon('alert') + ' Archived tenants could not be loaded — former tenants\' history is missing from these figures. Refresh to retry.</div>' : '';
+  return pageHead('Insights', 'How the building is doing') + archNote + win + kpis
     + _monthlyChartCard(acc, hasExp)
     + '<div class="insight-grid">' + _agingCard(today) + (hasExp ? _expenseMixCard(acc) : '') + '</div>'
     + _floorTableCard(acc, cash)
@@ -4704,8 +4729,15 @@ async function saveTemplateEdit(i) {
   const _label = document.getElementById('te-label-'+i).value.trim();
   if(!_label){ showToast('Please enter a template description.',false); return; }
   const _autoEl = document.getElementById('te-auto-'+i);
+  // A renamed charge remembers its old name so untagged bills posted under
+  // it still count as this charge's history.
+  const _prev = templatesCopy[i];
+  const _aliases = new Set(Array.isArray(_prev.aliases) ? _prev.aliases : []);
+  if(normLabel(_prev.label) && normLabel(_prev.label) !== normLabel(_label)) _aliases.add(_prev.label);
+  _aliases.forEach(a => { if(normLabel(a) === normLabel(_label)) _aliases.delete(a); });
   templatesCopy[i] = {
     ...templatesCopy[i],
+    aliases: Array.from(_aliases),
     label:  _label,
     amount: amt, dayOfMonth: day,
     pendingAmount: _isPending,
@@ -4722,7 +4754,7 @@ async function saveTemplateEdit(i) {
 }
 
 async function deleteTemplate(i) {
-  if(!confirm('Delete this template?')) return;
+  if(!confirm('Delete this recurring charge?\n\nBills already posted are kept. No new bills will post for it. If you add a charge with the same name later, those bills count as its history.')) return;
   const t = tenants.find(t=>t.id===editingId); if(!t||!t.templates) return;
   const templatesCopy = structuredClone(t.templates);
   templatesCopy.splice(i,1);
@@ -4828,7 +4860,7 @@ function refreshGenPreview() {
       // Same due-date and duplicate rules as automatic billing: day capped to
       // short months, never before move-in, one bill per template per cycle.
       const dueDate = templateDueDate(t, tmpl, val);
-      const alreadyExists = templateBillExists(t.bills, tmpl, val);
+      const alreadyExists = templateBillExists(t, tmpl, val);
       return {tmpl, dueDate, alreadyExists, selected: !alreadyExists};
     });
     entries.push({t, rows});
@@ -4997,10 +5029,15 @@ async function confirmGenerateBills() {
       if(tmpl && !tmpl.id) tmpl.id = uid();
       const src = tmpl || r.tmpl;
       additions.push(makeTemplateBill(src, ym, r.dueDate));
-      // Automatic billing never re-posts a cycle generated by hand.
-      if(tmpl && (!isYM(tmpl.postedThrough) || ym > tmpl.postedThrough)) tmpl.postedThrough = ym;
     });
-    if(additions.length) pending.push({tenant: e.t, newBills: [...e.t.bills, ...additions], newTemplates: templates});
+    if(!additions.length) return;
+    const newBills = [...e.t.bills, ...additions];
+    // Automatic billing never re-posts a cycle generated by hand — but
+    // postedThrough only advances across months that are really billed, so
+    // generating a future month can't make it skip the months before.
+    const holder = { bills: newBills, templates, billing_model: e.t.billing_model };
+    templates.forEach(x => bumpPostedThrough(holder, x));
+    pending.push({tenant: e.t, newBills, newTemplates: templates});
   }));
 
   if(!pending.length){ showToast('No bills selected to generate.', false); return; }

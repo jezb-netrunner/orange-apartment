@@ -1649,3 +1649,5 @@ button.kpi:active { transform: scale(0.99); }
 .meter { height: 8px; background: #cde2fb; border-radius: 4px; overflow: hidden; }
 .meter span { display: block; height: 100%; background: var(--series-1); border-radius: 4px; }
 .meter.sm { height: 6px; width: 110px; margin-bottom: 3px; }
+.issue.muted-issue { background: var(--surface-2); border-color: var(--border); color: var(--muted); }
+.issue.muted-issue .ico { color: var(--muted); }

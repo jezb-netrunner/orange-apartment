@@ -145,7 +145,8 @@ test('allocate: FIFO oldest first, settles bills, advance posts future cycles', 
   assert.equal(res.bills[0].paidDate, '2026-09-20');
   const adv = res.bills.slice(2);
   assert.deepEqual(adv.map(b => [b.period, b.due, b.status]), [['2026-10', '2026-10-10', 'paid'], ['2026-11', '2026-11-10', 'paid']]);
-  assert.equal(res.templates[0].postedThrough, '2026-11');
+  // First activation: postedThrough stays unset (auto-post marks cycles it finds).
+  assert.equal(res.templates[0].postedThrough, undefined);
   assert.equal(cashSum(res.bills), 18400);
   // Original tenant untouched (pure).
   assert.equal(t.bills.length, 2);
@@ -258,4 +259,71 @@ test('reconcile: variable (pending-amount) charges are gap-checked only from the
   const r = BC.reconcileTenant(t, { today: '2026-10-25', leadDays: 7 }).charges[0];
   assert.equal(r.variable, true);
   assert.deepEqual(r.missing.map(m => m.period), ['2026-09', '2026-10']);
+});
+
+// ── Regression tests from the code review ──
+test('deleted + re-added charge (same name) keeps its history: no double bill, no false gaps', () => {
+  const tagged = p => bill({ due: p + '-05', tmplId: 'OLD', period: p, status: 'paid', paidDate: p + '-05' });
+  const t = tenant({ move_in_date: '2026-07-05', templates: [rentT({ id: 'NEW' })], bills: ['2026-07', '2026-08', '2026-09', '2026-10'].map(tagged) });
+  const plan = BC.planAutoPost(t, { today: '2026-09-29', leadDays: 7, uid });
+  assert.equal(plan.bills.length, 0);
+  const r = BC.reconcileTenant(t, { today: '2026-09-29', leadDays: 7 }).charges[0];
+  assert.deepEqual(r.missing, []);
+  assert.equal(r.status, 'advance');
+  // A renamed charge still owns its untagged legacy bills through aliases.
+  const renamed = tenant({ templates: [rentT({ label: 'Rent', aliases: ['Monthly Rent'] })], bills: [bill({ due: '2026-10-05' })] });
+  assert.equal(BC.planAutoPost(renamed, { today: '2026-09-29', leadDays: 7, uid }).bills.length, 0);
+});
+
+test('postedThrough never jumps over an unposted cycle', () => {
+  const tm = rentT({ dayOfMonth: 15, postedThrough: '2026-08' });
+  const t = tenant({ templates: [tm], bills: [bill({ due: '2026-10-15', tmplId: 'T1', period: '2026-10' })] });
+  BC.bumpPostedThrough(t, tm);
+  assert.equal(tm.postedThrough, '2026-08'); // September is still missing
+  const plan = BC.planAutoPost(t, { today: '2026-09-10', leadDays: 7, uid });
+  assert.deepEqual(plan.bills.map(b => b.period), ['2026-09']);
+});
+
+test('reconcile ignores bills before the move-in month (no false "current")', () => {
+  const t = tenant({ move_in_date: '2026-06-01', templates: [rentT({ dayOfMonth: 1 })], bills:
+    ['2026-03', '2026-04', '2026-05', '2026-06'].map(p => bill({ due: p + '-01', status: 'paid', paidDate: p + '-01' }))
+      .concat(['2026-07', '2026-08', '2026-09'].map(p => bill({ due: p + '-01' }))) });
+  const r = BC.reconcileTenant(t, { today: '2026-09-27', leadDays: 7 }).charges[0];
+  assert.equal(r.status, 'behind');
+  assert.equal(r.arrears, 18000);
+  assert.equal(r.paidThrough, '2026-06-30');
+  assert.equal(r.ignored, 3);
+});
+
+test('due day before the move-in day: an unpaid bill past its due date is arrears, on-time is not "ahead"', () => {
+  const mk = (st) => tenant({ move_in_date: '2026-07-20', templates: [rentT({ dayOfMonth: 1 })], bills: [
+    bill({ due: '2026-07-20', period: '2026-07', tmplId: 'T1', status: 'paid', paidDate: '2026-07-20' }),
+    bill({ due: '2026-08-01', period: '2026-08', tmplId: 'T1', status: 'paid', paidDate: '2026-08-01' }),
+    bill({ due: '2026-09-01', period: '2026-09', tmplId: 'T1', status: st, paidDate: st === 'paid' ? '2026-09-01' : '' })] });
+  const behind = BC.reconcileTenant(mk('unpaid'), { today: '2026-09-15' }).charges[0];
+  assert.equal(behind.status, 'behind');
+  assert.equal(behind.arrears, 6000);
+  const onTime = BC.reconcileTenant(mk('paid'), { today: '2026-09-15' }).charges[0];
+  assert.equal(onTime.status, 'current');
+  assert.equal(onTime.aheadCycles, 0);
+});
+
+test('applyCredit returns unplaced cash to its own bill and date', () => {
+  const park = { id: 'P', label: 'Parking', amount: 1000, dayOfMonth: 1, pendingAmount: false };
+  const t = tenant({ templates: [park], bills: [
+    bill({ label: 'Parking', amount: 1000, due: '2026-01-01', tmplId: 'P', period: '2026-01', status: 'paid', paidDate: '2026-01-01', payments: [{ amount: 1500, date: '2026-01-01' }] }),
+    bill({ label: 'Parking', amount: 1000, due: '2026-03-01', tmplId: 'P', period: '2026-03', status: 'paid', paidDate: '2026-03-01', payments: [{ amount: 1500, date: '2026-03-01' }] }),
+    bill({ label: 'Repair', amount: 300, due: '2026-04-01' })] });
+  const byMonth = bills => { const m = {}; bills.forEach(b => BC.billCashEvents(b).forEach(e => { const k = e.date.slice(0, 7); m[k] = (m[k] || 0) + e.amount; })); return m; };
+  const before = byMonth(t.bills);
+  const res = BC.applyCredit(t, 'P', { today: '2026-04-10', uid });
+  assert.equal(res.movedTotal, 300);
+  assert.deepEqual(byMonth(res.bills), before);
+  assert.equal(res.bills[2].status, 'paid');
+});
+
+test('advance payment does not duplicate a hand-typed rent bill for the month', () => {
+  const t = tenant({ templates: [rentT({ dayOfMonth: 5 })], bills: [bill({ label: 'Rent – September', due: '2026-09-05', status: 'paid', paidDate: '2026-09-05' })] });
+  const res = BC.allocatePayment(t, [{ amount: 6000, date: '2026-09-20' }], { today: '2026-09-20', uid });
+  assert.deepEqual(res.lines.map(l => l.period), ['2026-10']);
 });

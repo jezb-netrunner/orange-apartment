@@ -144,15 +144,37 @@ function primaryTemplate(t) {
       || null;
 }
 
-// Bills that belong to a template: tagged with its id, or (legacy bills,
-// never tagged) carrying the same label. With `fallback`, a period that has
-// no such bill also accepts one untagged rent-category bill whose label
-// matches no template — so "Rent - March" typed by hand still counts as
-// March's rent when reconciling the primary charge.
+// Template ids that still exist on the tenant. A bill tagged with a
+// deleted template's id is treated like an untagged legacy bill, so
+// deleting a charge and re-adding it (same name) keeps its history.
+function _liveIds(t) { return new Set(((t && t.templates) || []).map(x => x && x.id).filter(Boolean)); }
+// A template's current label plus the labels it had before a rename.
+function _labelsOf(tmpl) {
+  return [tmpl.label].concat(Array.isArray(tmpl.aliases) ? tmpl.aliases : []).map(normLabel).filter(Boolean);
+}
+// Does bill `b` belong to template `tmpl`? Bills tagged with a live
+// template follow their tag; everything else matches by label.
+function billOfTemplate(b, tmpl, liveIds) {
+  if(!b) return false;
+  if(b.tmplId && liveIds.has(b.tmplId)) return b.tmplId === tmpl.id;
+  return _labelsOf(tmpl).includes(normLabel(b.label));
+}
+function _isLooseRent(b, t, liveIds, labels) {
+  return !!b && !(b.tmplId && liveIds.has(b.tmplId)) && !labels.has(normLabel(b.label)) && billCategory(b) === 'rent';
+}
+function _allLabels(t) {
+  const set = new Set();
+  ((t && t.templates) || []).forEach(x => { if(x) _labelsOf(x).forEach(l => set.add(l)); });
+  return set;
+}
+
+// Bills that belong to a template (see billOfTemplate). With `fallback`, a
+// period that has no such bill also accepts one untagged rent-category
+// bill whose label matches no template — so "Rent - March" typed by hand
+// still counts as March's rent when reconciling the primary charge.
 function templateBills(t, tmpl, fallback) {
   const bills = (t && t.bills) || [];
-  const labels = new Set(((t && t.templates) || []).map(x => normLabel(x && x.label)));
-  const want = normLabel(tmpl.label);
+  const liveIds = _liveIds(t);
   const byPeriod = new Map();
   const all = [];
   const add = (b, i) => {
@@ -161,13 +183,11 @@ function templateBills(t, tmpl, fallback) {
     if(!byPeriod.has(p)) byPeriod.set(p, []);
     byPeriod.get(p).push(i);
   };
-  bills.forEach((b, i) => {
-    if(!b) return;
-    if(b.tmplId ? b.tmplId === tmpl.id : normLabel(b.label) === want) add(b, i);
-  });
+  bills.forEach((b, i) => { if(billOfTemplate(b, tmpl, liveIds)) add(b, i); });
   if(fallback) {
+    const labels = _allLabels(t);
     bills.forEach((b, i) => {
-      if(!b || b.tmplId || labels.has(normLabel(b.label)) || billCategory(b) !== 'rent') return;
+      if(!_isLooseRent(b, t, liveIds, labels)) return;
       const p = billPeriod(b);
       if(p && !byPeriod.has(p)) add(b, i);
     });
@@ -175,11 +195,33 @@ function templateBills(t, tmpl, fallback) {
   return { byPeriod, all };
 }
 
-// Exact match only (id or label) — used to decide whether a cycle is posted.
-function templateBillExists(bills, tmpl, ym) {
-  const want = normLabel(tmpl.label);
-  return (bills || []).some(b => b && billPeriod(b) === ym &&
-    (b.tmplId ? b.tmplId === tmpl.id : normLabel(b.label) === want));
+// Is cycle `ym` of `tmpl` already billed? Used before creating a bill
+// (auto-post, generate, advance, backfill) so nothing is billed twice.
+// For the primary rent charge a hand-typed untagged rent bill of the same
+// amount in that month also counts ("Rent – September" ₱6,000).
+function templateBillExists(t, tmpl, ym) {
+  const bills = (t && t.bills) || [];
+  const liveIds = _liveIds(t);
+  if(bills.some(b => b && billPeriod(b) === ym && billOfTemplate(b, tmpl, liveIds))) return true;
+  const prim = primaryTemplate(t);
+  if(!prim || prim.id !== tmpl.id) return false;
+  const labels = _allLabels(t);
+  const rate = tmplRate(tmpl);
+  return bills.some(b => billPeriod(b) === ym && _isLooseRent(b, t, liveIds, labels) && r2(b.amount) === rate);
+}
+
+// Raise postedThrough only across cycles that really are billed (or
+// waived), never over a gap — so generating a future month by hand can't
+// make automatic billing skip the months in between. An unset value stays
+// unset (first activation keeps its own rules).
+function bumpPostedThrough(t, tmpl) {
+  if(!isYM(tmpl.postedThrough)) return;
+  const skip = new Set(Array.isArray(tmpl.skip) ? tmpl.skip : []);
+  for(let i = 0; i < 240; i++) {
+    const nx = addYM(tmpl.postedThrough, 1);
+    if(!(skip.has(nx) || templateBillExists(t, tmpl, nx))) break;
+    tmpl.postedThrough = nx;
+  }
 }
 
 function makeTemplateBill(tmpl, ym, due) {
@@ -236,7 +278,7 @@ function planAutoPost(t, opts) {
       const mark = () => {
         if(!isYM(tmpl.postedThrough) || ym > tmpl.postedThrough) { tmpl.postedThrough = ym; out.changed = true; }
       };
-      if(templateBillExists(existing.concat(out.bills), tmpl, ym)) { mark(); return; }
+      if(templateBillExists({ bills: existing.concat(out.bills), templates: out.templates, billing_model: t.billing_model }, tmpl, ym)) { mark(); return; }
       if(firstRun && due < today) return;
       out.bills.push(makeTemplateBill(tmpl, ym, due));
       mark();
@@ -255,7 +297,8 @@ function cycleWindow(moveIn, ym) {
 }
 
 // One recurring charge, reconciled from the move-in date:
-//   cyclesStarted  cycles whose start has arrived (annuity due: payable then)
+//   cyclesStarted  cycles that are payable: started, or their bill's due
+//                  date (the admin's, often before the start) has arrived
 //   covered        cycles fully paid, consuming all cash toward the charge
 //                  forward from the first cycle (advances included)
 //   paidThrough    last day covered ('' if nothing is)
@@ -284,9 +327,10 @@ function reconcileCharge(t, tmpl, opts) {
 
   const cycles = [];
   for(let ym = miYM, i = 0; i < MAX_CYCLES; i++, ym = addYM(ym, 1)) {
-    if(cycleWindow(mi, ym).start > today) break;
+    const due = templateDueDate(t, tmpl, ym);
+    if(cycleWindow(mi, ym).start > today && due > today) break;
     const idx = byPeriod.get(ym) || [];
-    cycles.push({ ym, due: templateDueDate(t, tmpl, ym), cost: cycleCost(ym), billed: idx.length > 0, waived: skip.has(ym) });
+    cycles.push({ ym, due, cost: cycleCost(ym), billed: idx.length > 0, waived: skip.has(ym) });
   }
 
   // A cycle is "missing" once its bill should have been posted: due date
@@ -304,10 +348,17 @@ function reconcileCharge(t, tmpl, opts) {
     .filter(c => c.ym >= checkFrom && !c.billed && !c.waived && diffDays(today, c.due) <= lead)
     .map(c => ({ period: c.ym, due: c.due, amount: rate }));
 
+  // Only bills that fall in a move-in cycle count toward coverage: bills
+  // dated before the move-in month, or with no date at all, can't be placed
+  // on the cycle timeline (they're reported, not silently counted).
+  const inScope = all.filter(i => { const p = billPeriod(bills[i]); return p && p >= miYM; });
+  const outScope = all.filter(i => !inScope.includes(i));
+  const ignoredCash = r2(outScope.reduce((s, i) => s + billSettled(bills[i]), 0));
+
   // Overpayments logged on individual bills of this charge.
   let excess = 0;
   const excessBills = [];
-  all.forEach(i => {
+  inScope.forEach(i => {
     const b = bills[i];
     const over = r2(billTotalPaid(b) - _num(b.amount));
     if(over > EPS) { excess = r2(excess + over); excessBills.push(i); }
@@ -316,14 +367,14 @@ function reconcileCharge(t, tmpl, opts) {
   const res = {
     tmplId: tmpl.id, label: tmpl.label, rate, moveIn: mi,
     variable: rate <= 0, cyclesStarted: cycles.length,
-    missing, excess, excessBills,
+    missing, excess, excessBills, ignored: outScope.length, ignoredCash,
     covered: 0, remainder: 0, paidThrough: '', arrears: 0, credit: 0, pool: 0,
     nextDue: '', nextAmount: 0, aheadCycles: 0, status: 'variable',
     openCovered: []
   };
   if(res.variable) return res; // pending-amount charges vary monthly: gap check only
 
-  const pool = r2(all.reduce((s, i) => s + billSettled(bills[i]), 0));
+  const pool = r2(inScope.reduce((s, i) => s + billSettled(bills[i]), 0));
   res.pool = pool;
 
   // Consume the pool forward, cycle by cycle (advances roll into future cycles).
@@ -395,7 +446,7 @@ function allocatePayment(t, chunks, opts) {
   const bills = _clone((t && t.bills) || []);
   const templates = _clone((t && t.templates) || []);
   const lines = [];
-  const queue = (chunks || []).map(c => ({ amount: r2(c.amount), date: isoOrEmpty(c.date), note: String(c.note || '') }))
+  const queue = (chunks || []).map(c => ({ amount: r2(c.amount), date: isoOrEmpty(c.date), note: String(c.note || ''), src: c.src }))
     .filter(c => c.amount > EPS);
   const take = (bill, maxAmt, label) => {
     let applied = 0;
@@ -434,20 +485,21 @@ function allocatePayment(t, chunks, opts) {
     const mi = moveInOf(t);
     let ym = ymOf(opts.today);
     if(mi && ymOf(mi) > ym) ym = ymOf(mi);
+    const holder = { bills, templates, billing_model: t && t.billing_model };
     for(let n = 0; queue.length && n < 240; n++, ym = addYM(ym, 1)) {
-      if(skip.has(ym) || templateBillExists(bills, tmpl, ym)) continue;
+      if(skip.has(ym) || templateBillExists(holder, tmpl, ym)) continue;
       const due = templateDueDate(t, tmpl, ym);
       const bill = makeTemplateBill(tmpl, ym, due);
       bill.remark = 'Paid in advance';
       const applied = take(bill, rate, 'Advance payment');
       bills.push(bill);
-      if(!isYM(tmpl.postedThrough) || ym > tmpl.postedThrough) tmpl.postedThrough = ym;
+      bumpPostedThrough(holder, tmpl);
       lines.push({ kind: 'advance', index: bills.length - 1, label: bill.label, due, period: ym,
         window: mi ? cycleWindow(mi, ym) : null, apply: applied, settles: billOpen(bill) <= EPS, remaining: billOpen(bill) });
     }
   }
   const leftover = r2(queue.reduce((s, c) => s + c.amount, 0));
-  return { bills, templates, lines, leftover, changed: lines.length > 0 };
+  return { bills, templates, lines, leftover, rest: queue, changed: lines.length > 0 };
 }
 
 // Move overpayments sitting on a charge's bills onto the tenant's open
@@ -462,8 +514,10 @@ function applyCredit(t, tmplId, opts) {
   const src = { bills: _clone(t.bills || []), templates: t.templates, billing_model: t.billing_model, move_in_date: t.move_in_date };
   const { all } = templateBills(src, tmpl, primary === tmpl);
   const chunks = [];
-  const sources = [];
-  all.forEach(i => {
+  // Same scope as the checker: with a move-in date, only bills in a
+  // move-in cycle (the ones whose overpayment the checker reports).
+  const mi = moveInOf(t);
+  all.filter(i => !mi || (billPeriod(src.bills[i]) && billPeriod(src.bills[i]) >= ymOf(mi))).forEach(i => {
     const b = src.bills[i];
     let over = r2(billTotalPaid(b) - _num(b.amount));
     if(over <= EPS) return;
@@ -472,8 +526,7 @@ function applyCredit(t, tmplId, opts) {
       const v = _num(pays[k].amount);
       const cut = r2(Math.min(v, over));
       if(cut <= EPS) continue;
-      chunks.push({ amount: cut, date: isoOrEmpty(pays[k].date), note: 'Credit from ' + b.label + (billPeriod(b) ? ' (' + billPeriod(b) + ')' : '') });
-      sources.push(i);
+      chunks.push({ amount: cut, date: isoOrEmpty(pays[k].date), note: 'Credit from ' + b.label + (billPeriod(b) ? ' (' + billPeriod(b) + ')' : ''), src: i, origNote: pays[k].note || '' });
       pays[k].amount = r2(v - cut);
       over = r2(over - cut);
       if(pays[k].amount <= EPS) pays.splice(k, 1);
@@ -485,12 +538,16 @@ function applyCredit(t, tmplId, opts) {
   });
   if(!chunks.length) return null;
   const moved = allocatePayment(src, chunks, Object.assign({}, opts, { advance: primary === tmpl }));
-  if(moved.leftover > EPS) {
-    // Put what couldn't be placed back on the first source bill.
-    const home = moved.bills[sources[0]];
+  // Whatever couldn't be placed goes back on the bill it came from, with
+  // its own payment date — cash-by-date figures never move.
+  const byKey = new Map(chunks.map(c => [c.src + '|' + c.date + '|' + c.note, c]));
+  moved.rest.forEach(r => {
+    const home = moved.bills[r.src];
+    if(!home) return;
+    const orig = byKey.get(r.src + '|' + r.date + '|' + r.note);
     home.payments = home.payments || [];
-    home.payments.push({ amount: moved.leftover, date: chunks[0].date, note: 'Unapplied credit' });
-  }
+    home.payments.push({ amount: r.amount, date: r.date, note: orig ? orig.origNote : '' });
+  });
   return Object.assign(moved, { movedTotal: r2(chunks.reduce((s, c) => s + c.amount, 0) - moved.leftover) });
 }
 
@@ -502,12 +559,14 @@ function backfillCycles(t, tmplId, periods, opts) {
   const tmpl = templates.find(x => x && x.id === tmplId);
   if(!tmpl) return null;
   const added = [];
+  const holder = { bills, templates, billing_model: t && t.billing_model };
   (periods || []).filter(isYM).sort().forEach(ym => {
-    if(templateBillExists(bills, tmpl, ym)) return;
+    if(templateBillExists(holder, tmpl, ym)) return;
     const b = makeTemplateBill(tmpl, ym, templateDueDate(t, tmpl, ym));
     bills.push(b);
     added.push(b);
   });
+  bumpPostedThrough(holder, tmpl);
   return { bills, templates, added };
 }
 
@@ -813,7 +872,7 @@ const BillingCore = {
   isYM, isISODate, isoOrEmpty, ymOf, addYM, daysInMonth, dateInMonth, lastDayOf, diffDays, addDaysISO, ymRange, r2,
   BILL_CATEGORIES, billCategory, billTotalPaid, billRemaining, billSettled, billOpen, billPeriod, normLabel, billCashEvents,
   tmplDay, tmplRate, isAutoTemplate, moveInOf, templateDueDate, primaryTemplate, templateBills, templateBillExists, makeTemplateBill,
-  planAutoPost, cycleWindow, reconcileCharge, reconcileTenant, allocatePayment, applyCredit, backfillCycles, waiveCycles,
+  billOfTemplate, bumpPostedThrough, planAutoPost, cycleWindow, reconcileCharge, reconcileTenant, allocatePayment, applyCredit, backfillCycles, waiveCycles,
   billCoverageWindow, billRecognition, occupiedInMonth, floorKey, computeIncomeStatement, agingBuckets, paymentReliability,
   EXPENSE_CATEGORY_KEYS
 };
