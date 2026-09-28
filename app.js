@@ -270,8 +270,8 @@ function buildStatementHTML(t, o) {
   // True outstanding balance is over ALL bills, not just the selected subset.
   const outstandingAllTime = t.bills.filter(b=>b.status!=='paid').reduce((s,b)=>s+Math.max(0,billRemaining(b)),0);
 
-  const dueStatusLabels = { paid:'Paid', overdue:'Overdue', 'due-today':'Due Today', 'due-soon':'Due Soon', upcoming:'Upcoming', 'no-date':'Unscheduled', awaiting:'Amount to follow' };
-  const dueStatusColors = { paid:'#1e8449', overdue:'#c0392b', 'due-today':'#c0392b', 'due-soon':'#b9770e', upcoming:'#5a6776', 'no-date':'#5a6776', awaiting:'#5a6776' };
+  const dueStatusLabels = { paid:'Paid', overdue:'Overdue', 'due-today':'Due Today', 'due-soon':'Due Soon', grace:'In grace period', upcoming:'Upcoming', 'no-date':'Unscheduled', awaiting:'Amount to follow' };
+  const dueStatusColors = { paid:'#1e8449', overdue:'#c0392b', 'due-today':'#c0392b', 'due-soon':'#b9770e', grace:'#b9770e', upcoming:'#5a6776', 'no-date':'#5a6776', awaiting:'#5a6776' };
   const statusCell = b => {
     const ds = getDueStatus(b);
     const label = dueStatusLabels[ds]||ds;
@@ -533,8 +533,8 @@ function printStatement() {
 // and rent paid ahead sits as unearned until its cycle arrives. Cash basis
 // counts money when received. Scope: the whole building, one floor, all
 // floors side by side, or one page per floor. Floor-tagged expenses are
-// direct costs; untagged ones are shared and allocated by headcount or
-// revenue share (or left unallocated). Numbers come from
+// direct costs; untagged ones are shared and stay in the building total unless
+// the admin chooses to split them by occupied units or revenue share. Numbers come from
 // computeIncomeStatement (billing-core.js); this section only renders.
 // ─────────────────────────────────────────────
 let _incStmtPreset = '6m';       // 'this' | 'last' | '3m' | '6m' | 'ytd' | 'all' | 'custom'
@@ -546,7 +546,7 @@ const INCSTMT_PREFS_KEY = 'oa_incstmt_prefs_v2';
 
 function incStmtDefaultPrefs() {
   return {
-    preset:'6m', basis:'accrual', prorate:false, scope:'building', alloc:'headcount',
+    preset:'6m', basis:'accrual', prorate:false, scope:'building', alloc:'none',
     incDetail:true, expDetail:true, monthly:true, memo:true,
     sign:false, note:'', size:'normal', theme:'color', paper:'a4', orient:'portrait'
   };
@@ -590,6 +590,8 @@ function openIncStmtModal(scope) {
       prefs = Object.assign(prefs, saved);
       // Spreading is opt-in; it is saved as `spread` so an old saved default (prorate) is ignored.
       prefs.prorate = typeof saved.spread === 'boolean' ? saved.spread : false;
+      // Splitting building-wide costs is opt-in too (saved as `split`; an old saved default is ignored).
+      prefs.alloc = ['units','revenue','none'].includes(saved.split) ? saved.split : 'none';
     }
   } catch {}
   if(scope) prefs.scope = scope;
@@ -600,7 +602,7 @@ function openIncStmtModal(scope) {
   const setVal = (id,v)=>{ document.getElementById(id).value = v; };
   setVal('incstmt-basis', prefs.basis==='cash' ? 'cash' : 'accrual');
   setChk('incstmt-prorate', prefs.prorate);
-  setVal('incstmt-alloc', ['headcount','revenue','none'].includes(prefs.alloc) ? prefs.alloc : 'headcount');
+  setVal('incstmt-alloc', ['units','revenue','none'].includes(prefs.alloc) ? prefs.alloc : 'none');
   setChk('incstmt-inc-detail', prefs.incDetail);
   setChk('incstmt-exp-detail', prefs.expDetail);
   setChk('incstmt-monthly', prefs.monthly);
@@ -693,8 +695,9 @@ function incStmtOptsChanged() {
   _syncIncStmtControls();
   const o = getIncStmtOpts();
   try {
-    const {from, to, prorate, ...prefs} = o; // range is per-visit, everything else persists
+    const {from, to, prorate, alloc, ...prefs} = o; // range is per-visit, everything else persists
     prefs.spread = prorate;
+    prefs.split = alloc;
     localStorage.setItem(INCSTMT_PREFS_KEY, JSON.stringify(prefs));
   } catch {}
   clearTimeout(_incStmtPreviewTimer);
@@ -727,9 +730,16 @@ function _incStmtAllTimeRange(basis) {
   return { from: min || cur, to };
 }
 
+// Occupied units per floor in the last month, so a units split is checkable.
+function _unitsNote(R) {
+  if(!R.unitsByMonth || !R.months.length) return '';
+  const m = R.months[R.months.length-1], u = R.unitsByMonth[m] || {};
+  const parts = R.floors.filter(f => u[f]).map(f => esc(_floorLabel(f))+' '+u[f]);
+  return parts.length ? ' Occupied units in '+fmtYM(m,'short')+': '+parts.join(', ')+'.' : '';
+}
 const _ALLOC_TEXT = {
-  headcount: 'allocated by headcount (tenants in residence each month)',
-  revenue: 'allocated by each floor’s share of revenue',
+  units: 'split by the number of occupied units on each floor each month',
+  revenue: 'split by each floor’s share of revenue',
   none: 'not allocated to floors — shown in the building total only'
 };
 
@@ -827,6 +837,8 @@ function buildIncomeStatementHTML(o) {
           if(!c.direct.total && !c.shared.total) rows.push('<tr class="catrow"><td colspan="2" class="nodata">No expenses charged to this floor.</td></tr>');
         }
       }
+      if(c.recovered && c.recovered.total > 0.005)
+        rows.push('<tr class="catrow"><td>Less: utilities '+(accrual?'billed back to':'paid back by')+' tenants</td><td class="num">&minus;'+peso(c.recovered.total)+'</td></tr>');
       rows.push('<tr class="subtotal"><td>Total expenses</td><td class="num">'+peso(expTotal)+'</td></tr>');
       const net = r2(c.revenue.total - expTotal);
       rows.push('<tr class="netline'+(net<0?' neg':' pos')+'"><td>'+(net<0?'Net loss':'Net income')+'</td><td class="num">'+signedPeso(net)+'</td></tr>');
@@ -839,17 +851,18 @@ function buildIncomeStatementHTML(o) {
         + '<tr><td>Billed to tenants</td><td class="num">'+peso(ptc.billed)+'</td></tr>'
         + '<tr><td>Settled in period</td><td class="num">'+peso(ptc.settled)+'</td></tr>'
         + '<tr><td>Still unpaid</td><td class="num">'+peso(ptc.outstanding)+'</td></tr>'
-        + '</tbody></table><div class="tbl-note">Collected on behalf of the utility provider (IFRS 15: the property acts as agent), so excluded from revenue and net income.</div></div>'
+        + (ptc.offset > 0.005 ? '<tr><td>Offset against utility costs</td><td class="num">'+peso(ptc.offset)+'</td></tr>' : '')
+        + '</tbody></table><div class="tbl-note">Collected on behalf of the utility provider (IFRS 15: the property acts as agent), so excluded from revenue; the matching utility costs are reduced by the same amount, so only the part tenants don\'t pay back is an expense.</div></div>'
       : '';
     if(undated.total>0) tableNotes += '<div class="tbl-note">Includes '+peso(undated.total)+(accrual?' billed with no due date.':' received with no recorded payment date.')+'</div>';
     if(!isTotal && hasExpenses) {
       const sharedAll = R.total.shared.total;
-      if(sharedAll>0) tableNotes += '<div class="tbl-note">Building-wide costs of '+peso(sharedAll)+' are '+_ALLOC_TEXT[o.alloc]+(o.alloc==='none'?'':'; this floor’s share is '+peso(c.shared.total))+'.</div>';
+      if(sharedAll>0) tableNotes += '<div class="tbl-note">Building-wide costs of '+peso(sharedAll)+' are '+_ALLOC_TEXT[o.alloc]+(o.alloc==='none'?'':'; this floor’s share is '+peso(c.shared.total))+'.'+_unitsNote(R)+'</div>';
     } else if(isTotal && hasExpenses && R.unallocated.total>0 && o.scope!=='building') {
       tableNotes += '<div class="tbl-note">'+peso(R.unallocated.total)+' of shared costs '+(o.alloc==='none'
         ? 'are not allocated to floors (building total only).'
         : o.alloc==='revenue' ? 'could not be allocated because no floor had revenue that month.'
-        : 'could not be allocated because no tenants were in residence that month.')+'</div>';
+        : 'could not be allocated because no units were occupied that month.')+'</div>';
     }
 
     // Month-by-month (per-year rows on very long ranges)
@@ -940,6 +953,7 @@ function buildIncomeStatementHTML(o) {
       }
       rows.push(line('of which shared, allocated', c=>peso(c.shared.total), 'catrow muted', peso(r2(T.shared.total - R.unallocated.total))));
       if(R.unallocated.total>0) rows.push(line('Shared, unallocated', ()=>'&mdash;', 'catrow muted', peso(R.unallocated.total)));
+      if(T.recovered.total > 0.005) rows.push(line('Less: utilities '+(accrual?'billed back':'paid back'), c=>c.recovered.total>0.005?'&minus;'+peso(c.recovered.total):'&mdash;', 'catrow', '&minus;'+peso(T.recovered.total)));
       rows.push(line('Total expenses', c=>peso(c.expenses), 'subtotal', peso(T.expenses)));
       rows.push(line('Net income', c=>signedPeso(c.net), 'netline', signedPeso(T.net)));
       rows.push(line('Margin', c=>c.revenue.total>0 ? Math.round(c.net/c.revenue.total*100)+'%' : '&mdash;', 'catrow muted', T.revenue.total>0 ? Math.round(T.net/T.revenue.total*100)+'%' : '&mdash;'));
@@ -963,12 +977,12 @@ function buildIncomeStatementHTML(o) {
     const pl = (label, k) => '<tr><td>'+label+'</td>'+cols.map(c=>'<td class="num">'+peso((c.passThrough||{})[k]||0)+'</td>').join('')+'<td class="num tot">'+peso(PT[k])+'</td></tr>';
     const passRows = (PT.billed > 0.005 || PT.settled > 0.005)
       ? '<div class="sec"><div class="sec-label">Utilities billed back to tenants &middot; pass-through, not revenue</div><table class="ptable cmp"><thead>'+th+'</thead><tbody>'
-        + pl('Billed to tenants','billed') + pl('Settled in period','settled') + pl('Still unpaid','outstanding') + '</tbody></table></div>'
+        + pl('Billed to tenants','billed') + pl('Settled in period','settled') + pl('Still unpaid','outstanding') + (PT.offset > 0.005 ? pl('Offset against utility costs','offset') : '') + '</tbody></table></div>'
       : '';
     return '<div class="doc">'
       + docHead('Income Statement &middot; By Floor', basisLabel, 'Property', esc(propertyName), keys.length+' floor'+(keys.length!==1?'s':''), hasExpenses?(headVal<0?'Net Loss':'Net Income'):'Total Revenue', headVal)
       + '<table class="cmp"><thead>'+th+'</thead><tbody>'+rows.join('')+'</tbody></table>'
-      + (hasExpenses && T.shared.total>0 ? '<div class="tbl-note">Building-wide costs of '+peso(T.shared.total)+' are '+_ALLOC_TEXT[o.alloc]+'. Floor-tagged expenses are charged to their floor directly.</div>' : '')
+      + (hasExpenses && T.shared.total>0 ? '<div class="tbl-note">Building-wide costs of '+peso(T.shared.total)+' are '+_ALLOC_TEXT[o.alloc]+'. Floor-tagged expenses are charged to their floor directly.'+_unitsNote(R)+'</div>' : '')
       + expNote + memoRows + passRows
       + '<div class="tbl-note basis-note">'+basisNote+'</div>'
       + noteHtml + signHtml
@@ -1298,6 +1312,8 @@ let _settingsLoadFailed = false;
 // the settings table. The floor pickers offer these plus any floor already
 // used by a tenant or an expense.
 let managedFloors = [];
+// Days after the due date before a bill counts as overdue/late (admin setting).
+let graceDays = 0;
 function allFloors() {
   const canon = floorCanon(managedFloors.concat(allTenants().map(t => t.floor), expenses.map(x => x.floor)));
   const set = new Set();
@@ -1328,7 +1344,7 @@ async function _reloadAutoBillSettings() {
 async function loadAdminSettings() {
   _settingsLoadFailed = false;
   try {
-    const rows = await sbFetch('settings?select=key,value&key=in.(payment_instructions,announcements,property_name,property_subtitle,auto_billing,auto_billing_lead_days,floors)');
+    const rows = await sbFetch('settings?select=key,value&key=in.(payment_instructions,announcements,property_name,property_subtitle,auto_billing,auto_billing_lead_days,floors,grace_days)');
     const map = {}; (rows||[]).forEach(r=>{ map[r.key]=r.value; });
     paymentInstructions = map.payment_instructions || '';
     announcements       = map.announcements || '';
@@ -1337,6 +1353,7 @@ async function loadAdminSettings() {
     // Automatic billing is on unless explicitly turned off (admin-only keys:
     // read_setting's anon allowlist never exposes them).
     autoBilling = _parseAutoBilling(map);
+    { const g = Number(map.grace_days); graceDays = isFinite(g) ? Math.min(30, Math.max(0, Math.round(g))) : 0; }
     try { const fl = JSON.parse(map.floors || '[]'); managedFloors = Array.isArray(fl) ? fl.filter(x => typeof x === 'string' && x.trim()) : []; } catch { managedFloors = []; }
   } catch {
     // A transient failure must not masquerade as "Not set" — editing on top
@@ -1703,6 +1720,7 @@ async function logout() {
   expensesFloorAvailable = null;
   archivedTenants = [];
   managedFloors = [];
+  graceDays = 0;
   _archivedLoadError = false;
   expenseMonth = '';
   _editingExpenseId = null;
@@ -2010,7 +2028,7 @@ function attentionItems() {
     // posting window has opened (it was posted), whatever its date.
     if(ds === 'awaiting') { items.push({ t, b, bi, ds }); return; }
     if(billOpen(b) <= 0.005) return;
-    if(ds === 'overdue' || ds === 'due-today' || ds === 'due-soon') items.push({ t, b, bi, ds });
+    if(ds === 'overdue' || ds === 'grace' || ds === 'due-today' || ds === 'due-soon') items.push({ t, b, bi, ds });
   }));
   const rank = x => x.ds === 'overdue' ? 0 : x.ds === 'awaiting' ? 2 : 1; // placeholders are never late
   items.sort((a, b) => rank(a) - rank(b) || (a.b.due || '').localeCompare(b.b.due || ''));
@@ -2026,7 +2044,7 @@ function attentionRowHtml(it) {
   }
   const late = daysOverdue(it.b);
   const tone = it.ds === 'overdue' ? 'bad' : 'warn';
-  const lbl = it.ds === 'overdue' ? (late + 'd late') : it.ds === 'due-today' ? 'Due today' : 'Due ' + shortDate(it.b.due);
+  const lbl = it.ds === 'overdue' ? (late + 'd late') : it.ds === 'due-today' ? 'Due today' : it.ds === 'grace' ? 'Grace period' : 'Due ' + shortDate(it.b.due);
   return '<div class="att-row" data-tid="' + esc(it.t.id) + '" data-bi="' + it.bi + '">'
     + '<div class="att-main"><div class="att-title">' + esc(it.b.label) + ' ' + chip(tone, lbl) + '</div>'
     + '<div class="att-sub"><a href="#/tenants/' + encodeURIComponent(it.t.id) + '">' + esc(it.t.name) + '</a> · Unit ' + esc(it.t.unit) + (it.b.due ? ' · due ' + shortDate(it.b.due) : '') + '</div></div>'
@@ -2051,24 +2069,28 @@ function renderHome() {
     if(getDueStatus(b) === 'overdue') { overdue += o; overdueN++; }
   }));
   const cat = outstandingByCategory(tenants.flatMap(t => t.bills));
+  // Balances left by former tenants are still receivables; shown apart so the drill-down (current tenants) still ties.
+  const formerOpen = r2(archivedTenants.reduce((s, t) => s + tenantSummary(t).open, 0));
   const all = allTenants();
   const collected = cashInMonth(all, ym), billed = billedInMonth(all, ym);
   const utilSettled = cashInMonth(all, ym, true);
   const rate = billed > 0 ? Math.round(collected / billed * 100) : null;
   const expOk = expensesAvailable && !_expensesLoadError;
   const spent = expOk ? _expensesInMonth(ym) : 0;
-  const net = r2(collected - spent);
+  // Cash in (utility payments included, since the utility costs are in `spent`) minus cash out.
+  const net = r2(collected + utilSettled - spent);
 
   const kpis = '<div class="kpis">'
     + '<button type="button" class="kpi" onclick="goBills(\'open\')"><div class="kpi-label">Outstanding</div><div class="kpi-value">' + peso(open) + '</div>'
-    +   (open ? '<div class="kpi-lines">' + balanceLinesHtml(cat, 'stat-line') + '</div>' : '<div class="kpi-sub">Nothing owed</div>') + '</button>'
+    +   (open ? '<div class="kpi-lines">' + balanceLinesHtml(cat, 'stat-line') + '</div>' : '<div class="kpi-sub">Nothing owed</div>')
+    +   (formerOpen > 0.005 ? '<div class="kpi-sub">+ ' + peso(formerOpen) + ' owed by former tenants</div>' : '') + '</button>'
     + '<button type="button" class="kpi" onclick="goBills(\'overdue\')"><div class="kpi-label">Overdue</div><div class="kpi-value ' + (overdue ? 'bad' : 'good') + '">' + (overdue ? peso(overdue) : 'None') + '</div>'
     +   '<div class="kpi-sub">' + (overdueN ? overdueN + ' bill' + (overdueN !== 1 ? 's' : '') + ' past due' : 'nothing past due') + '</div></button>'
     + '<button type="button" class="kpi" onclick="go(\'reports\')"><div class="kpi-label">Collected · ' + monthShort + '</div><div class="kpi-value good">' + peso(collected) + '</div>'
-    +   '<div class="kpi-sub">of ' + peso(billed) + ' billed' + (rate !== null ? ' · ' + rate + '%' : '') + (utilSettled ? ' · utilities ' + peso(utilSettled) + ' passed through' : '') + '</div></button>'
+    +   '<div class="kpi-sub">' + peso(billed) + ' billed this month' + (collected > billed + 0.005 ? ' · includes older bills or advances' : rate !== null ? ' · ' + rate + '%' : '') + (utilSettled ? ' · utilities ' + peso(utilSettled) + ' passed through' : '') + '</div></button>'
     + (expOk
         ? '<button type="button" class="kpi" onclick="go(\'expenses\')"><div class="kpi-label">Net · ' + monthShort + '</div><div class="kpi-value ' + (net < 0 ? 'bad' : '') + '">' + (net < 0 ? '&minus;' : '') + peso(Math.abs(net)) + '</div>'
-          + '<div class="kpi-sub">collected &minus; ' + peso(spent) + ' expenses</div></button>'
+          + '<div class="kpi-sub">' + peso(r2(collected + utilSettled)) + ' received' + (utilSettled ? ' (incl. utilities)' : '') + ' &minus; ' + peso(spent) + ' expenses</div></button>'
         : '<div class="kpi"><div class="kpi-label">Tenants</div><div class="kpi-value">' + tenants.length + '</div><div class="kpi-sub">' + openN + ' open bill' + (openN !== 1 ? 's' : '') + '</div></div>')
     + '</div>';
 
@@ -2371,8 +2393,8 @@ function billMiniRow(t, b, bi) {
       + '<div class="bm-actions"><button type="button" class="btn-mini" onclick="const r=this.closest(\'[data-tid]\');openEditBillFromTable(r.dataset.tid,+r.dataset.bi)">' + icon('edit') + '<span>Enter amount</span></button>'
       + '<button type="button" class="btn-icon" aria-label="Bill actions" aria-haspopup="menu" onclick="const r=this.closest(\'[data-tid]\');openBillMenu(this,r.dataset.tid,+r.dataset.bi)">' + icon('kebab') + '</button></div></div>';
   }
-  const cls = { overdue: 'overdue', 'due-today': 'today', 'due-soon': 'soon' }[ds] || 'normal';
-  const chipTxt = b.due ? ({ overdue: 'Overdue · ', 'due-today': 'Due today · ', 'due-soon': 'Due soon · ' }[ds] || 'Due ') + shortDate(b.due) : 'No due date';
+  const cls = { overdue: 'overdue', grace: 'soon', 'due-today': 'today', 'due-soon': 'soon' }[ds] || 'normal';
+  const chipTxt = b.due ? ({ overdue: 'Overdue · ', grace: 'Grace period · due ', 'due-today': 'Due today · ', 'due-soon': 'Due soon · ' }[ds] || 'Due ') + shortDate(b.due) : 'No due date';
   const part = billTotalPaid(b) > 0 ? ' <span class="muted">(' + peso(billTotalPaid(b)) + ' received)</span>' : '';
   return '<div class="bm-row" data-tid="' + esc(t.id) + '" data-bi="' + bi + '">'
     + '<div class="bm-main"><div class="bm-label">' + esc(b.label) + (billPeriod(b) ? ' <span class="muted">· ' + fmtYM(billPeriod(b), 'short') + '</span>' : '') + '</div>'
@@ -2429,7 +2451,8 @@ function cycleCardHtml(t, s) {
     }
     let status;
     if(c.variable) status = chip('muted', 'Variable amount') + ' <span class="muted">cycle check only</span>';
-    else if(c.status === 'behind') status = chip('bad', 'Behind · ' + peso(c.arrears)) + (c.paidThrough ? ' Paid through ' + formatDate(c.paidThrough) : c.pool > 0.005 ? ' Payments so far don\'t cover the first cycle' : ' No payments matched to this charge');
+    else if(c.status === 'behind') status = chip('bad', 'Behind · ' + peso(c.arrears)) + (c.paidThrough ? ' Paid through ' + formatDate(c.paidThrough) : c.pool > 0.005 ? ' Payments so far don\'t cover the first cycle' : ' No payments matched to this charge')
+      + (c.missing.length ? ' <span class="muted">· counted from ' + (moveInOf(t) && c.startYM === ymOf(moveInOf(t)) ? 'move-in' : fmtYM(c.startYM, 'short')) + ', including ' + c.missing.length + ' cycle' + (c.missing.length !== 1 ? 's' : '') + ' never billed — post or waive ' + (c.missing.length !== 1 ? 'them' : 'it') + ' below</span>' : '');
     else if(c.status === 'advance') status = chip('good', c.aheadCycles + ' cycle' + (c.aheadCycles !== 1 ? 's' : '') + ' ahead') + ' Paid through <strong>' + formatDate(c.paidThrough) + '</strong>';
     else status = chip('good', 'Current') + (c.paidThrough ? ' Paid through <strong>' + formatDate(c.paidThrough) + '</strong>' : '') + (c.nextDue ? ' · next ' + peso(c.nextAmount) + ' due ' + shortDate(c.nextDue) : '');
     const a = ' data-tid="' + esc(t.id) + '" data-tmpl="' + esc(c.tmplId) + '"';
@@ -2705,7 +2728,7 @@ function billRowsForView() {
       if(billView === 'open' && !isOpen && !awaiting) return;
       if(billView === 'awaiting' && !awaiting) return;
       if(billView === 'overdue' && !(isOpen && ds === 'overdue')) return;
-      if(billView === 'soon' && !(isOpen && (ds === 'due-today' || ds === 'due-soon'))) return;
+      if(billView === 'soon' && !(isOpen && (ds === 'grace' || ds === 'due-today' || ds === 'due-soon'))) return;
       if(billView === 'paid' && ds !== 'paid') return;
       // Undated open bills stay visible in every month — they belong to none.
       if(filterMonth && billPeriod(b) !== filterMonth && !(!billPeriod(b) && (isOpen || awaiting))) return;
@@ -2812,7 +2835,7 @@ function renderRecurringTab() {
       const a = ' data-tid="' + esc(t.id) + '" data-tmpl="' + esc(c.tmplId) + '"';
       let status;
       if(c.variable) status = chip('muted', 'Variable');
-      else if(c.status === 'behind') status = chip('bad', 'Behind ' + peso(c.arrears));
+      else if(c.status === 'behind') status = chip('bad', 'Behind ' + peso(c.arrears)) + (c.missing.length ? ' <span class="muted">incl. ' + c.missing.length + ' never billed</span>' : '');
       else if(c.status === 'advance') status = chip('good', c.aheadCycles + ' ahead');
       else status = chip('good', 'Current');
       const acts = [];
@@ -2930,7 +2953,7 @@ async function _runAutoBilling(opts) {
         try {
           await dbUpdateTenantGuarded(tt, patch);
           Object.assign(tt, patch);
-          plan.bills.forEach(b => posted.push({ tid: tt.id, name: tt.name, label: b.label, period: b.period }));
+          plan.bills.forEach(b => posted.push({ tid: tt.id, name: tt.name, label: b.label, period: b.period, fromCredit: billTotalPaid(b) > 0.005 }));
           break;
         } catch(e) {
           if(e.gone) break;                          // archived/deleted elsewhere — nothing to post
@@ -2945,7 +2968,9 @@ async function _runAutoBilling(opts) {
   else if(_autoBillLast && posted.length) _autoBillLast.posted = _autoBillLast.posted.concat(posted);
   if(posted.length) {
     const months = Array.from(new Set(posted.map(p => fmtYM(p.period, 'short'))));
-    showToast('Posted ' + posted.length + ' recurring bill' + (posted.length !== 1 ? 's' : '') + ' (' + months.join(', ') + ').');
+    const cr = posted.filter(p => p.fromCredit);
+    showToast('Posted ' + posted.length + ' recurring bill' + (posted.length !== 1 ? 's' : '') + ' (' + months.join(', ') + ').'
+      + (cr.length ? ' ' + cr.length + ' paid from money received earlier beyond an earlier bill (' + Array.from(new Set(cr.map(p => p.name))).join(', ') + ') — see the payment notes.' : ''));
   } else if(failed) showToast(failed + ' tenant' + (failed !== 1 ? 's' : '') + ' could not be updated — recurring bills will retry next time.', false);
   else if(opts.manual) {
     // "Everything is posted" only when no due cycle is still unbilled
@@ -3159,8 +3184,8 @@ function renderReportsModule() {
     + card('doc', 'Income statement', 'Revenue, expenses and net income for any period. <strong>Accrual basis</strong> by default (revenue in the cycle it\'s earned; advances held as unearned), or cash basis.',
         btn('Open', 'openIncStmtModal()', { primary: true, icon: 'print' }))
     + card('building', 'Income statement per floor', floors.length
-        ? 'Each floor\'s revenue with its own expenses plus a fair share of building-wide costs &mdash; side by side, or one page per floor.'
-        : 'Give tenants a floor/group label to compare floors. Floor-tagged expenses go to their floor; shared costs are split by headcount or revenue.',
+        ? 'Each floor\'s revenue with its own floor-tagged expenses (building-wide costs can optionally be split) &mdash; side by side, or one page per floor.'
+        : 'Give tenants a floor/group label to compare floors. Floor-tagged expenses go to their floor; shared costs stay in the building total unless you choose to split them.',
         btn('Side by side', 'openIncStmtModal(\'floors-compare\')', { icon: 'building' }) + btn('One page per floor', 'openIncStmtModal(\'floors-pages\')', { icon: 'print' }))
     + card('users', 'Statement of account', 'A tenant\'s bills, payments and balance for a period — ready to print or save as PDF.',
         (tenants.length ? '<select id="rep-tenant" class="tb-select" aria-label="Tenant">' + tOpts + '</select>' + btn('Open', 'openStmtModalById(document.getElementById(\'rep-tenant\').value)', { primary: true, icon: 'print' }) : '<span class="muted">No tenants yet.</span>'))
@@ -3180,7 +3205,13 @@ function renderSettingsModule() {
     + '<div class="set-row"><div><div class="set-label">Posting lead time</div><div class="set-hint">Rent is paid in advance, so tenants see the bill before it\'s due.</div></div>'
     + '<select id="set-lead" class="tb-select" aria-label="Posting lead time" onchange="saveAutoBilling(\'lead\')">' + leadOpts + '</select></div>'
     + '<div class="btn-row">' + btn('Run now', 'runAutoBilling({manual:true})', { icon: 'repeat' }) + '</div>'
-    + '</section>';
+    + '</section>'
+    + '<section class="card"><div class="card-head"><h2 class="card-title">' + icon('calendar') + ' Late payments</h2></div>'
+    + '<div class="set-row"><div><div class="set-label">Grace period</div><div class="set-hint">Days after the due date before a bill shows as overdue and counts as late in punctuality.</div></div>'
+    + '<select id="set-grace" class="tb-select" aria-label="Grace period" onchange="saveGraceDays()">'
+    + [0, 1, 2, 3, 5, 7, 10, 15].map(d => '<option value="' + d + '"' + (graceDays === d ? ' selected' : '') + '>' + (d ? d + ' day' + (d !== 1 ? 's' : '') : 'None') + '</option>').join('')
+    + (![0, 1, 2, 3, 5, 7, 10, 15].includes(graceDays) ? '<option value="' + graceDays + '" selected>' + graceDays + ' days</option>' : '')
+    + '</select></div></section>';
   const portalCard = (ic, label, val, empty, fn) => '<div class="set-row"><div class="set-main"><div class="set-label">' + label + '</div>'
     + (val ? '<div class="set-preview">' + esc(val) + '</div>' : '<div class="set-hint">' + empty + '</div>') + '</div>'
     + btn('Edit', fn, { icon: 'edit' }) + '</div>';
@@ -3244,6 +3275,13 @@ async function removeFloor(f) {
   if(n || m) { showToast('"' + f + '" is used by ' + n + ' tenant(s) and ' + m + ' expense(s). Rename it, or move them to another floor first.', false); return; }
   if(!confirm('Remove floor "' + f + '"?')) return;
   try { await _saveManagedFloors(managedFloors.filter(x => floorNorm(x) !== floorNorm(f))); showToast('Floor removed.'); } catch(e) { showToast('Could not save: ' + e.message, false); }
+  rerenderAdmin();
+}
+async function saveGraceDays() {
+  if(!_guardSettingsEdit()) { rerenderAdmin(); return; }
+  const v = Math.min(30, Math.max(0, Math.round(Number(document.getElementById('set-grace').value) || 0)));
+  try { await dbSetSetting('grace_days', String(v)); graceDays = v; showToast(v ? 'Grace period set to ' + v + ' day' + (v !== 1 ? 's' : '') + '.' : 'Grace period removed.'); }
+  catch(e) { showToast('Could not save: ' + e.message, false); }
   rerenderAdmin();
 }
 async function saveAutoBilling(which) {
@@ -3357,7 +3395,8 @@ function renderExpensesModule() {
   const ym = _expYM();
   const monthLabel = fmtYM(ym);
   const monthTotal = _expensesInMonth(ym);
-  const collected = cashInMonth(allTenants(), ym);
+  // All cash received (utility payments too — their costs are in the spend) minus spent.
+  const collected = r2(cashInMonth(allTenants(), ym) + cashInMonth(allTenants(), ym, true));
   const net = r2(collected - monthTotal);
   const monthExpenses = expenses
     .filter(x=>(x.expense_date||'').startsWith(ym))
@@ -3380,7 +3419,7 @@ function renderExpensesModule() {
       : `<div class="exp-row" data-id="${esc(x.id)}">
           <span class="exp-date">${shortDate(x.expense_date)}</span>
           <span class="exp-cat exp-cat-${esc(x.category||'other')}">${esc(_expCatLabel(x.category))}</span>
-          <span class="exp-note">${(x.floor||'').trim()?'<span class="exp-floor">'+esc(x.floor)+'</span> ':''}${esc(x.note||'')}</span>
+          <span class="exp-note">${(x.floor||'').trim()?'<span class="exp-floor">'+esc(x.floor)+'</span> ':(expensesFloorAvailable?'<span class="exp-floor muted">Whole building</span> ':'')}${esc(x.note||'')}</span>
           <span class="exp-amt">${peso(x.amount)}</span>
           <span class="exp-actions">
             <button type="button" class="btn-icon" onclick="editExpense(this.closest('[data-id]').dataset.id)" aria-label="Edit expense">${icon('edit')}</button>
@@ -3397,8 +3436,8 @@ function renderExpensesModule() {
       </div>`
     + `<div class="kpis kpis-3">
         <div class="kpi"><div class="kpi-label">Spent · ${esc(fmtYM(ym,'short'))}</div><div class="kpi-value">${peso(monthTotal)}</div><div class="kpi-sub">${monthExpenses.length} expense${monthExpenses.length!==1?'s':''}</div></div>
-        <div class="kpi"><div class="kpi-label">Collected</div><div class="kpi-value good">${peso(collected)}</div><div class="kpi-sub">payments received</div></div>
-        <div class="kpi"><div class="kpi-label">Net cash</div><div class="kpi-value ${net<0?'bad':''}">${net<0?'&minus;':''}${peso(Math.abs(net))}</div><div class="kpi-sub">collected &minus; spent</div></div>
+        <div class="kpi"><div class="kpi-label">Collected</div><div class="kpi-value good">${peso(collected)}</div><div class="kpi-sub">payments received, incl. utilities</div></div>
+        <div class="kpi"><div class="kpi-label">Net cash</div><div class="kpi-value ${net<0?'bad':''}">${net<0?'&minus;':''}${peso(Math.abs(net))}</div><div class="kpi-sub">all payments received (incl. utilities) &minus; spent</div></div>
       </div>`
     + (_editingExpenseId ? '' : `<section class="card"><div class="card-head"><h2 class="card-title">Log an expense</h2></div>${_expFormHtml('new', null)}</section>`)
     + `<section class="card"><div class="card-head"><h2 class="card-title">${esc(monthLabel)}</h2></div>${catHtml}<div class="exp-list">${rows}</div></section>`;
@@ -3535,7 +3574,7 @@ function renderInsightsModule() {
   if(!all.length) return pageHead('Insights') + '<div class="empty-state"><p>Insights appear once you have tenants and bills.</p></div>';
   const rg = _insightRange(insightWindow);
   const hasExp = expensesAvailable && !_expensesLoadError;
-  const base = { tenants: all, expenses, hasExpenses: hasExp, floorRank, floorCanon: appFloorCanon(), allocation: 'headcount' };
+  const base = { tenants: all, expenses, hasExpenses: hasExp, floorRank, floorCanon: appFloorCanon(), allocation: 'none' };
   // Same revenue recognition as the printed income statement, so the two tie out.
   const prorate = _incStmtProrate();
   const acc = computeIncomeStatement(Object.assign({}, base, { from: rg.from, to: rg.to, basis: 'accrual', prorate }));
@@ -3566,7 +3605,7 @@ function renderInsightsModule() {
     + tile('Cash collected', peso(cash.total.revenue.total), _delta(cash.total.revenue.total, cashPrev.total.revenue.total, true))
     + (hasExp ? tile('Net income', (netV < 0 ? '&minus;' : '') + peso(Math.abs(netV)), _delta(netV, accPrev.total.net, true), netV < 0 ? 'bad' : '')
               : tile('Expenses', '&mdash;', 'ledger not set up'))
-    + tile('Billed & paid', eff === null ? '&mdash;' : eff + '%', billedWin ? peso(paidWin) + ' of ' + peso(billedWin) + ' billed' : 'nothing billed yet', eff !== null && eff < 80 ? 'bad' : '')
+    + tile('Billed & paid', eff === null ? '&mdash;' : eff + '%', billedWin ? peso(paidWin) + ' of ' + peso(billedWin) + ' billed (incl. utilities)' : 'nothing billed yet', eff !== null && eff < 80 ? 'bad' : '')
     + '</div>';
 
   const archNote = _archivedLoadError ? '<div class="hint-note">' + icon('alert') + ' Archived tenants could not be loaded — former tenants\' history is missing from these figures. Refresh to retry.</div>' : '';
@@ -3679,11 +3718,11 @@ function _hbars(items, fmt, cls) {
 }
 
 function _agingCard(today) {
-  const buckets = agingBuckets(tenants, today);
+  const buckets = agingBuckets(allTenants(), today);
   const total = r2(buckets.reduce((s, b) => s + b.amount, 0));
   const late = r2(buckets.filter(b => !['current', 'nodate'].includes(b.key)).reduce((s, b) => s + b.amount, 0));
-  // Same tenants as the buckets above (current tenants), same recognition as the statement.
-  const memo = computeIncomeStatement({ tenants, expenses: [], from: _currentYM(), to: _currentYM(), basis: 'accrual', prorate: _incStmtProrate(), hasExpenses: false }).memo.__total;
+  // Same tenants as the buckets above (current and former), same recognition as the statement.
+  const memo = computeIncomeStatement({ tenants: allTenants(), expenses: [], from: _currentYM(), to: _currentYM(), basis: 'accrual', prorate: _incStmtProrate(), hasExpenses: false }).memo.__total;
   const oldest = buckets.slice().reverse().find(b => b.amount > 0 && b.key !== 'current' && b.key !== 'nodate');
   const note = !total ? 'Nobody owes anything right now.'
     : late ? peso(late) + ' of ' + peso(total) + ' is past due' + (oldest && (oldest.key === 'd90p' || oldest.key === 'd90') ? ' — some of it for over ' + (oldest.key === 'd90p' ? '90' : '60') + ' days.' : '.')
@@ -3699,11 +3738,11 @@ function _agingCard(today) {
 
 function _expenseMixCard(acc) {
   const T = acc.total;
-  const cats = EXPENSE_CATEGORIES.map(c => ({ label: c.label, value: r2(T.direct[c.key] + T.shared[c.key]) })).filter(x => x.value > 0).sort((a, b) => b.value - a.value);
+  const cats = EXPENSE_CATEGORIES.map(c => ({ label: c.label, value: r2(T.direct[c.key] + T.shared[c.key] - T.recovered[c.key]) })).filter(x => x.value > 0).sort((a, b) => b.value - a.value);
   const spent = T.expenses;
   const meter = '';
   return '<section class="card"><div class="card-head"><h2 class="card-title">Where the money goes</h2><button type="button" class="link-btn" onclick="go(\'expenses\')">Expenses</button></div>'
-    + (cats.length ? '<p class="card-text">' + peso(spent) + ' spent' + (T.revenue.total > 0 ? ' — ' + Math.round(spent / T.revenue.total * 100) + '% of revenue.' : '.') + '</p>'
+    + (cats.length ? '<p class="card-text">' + peso(spent) + ' spent' + (T.recovered.total > 0.005 ? ' after ' + peso(T.recovered.total) + ' of utilities billed back to tenants' : '') + (T.revenue.total > 0 ? ' — ' + Math.round(spent / T.revenue.total * 100) + '% of revenue.' : '.') + '</p>'
         + _hbars(cats.map(c => Object.assign(c, { sub: '· ' + Math.round(c.value / spent * 100) + '%' })), x => peso(x.value), 's2')
         : '<div class="empty-inline">No expenses logged in this period.</div>')
     + meter + '</section>';
@@ -3717,11 +3756,11 @@ function _passThroughCard(acc) {
   const T = acc.total;
   const utilSpent = r2(['electricity', 'water', 'internet'].reduce((s, k) => s + T.direct[k] + T.shared[k], 0));
   return '<section class="card"><div class="card-head"><h2 class="card-title">Utilities billed back</h2></div>'
-    + '<p class="card-text">Electricity, water and similar bills charged to tenants are collected for the provider — pass-through, not revenue (IFRS 15, agent). They are kept out of revenue and net income.</p>'
+    + '<p class="card-text">Electricity, water and similar bills charged to tenants are collected for the provider — pass-through, not revenue (IFRS 15, agent). They are kept out of revenue, and the utility costs they reimburse are reduced by the same amount, so only the part tenants don\'t pay back counts as an expense.</p>'
     + '<div class="mini-stats"><div><span class="muted">Billed to tenants</span><strong>' + peso(P.billed) + '</strong></div>'
     + '<div><span class="muted">Settled</span><strong>' + peso(P.settled) + '</strong></div>'
     + '<div><span class="muted">Still unpaid</span><strong>' + peso(P.outstanding) + '</strong></div></div>'
-    + (utilSpent > 0 ? '<p class="card-text muted">Utility costs the property itself paid (Expenses) in this period: ' + peso(utilSpent) + '.</p>' : '')
+    + (utilSpent > 0 ? '<p class="card-text muted">Utility costs paid (Expenses): ' + peso(utilSpent) + '; ' + peso(T.recovered.total) + ' offset by billings to tenants, ' + peso(r2(utilSpent - T.recovered.total)) + ' borne by the property.</p>' : '')
     + '</section>';
 }
 
@@ -3733,23 +3772,26 @@ function _floorTableCard(acc, cash) {
     const c = acc.columns[f];
     const m = cash.memo[f];
     const onFloor = tenants.filter(t => floorNorm(t.floor) === floorNorm(f));
-    const owed = r2(onFloor.reduce((s, t) => s + tenantSummary(t).open, 0));
+    const owed = r2(allTenants().filter(t => floorNorm(t.floor) === floorNorm(f)).reduce((s, t) => s + tenantSummary(t).open, 0));
     const n = onFloor.length;
-    const margin = c.revenue.total > 0 ? Math.round(c.net / c.revenue.total * 100) : null;
+    // Only floor-tagged costs: building-wide costs are not charged to a floor here.
+    const floorExp = r2(c.direct.total - c.recovered.total); // net of utilities billed back
+    const net = r2(c.revenue.total - floorExp);
+    const margin = c.revenue.total > 0 ? Math.round(net / c.revenue.total * 100) : null;
     return '<tr><td><strong>' + esc(f || 'No floor') + '</strong><div class="muted">' + n + ' tenant' + (n !== 1 ? 's' : '') + '</div></td>'
       + '<td class="num">' + peso(c.revenue.total) + '</td>'
-      + (hasExp ? '<td class="num">' + peso(c.expenses) + '</td><td class="num' + (c.net < 0 ? ' txt-bad' : '') + '">' + (c.net < 0 ? '&minus;' : '') + peso(Math.abs(c.net)) + (margin !== null ? '<div class="muted">' + margin + '% margin</div>' : '') + '</td>' : '')
+      + (hasExp ? '<td class="num">' + (floorExp > 0.005 ? peso(floorExp) : '<span class="muted">&mdash;</span>') + '</td><td class="num' + (net < 0 ? ' txt-bad' : '') + '">' + (net < 0 ? '&minus;' : '') + peso(Math.abs(net)) + (margin !== null ? '<div class="muted">' + margin + '% margin</div>' : '') + '</td>' : '')
       + '<td class="num">' + (m && m.rate !== null ? m.rate + '%' : '&mdash;') + '</td>'
       + '<td class="num">' + (owed ? peso(owed) : '<span class="muted">&mdash;</span>') + '</td></tr>';
   }).join('');
   return '<section class="card"><div class="card-head"><h2 class="card-title">Floors</h2><button type="button" class="link-btn" onclick="openIncStmtModal(\'floors-compare\')">Per-floor income statement</button></div>'
-    + '<div class="table-scroll"><table class="mini-table"><thead><tr><th>Floor</th><th class="num">Revenue</th>' + (hasExp ? '<th class="num">Expenses*</th><th class="num">Net</th>' : '')
+    + '<div class="table-scroll"><table class="mini-table"><thead><tr><th>Floor</th><th class="num">Revenue</th>' + (hasExp ? '<th class="num">Floor expenses*</th><th class="num">Net</th>' : '')
     + '<th class="num">Collected</th><th class="num">Owed now</th></tr></thead><tbody>' + rows + '</tbody></table></div>'
-    + '<p class="card-text muted">Revenue on accrual basis. ' + (hasExp ? '*Includes floor-tagged costs plus a headcount share of building-wide costs. ' : '') + 'Collected = cash received vs billed in the period.</p></section>';
+    + '<p class="card-text muted">Revenue on accrual basis. ' + (hasExp ? '*Expenses tagged to that floor, less utilities billed back to its tenants' + (acc.total.shared.total > 0 ? '; building-wide costs of ' + peso(acc.total.shared.total) + ' are not split across floors here (the per-floor income statement can allocate them)' : '') + '. ' : '') + 'Collected = cash received vs billed in the period.</p></section>';
 }
 
 function _punctualityCard(rg, today) {
-  const rel = paymentReliability(allTenants(), rg.from, rg.to, today);
+  const rel = paymentReliability(allTenants(), rg.from, rg.to, today, graceDays);
   const n = rel.reduce((s, r) => s + r.n, 0);
   if(!n) return '<section class="card"><div class="card-head"><h2 class="card-title">Payment punctuality</h2></div><div class="empty-inline">No bills have fallen due in this period yet.</div></section>';
   const unpaidN = rel.reduce((s, r) => s + (r.unpaidLate || 0), 0);
@@ -3765,7 +3807,7 @@ function _punctualityCard(rg, today) {
       + '<td class="num">' + (owed ? peso(owed) : '<span class="muted">&mdash;</span>') + '</td></tr>';
   }).join('');
   return '<section class="card"><div class="card-head"><h2 class="card-title">Payment punctuality</h2></div>'
-    + '<p class="card-text"><strong>' + pct + '%</strong> of ' + n + ' bill' + (n !== 1 ? 's' : '') + ' due in this period were paid on or before the due date'
+    + '<p class="card-text"><strong>' + pct + '%</strong> of ' + n + ' bill' + (n !== 1 ? 's' : '') + ' due in this period were paid on or before the due date' + (graceDays ? ' (or within the ' + graceDays + '-day grace period)' : '')
     + (unpaidN ? ' (' + unpaidN + ' past due and still unpaid count as late)' : '') + '.'
     + (late.length ? ' Late payers, most habitual first:' : ' Nobody paid late.') + '</p>'
     + (late.length ? '<div class="table-scroll"><table class="mini-table"><thead><tr><th>Tenant</th><th>On time</th><th class="num">Avg. late by</th><th class="num">Owes now</th></tr></thead><tbody>' + rows + '</tbody></table></div>' : '')
@@ -3855,7 +3897,10 @@ function getDueStatus(bill) {
   const today = new Date(); today.setHours(0,0,0,0);
   const in3   = new Date(today); in3.setDate(in3.getDate()+3);
   const d     = new Date(bill.due+'T00:00:00');
-  if(d < today)                  return 'overdue';
+  if(d < today) {
+    const g = new Date(d); g.setDate(g.getDate() + graceDays);
+    return g >= today ? 'grace' : 'overdue';
+  }
   if(d.getTime()===today.getTime()) return 'due-today';
   if(d <= in3)                   return 'due-soon';
   return 'upcoming';
@@ -3870,6 +3915,7 @@ function getDueUrgencyScore(bill) {
     const days = bill.due ? Math.round((today-new Date(bill.due+'T00:00:00'))/86400000) : 0;
     return -days;
   }
+  if(s==='grace')     return 0.5;
   if(s==='due-today') return 1;
   if(s==='due-soon')  return 2;
   if(s==='upcoming'){
@@ -3932,7 +3978,7 @@ function floorList() {
 
 // Badge colour class from a derived due-status.
 function dsBadgeClass(ds){
-  return { overdue:'ds-overdue', 'due-today':'ds-overdue', 'due-soon':'ds-due',
+  return { overdue:'ds-overdue', 'due-today':'ds-overdue', 'due-soon':'ds-due', grace:'ds-due',
            upcoming:'ds-upcoming', 'no-date':'ds-upcoming', awaiting:'ds-due', paid:'ds-paid' }[ds] || 'ds-upcoming';
 }
 // ── BILLS TABLE (Billing module) ──
@@ -3981,7 +4027,7 @@ function renderTableView(c, rows) {
     return r;
   });
 
-  const dueStatusLabel = { overdue:'Overdue', 'due-today':'Due Today', 'due-soon':'Due Soon', upcoming:'Upcoming', 'no-date':'Unscheduled', awaiting:'Needs amount', paid:'Paid' };
+  const dueStatusLabel = { overdue:'Overdue', 'due-today':'Due Today', 'due-soon':'Due Soon', grace:'In grace period', upcoming:'Upcoming', 'no-date':'Unscheduled', awaiting:'Needs amount', paid:'Paid' };
   const totalRows = rows.length;
   const capped = rows.slice(0, tableRowLimit);
   const openSum = r2(rows.reduce((s, r) => s + billOpen(r.bill), 0));
@@ -3999,7 +4045,7 @@ function renderTableView(c, rows) {
       const b = r.bill, t = r.tenant;
       const ds = b.status === 'paid' ? 'paid' : getDueStatus(b);
       const isPaid = b.status === 'paid';
-      const cls = { overdue:'overdue', 'due-today':'today', 'due-soon':'soon', paid:'paid' }[ds] || 'normal';
+      const cls = { overdue:'overdue', grace:'soon', 'due-today':'today', 'due-soon':'soon', paid:'paid' }[ds] || 'normal';
       const chipTxt = isPaid ? 'Paid' + (b.paidDate ? ' · ' + shortDate(b.paidDate) : '')
         : ds === 'awaiting' ? 'Needs amount'
         : b.due ? (dueStatusLabel[ds] || 'Due') + ' · ' + shortDate(b.due) : 'No due date';
@@ -4616,6 +4662,7 @@ function billListItemHtml(b, i, extraClass) {
     overdue:   {label: 'Overdue',   color: 'var(--rust)'},
     'due-today':{label:'Due Today', color: 'var(--rust)'},
     'due-soon':{label:'Due Soon',   color: 'var(--orange)'},
+    grace:{label:'In grace period', color: 'var(--orange)'},
     upcoming:  {label: 'Upcoming',  color: 'var(--muted)'},
     'no-date': {label: 'Unscheduled', color: 'var(--muted)'},
     awaiting:  {label: 'Needs amount', color: 'var(--orange)'}
@@ -4687,11 +4734,13 @@ function editBillInline(i){
       <div class="field"><label>Amount (&#8369;)</label><input type="text" id="bi-amount-${i}" value="${b.amount}" inputmode="decimal" pattern="[0-9.]*" autocomplete="off"></div>
       <div class="field"><label>Due Date</label><input type="date" id="bi-due-${i}" value="${b.due||''}"></div>
       <div class="field"><label>Status</label>
-        <select id="bi-status-${i}" onchange="document.getElementById('bi-pd-wrap-${i}').style.display=this.value==='paid'?'block':'none'">
+        <select id="bi-status-${i}" onchange="_paidToggle(this,'bi-pd-wrap-${i}','bi-paidDate-${i}')">
           <option value="unpaid" ${b.status!=='paid'?'selected':''}>Unpaid</option>
           <option value="paid" ${b.status==='paid'?'selected':''}>Paid</option>
         </select>
       </div>
+      ${b.tmplId ? '' : _monthField('bi-period-'+i, b.period)}
+      ${_catField('bi-cat-'+i, b.category || '', b.label, !!b.tmplId)}
       <div class="field full" id="bi-pd-wrap-${i}" style="display:${b.status==='paid'?'block':'none'}"><label>Date Paid</label><input type="date" id="bi-paidDate-${i}" value="${b.paidDate||''}"></div>
       <div class="field full"><label>Remark <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted)">(optional)</span></label><input type="text" id="bi-remark-${i}" value="${esc(b.remark||'')}" placeholder="e.g. Partial payment received"></div>
       <div class="field full"><label>Google Drive Scan Link <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted)">(optional)</span></label><input type="text" id="bi-scanLink-${i}" value="${esc(b.scanLink||'')}" placeholder="https://drive.google.com/..."></div>
@@ -4713,13 +4762,15 @@ async function saveBillEdit(i){
   if(_amt===0 && !confirm('Amount is ₱0. Save anyway?')) return;
   const newStatus=document.getElementById('bi-status-'+i).value==='paid'?'paid':'unpaid';
   const pdInput=document.getElementById('bi-paidDate-'+i);
-  const paidDate=newStatus==='paid'?(pdInput?pdInput.value||todayISO():todayISO()):'';
+  if(newStatus==='paid' && pdInput && !pdInput.value){ showToast('Enter the date it was paid.',false); return; }
+  const paidDate=newStatus==='paid'?(pdInput?pdInput.value:todayISO()):'';
   if(newStatus==='paid' && paidDate!==t.bills[i].paidDate && !_futureDateOk(paidDate)) return;
   let remark=document.getElementById('bi-remark-'+i).value.trim();
   // Auto-clear "pending amount" remark when a real amount is entered
   if(_amt > 0 && remark.toLowerCase().includes('pending amount')) remark = '';
   const due=document.getElementById('bi-due-'+i).value;
   const scanLink=(function(v){return /^https:\/\//i.test(v)?v:'';})(document.getElementById('bi-scanLink-'+i).value.trim());
+  const _biCat = _catVal('bi-cat-'+i), _biPeriod = t.bills[i].tmplId ? null : _monthVal('bi-period-'+i);
   // Paid → Unpaid on a bill its logged payments settle: the most recent
   // payment is taken off (earlier genuine ones stay); a Receive-payment
   // entry offers to undo that whole payment instead.
@@ -4737,6 +4788,8 @@ async function saveBillEdit(i){
     if(!bills[i]) return;
     const prev = bills[i];
     const b = {...prev,label,amount:_amt,due,status:newStatus,remark,scanLink,paidDate};
+    if(_biCat) b.category = _biCat; else delete b.category;
+    if(_biPeriod !== null){ if(_biPeriod && _biPeriod !== ymOf(due)) b.period = _biPeriod; else delete b.period; }
     if(dropPayments){
       b.payments = (b.payments||[]).slice(0, -1);
       if(billTotalPaid(b) >= _amt - 0.005){ b.status = 'paid'; b.paidDate = prev.paidDate; sync = 'still'; }
@@ -4771,11 +4824,13 @@ function startNewBill(){
       <div class="field"><label>Amount (&#8369;)</label><input type="text" id="nb-amount" placeholder="0" inputmode="decimal" pattern="[0-9.]*" autocomplete="off"></div>
       <div class="field"><label>Due Date</label><input type="date" id="nb-due"></div>
       <div class="field"><label>Status</label>
-        <select id="nb-status" onchange="document.getElementById('nb-pd-wrap').style.display=this.value==='paid'?'block':'none'">
+        <select id="nb-status" onchange="_paidToggle(this,'nb-pd-wrap','nb-paidDate')">
           <option value="unpaid" selected>Unpaid</option>
           <option value="paid">Paid</option>
         </select>
       </div>
+      ${_monthField('nb-period', '')}
+      ${_catField('nb-cat', '', '', false)}
       <div class="field full" id="nb-pd-wrap" style="display:none"><label>Date Paid</label><input type="date" id="nb-paidDate"></div>
       <div class="field full"><label>Remark <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted)">(optional)</span></label><input type="text" id="nb-remark" placeholder="e.g. Partial payment received"></div>
       <div class="field full"><label>Google Drive Scan Link <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted)">(optional)</span></label><input type="text" id="nb-scanLink" placeholder="https://drive.google.com/..."></div>
@@ -4801,13 +4856,17 @@ async function saveNewBill(){
   const _nbAmt = normalizeAmount(document.getElementById('nb-amount').value);
   if(_nbAmt===0 && !confirm('Amount is ₱0. Add this bill anyway?')) return;
   const status=document.getElementById('nb-status').value==='paid'?'paid':'unpaid';
-  const paidDate=status==='paid'?(document.getElementById('nb-paidDate').value||todayISO()):'';
+  if(status==='paid' && !document.getElementById('nb-paidDate').value){ showToast('Enter the date it was paid.',false); return; }
+  const paidDate=status==='paid'?document.getElementById('nb-paidDate').value:'';
   const bill={label,amount:normalizeAmount(document.getElementById('nb-amount').value),due:document.getElementById('nb-due').value,status,remark:document.getElementById('nb-remark').value.trim(),scanLink:(function(v){return /^https:\/\//i.test(v)?v:'';})(document.getElementById('nb-scanLink').value.trim()),paidDate,payments:[]};
+  const _nbPeriod = _monthVal('nb-period'), _nbCat = _catVal('nb-cat');
+  if(_nbPeriod && _nbPeriod !== ymOf(bill.due)) bill.period = _nbPeriod;
+  if(_nbCat) bill.category = _nbCat;
   const _t = tenants.find(x=>x.id===editingId);
   const ph = _t && bill.amount > 0 ? _placeholderFor(_t, label, bill.due) : -1;
-  if(_t && ph < 0 && bill.due){
-    const _tm = templateOfBill(_t, {label}) || (isRentLabel(label) ? primaryTemplate(_t) : null);
-    if(_tm && templateBillExists(_t, _tm, bill.due.slice(0,7)) && !confirm(_t.name+' already has a "'+_tm.label+'" bill for '+fmtYM(bill.due.slice(0,7))+'. Add another?')) return;
+  if(_t && ph < 0 && billPeriod(bill)){
+    const _tm = templateOfBill(_t, {label}) || (isRentLabel(label) && _nbCat !== 'utilities' && _nbCat !== 'other' ? primaryTemplate(_t) : null);
+    if(_tm && templateBillExists(_t, _tm, billPeriod(bill)) && !confirm(_t.name+' already has a "'+_tm.label+'" bill for '+fmtYM(billPeriod(bill))+'. Add another?')) return;
   }
   if(ph >= 0 && confirm('"'+_t.bills[ph].label+'"'+(billPeriod(_t.bills[ph])?' for '+fmtYM(billPeriod(_t.bills[ph])):'')+' is already posted and waiting for its amount.\n\nOK: fill it with ₱'+fmtMoney(bill.amount)+'.\nCancel: add a separate bill instead.')){
     const ok = await saveBills(editingId, bills=>{
@@ -4871,6 +4930,7 @@ async function saveTenant(){
   const dueDay = Number(_ddRaw);
   if(String(_ddRaw).trim() && !(Number.isInteger(dueDay) && dueDay>=1 && dueDay<=31)){ showToast('Rent due day must be a whole number from 1 to 31.',false); return; }
   if(!name||!unit||!code){showToast('Please fill in name, unit, and access code.',false);return;}
+  if(!editingId && billForms.some(b=>b.label && b.status==='paid' && !b.paidDate)){showToast('Enter the date each paid bill was paid.',false);return;}
   if(tenants.find(t=>t.code===code&&t.id!==editingId)){showToast('That access code is already in use.',false);return;}
   const _archSame = archivedTenants.find(t=>t.code===code&&t.id!==editingId);
   if(_archSame){ showToast('Access code '+code+' belongs to archived tenant '+_archSame.name+' — pick another (Generate makes a new one).',false); return; }
@@ -4890,7 +4950,7 @@ async function saveTenant(){
       status:   b.status==='paid'?'paid':'unpaid',
       remark:   (b.remark||'').trim(),
       scanLink: /^https:\/\//i.test((b.scanLink||'').trim()) ? (b.scanLink||'').trim() : '',
-      paidDate: b.status==='paid' ? (b.paidDate || todayISO()) : '',
+      paidDate: b.status==='paid' ? b.paidDate : '',
       payments: []
     }));
     const negative = billForms.find(b=>b.label && Number(String(b.amount||'').replace(/,/g,'')) < 0);
@@ -5003,6 +5063,8 @@ function openQuickBill(tid){
   document.getElementById('qb-label').value='';
   document.getElementById('qb-amount').value='';
   document.getElementById('qb-due').value='';
+  document.getElementById('qb-period').value='';
+  document.getElementById('qb-cat').value='';
   document.getElementById('qb-remark').value='';
   document.getElementById('qb-scan').value='';
   document.getElementById('qb-paid').checked=false;
@@ -5012,6 +5074,13 @@ function openQuickBill(tid){
   openModal('addbill-modal');
 }
 function closeQuickBill(){ closeModalEl('addbill-modal'); }
+// Show the Date Paid field when a bill is marked paid, pre-filled (visibly) with today.
+function _paidToggle(sel, wrapId, inputId){
+  const on = sel.value==='paid';
+  document.getElementById(wrapId).style.display = on ? 'block' : 'none';
+  const inp = document.getElementById(inputId);
+  if(on && inp && !inp.value) inp.value = todayISO();
+}
 function qbTogglePaid(cb){
   document.getElementById('qb-paiddate-wrap').style.display = cb.checked ? 'block' : 'none';
   if(cb.checked && !document.getElementById('qb-paiddate').value){
@@ -5066,7 +5135,8 @@ async function saveQuickBill(addAnother){
   if(ph >= 0){
     const pb = t.bills[ph];
     if(confirm('"'+pb.label+'"'+(billPeriod(pb)?' for '+fmtYM(billPeriod(pb)):'')+' is already posted and waiting for its amount.\n\nOK: fill it with ₱'+fmtMoney(amount)+'.\nCancel: add a separate bill instead.')){
-      const paidDateQ = isPaidQ ? (document.getElementById('qb-paiddate').value || todayISO()) : '';
+      if(isPaidQ && !document.getElementById('qb-paiddate').value){ showToast('Enter the date it was paid.',false); return; }
+      const paidDateQ = isPaidQ ? document.getElementById('qb-paiddate').value : '';
       const scanQ = document.getElementById('qb-scan').value.trim();
       const remarkQ = document.getElementById('qb-remark').value.trim();
       const ok = await saveBills(tid, bills=>{
@@ -5082,7 +5152,7 @@ async function saveQuickBill(addAnother){
       }, 'Amount entered for '+t.name+'.', t);
       if(ok !== true) return;
       rerenderAdmin();
-      if(addAnother){ ['qb-label','qb-amount','qb-remark','qb-scan'].forEach(id=>{ document.getElementById(id).value=''; }); document.getElementById('qb-paid').checked=false; document.getElementById('qb-paiddate-wrap').style.display='none'; document.getElementById('qb-label').focus(); }
+      if(addAnother){ ['qb-label','qb-amount','qb-remark','qb-scan','qb-period','qb-cat'].forEach(id=>{ document.getElementById(id).value=''; }); document.getElementById('qb-paid').checked=false; document.getElementById('qb-paiddate-wrap').style.display='none'; document.getElementById('qb-label').focus(); }
       else closeQuickBill();
       return;
     }
@@ -5090,18 +5160,23 @@ async function saveQuickBill(addAnother){
   // Duplicate guard: same label already billed in that month, or a bill
   // that stands for a recurring charge (e.g. "Rent - October") the month
   // already has.
-  if(due && ph < 0){
-    const _tm = templateOfBill(t, {label}) || (isRentLabel(label) ? primaryTemplate(t) : null);
-    const dup = t.bills.some(b=>(b.label||'').trim().toLowerCase()===label.toLowerCase() && b.due && b.due.slice(0,7)===due.slice(0,7))
-      || !!(_tm && templateBillExists(t, _tm, due.slice(0,7)));
-    if(dup && !confirm(t.name+' already has a "'+label+'" bill due '+new Date(due.slice(0,7)+'-02').toLocaleString('default',{month:'long',year:'numeric'})+'. Add another?')) return;
+  const qbPeriod = _monthVal('qb-period'), qbCat = _catVal('qb-cat');
+  const forYM = qbPeriod || ymOf(due);
+  if(forYM && ph < 0){
+    const _tm = templateOfBill(t, {label}) || (isRentLabel(label) && qbCat !== 'utilities' && qbCat !== 'other' ? primaryTemplate(t) : null);
+    const dup = t.bills.some(b=>(b.label||'').trim().toLowerCase()===label.toLowerCase() && billPeriod(b)===forYM)
+      || !!(_tm && templateBillExists(t, _tm, forYM));
+    if(dup && !confirm(t.name+' already has a "'+label+'" bill for '+fmtYM(forYM)+'. Add another?')) return;
   }
   const isPaid = document.getElementById('qb-paid').checked;
-  const paidDate = isPaid ? (document.getElementById('qb-paiddate').value || todayISO()) : '';
+  if(isPaid && !document.getElementById('qb-paiddate').value){ showToast('Enter the date it was paid.',false); return; }
+  const paidDate = isPaid ? document.getElementById('qb-paiddate').value : '';
   const scan = document.getElementById('qb-scan').value.trim();
   const bill = { label, amount, due, status: isPaid?'paid':'unpaid',
     remark: document.getElementById('qb-remark').value.trim(),
     scanLink: /^https:\/\//i.test(scan)?scan:'', paidDate, payments: [] };
+  if(qbPeriod && qbPeriod !== ymOf(due)) bill.period = qbPeriod;
+  if(qbCat) bill.category = qbCat;
   const ok = await saveBills(tid, bills=>{ bills.push(bill); }, 'Bill added for '+t.name+'.');
   if(ok !== true) return; // form stays filled so the admin can retry
   rerenderAdmin();
@@ -5110,6 +5185,8 @@ async function saveQuickBill(addAnother){
     document.getElementById('qb-amount').value='';
     document.getElementById('qb-remark').value='';
     document.getElementById('qb-scan').value='';
+    document.getElementById('qb-period').value='';
+    document.getElementById('qb-cat').value='';
     document.getElementById('qb-paid').checked=false;
     document.getElementById('qb-paiddate-wrap').style.display='none';
     document.getElementById('qb-label').focus();
@@ -5176,8 +5253,9 @@ function renderTenant(){
   // ── All-inclusive tenants: one predictable number, so the header answers
   // "am I paid up this month?" instead of repeating the same figure 3 times.
   const isInclusive = t.billing_model==='inclusive';
-  const _tmplRate = (t.templates||[]).find(x=>/rent/i.test(x.label||'')) || (t.templates||[])[0];
-  const flatRate = Number(t.flat_rate) || (_tmplRate && !_tmplRate.pendingAmount ? Number(_tmplRate.amount) : 0) || 0;
+  // The live rent charge at this month's rate (a retired or stale rate would mislead the tenant).
+  const _tmplRate = primaryTemplate(t);
+  const flatRate = (_tmplRate ? tmplRateAt(_tmplRate, curYM) : 0) || (!(t.templates||[]).length ? Number(t.flat_rate) || 0 : 0);
   const monthName = now.toLocaleString('default',{month:'long'});
   const curMonthBills  = t.bills.filter(b=>b.due&&b.due.startsWith(curYM));
   const curMonthUnpaid = curMonthBills.filter(b=>b.status!=='paid' && !billAwaitingAmount(b));
@@ -5255,6 +5333,7 @@ function renderTenant(){
     if(s==='overdue')   return {chip:'Overdue · '+d,  cls:'overdue'};
     if(s==='due-today') return {chip:'Due Today · '+d, cls:'today'};
     if(s==='due-soon')  return {chip:'Due Soon · '+d,  cls:'soon'};
+    if(s==='grace')     return {chip:'Grace period · due '+d, cls:'soon'};
     return {chip:'Due '+d, cls:'normal'};
   }
 
@@ -5692,6 +5771,7 @@ function editTemplateInline(i) {
         <input type="checkbox" id="te-auto-${i}" ${tmpl.auto!==false?'checked':''}>
         <label for="te-auto-${i}">Post automatically each cycle <span class="opt">(ahead of the due date, rent in advance)</span></label>
       </div>
+      ${_catField('te-cat-'+i, tmpl.category || '', tmpl.label, true)}
     </div>
     <div style="display:flex;gap:8px;margin-top:12px;">
       <button class="btn-cancel" style="flex:1;padding:9px;" onclick="document.getElementById('tmpl-edit-inline-${i}').style.display='none'">Cancel</button>
@@ -5760,10 +5840,22 @@ async function saveTemplateEdit(i) {
   // A metered charge switched to a fixed amount is reckoned from now on.
   if(_prev.pendingAmount && !_isPending) _next.since = _sinceFor(t, _next);
   _next.pendingAmount = _isPending;
+  // Category: set on the charge and carried onto every bill of it.
+  const _cat = _catVal('te-cat-'+i);
+  if(_cat) _next.category = _cat; else delete _next.category;
+  let billsCopy = null;
+  if((_prev.category || '') !== _cat) {
+    billsCopy = structuredClone(t.bills || []);
+    billsCopy.forEach((b, k) => {
+      if(!b || (templateOfBill(t, t.bills[k]) || {}).id !== _prev.id) return;
+      if(_cat) b.category = _cat; else delete b.category;
+    });
+  }
   templatesCopy[i] = _next;
   try {
-    await dbUpdateTenantGuarded(t, {templates: templatesCopy});
+    await dbUpdateTenantGuarded(t, billsCopy ? {templates: templatesCopy, bills: billsCopy} : {templates: templatesCopy});
     t.templates = templatesCopy;
+    if(billsCopy) t.bills = billsCopy;
     showToast('Template saved.');
     await runAutoBilling({ only: t.id });
     renderTemplateList();
@@ -5845,6 +5937,7 @@ function startNewTemplate() {
         <input type="checkbox" id="nt-auto" checked>
         <label for="nt-auto">Post automatically each cycle <span class="opt">(ahead of the due date, rent in advance)</span></label>
       </div>
+      ${_catField('nt-cat', '', '', true)}
     </div>
     <div style="display:flex;gap:8px;margin-top:12px;">
       <button class="btn-cancel" style="flex:1;padding:9px;" onclick="cancelNewTemplate()">Cancel</button>
@@ -5852,6 +5945,23 @@ function startNewTemplate() {
     </div>
   </div>`;
 }
+
+// Category picker for a charge or bill. '' = decide from the name (shown).
+const _CAT_OPTS = [['rent','Rent (revenue)'],['utilities','Utility billed back (not revenue)'],['other','Other charge (revenue)']];
+function _catField(id, cur, label, full) {
+  const guess = billCategory({ label: label || '' });
+  const name = (_CAT_OPTS.find(o => o[0] === guess) || [,''])[1];
+  return '<div class="field'+(full?' full':'')+'"><label for="'+id+'">Category</label><select id="'+id+'">'
+    + '<option value=""'+(!cur?' selected':'')+'>From the name'+(label?' ('+esc(name)+')':'')+'</option>'
+    + _CAT_OPTS.map(o => '<option value="'+o[0]+'"'+(cur===o[0]?' selected':'')+'>'+o[1]+'</option>').join('')
+    + '</select></div>';
+}
+// "For month" on a hand-typed bill: blank = the due date's month.
+function _monthField(id, cur) {
+  return '<div class="field"><label for="'+id+'">For month <span class="opt">(blank = due date\'s month)</span></label><input type="month" id="'+id+'" value="'+(isYM(cur)?cur:'')+'"></div>';
+}
+function _monthVal(id) { const el = document.getElementById(id); return el && isYM(el.value) ? el.value : ''; }
+function _catVal(id) { const el = document.getElementById(id); const v = el ? el.value : ''; return _CAT_OPTS.some(o => o[0] === v) ? v : ''; }
 
 function cancelNewTemplate() {
   document.getElementById('new-tmpl-inline').style.display='none';
@@ -5878,10 +5988,12 @@ async function saveNewTemplate() {
   // Another charge's old name equal to this new name now belongs here.
   templatesCopy.forEach(x => { if(x && Array.isArray(x.aliases)) x.aliases = x.aliases.filter(a => normLabel(a) !== normLabel(label)); });
   const _nt = {id:uid(), label, amount:amt, dayOfMonth:day, pendingAmount:_ntPending, auto: _ntAuto ? _ntAuto.checked : true};
+  const _ntCat = _catVal('nt-cat'); if(_ntCat) _nt.category = _ntCat;
   // A new charge isn't owed for months before it existed — except the
   // tenant's first rent charge, which is reckoned from move-in.
   const _firstRent = isRentLabel(label) && !templatesCopy.some(x => x && isRentLabel(x.label));
   if(!_firstRent) _nt.since = _sinceFor(t, _nt);
+  const _startsNext = _nt.since && _nt.since > _currentYM();
   // A second rent charge (a new rate set up as a new charge): offer to stop
   // the old one so the tenant isn't charged rent twice.
   const _oldRent = isRentLabel(_nt.label) ? templatesCopy.filter(x => x && !x.retired && isRentLabel(x.label)) : [];
@@ -5891,7 +6003,7 @@ async function saveNewTemplate() {
   try {
     await dbUpdateTenantGuarded(t, {templates: templatesCopy});
     t.templates = templatesCopy;
-    showToast('Template added.');
+    showToast(_startsNext ? 'Charge added. This month\'s due day has passed, so it starts in '+fmtYM(_nt.since)+'.' : 'Charge added.');
     cancelNewTemplate();
     await runAutoBilling({ only: t.id });
     renderTemplateList();
@@ -6322,7 +6434,7 @@ function csvCell(v){
   return '"'+s+'"';
 }
 function exportCSV() {
-  const dsLabel = { paid:'Paid', overdue:'Overdue', 'due-today':'Due Today', 'due-soon':'Due Soon', upcoming:'Upcoming', 'no-date':'Unscheduled', awaiting:'Amount to follow' };
+  const dsLabel = { paid:'Paid', overdue:'Overdue', 'due-today':'Due Today', 'due-soon':'Due Soon', grace:'In grace period', upcoming:'Upcoming', 'no-date':'Unscheduled', awaiting:'Amount to follow' };
   const rows = [['Tenant Name','Unit','Floor','Tenant Status','Billing Model','Access Code','Bill Label','Cycle','Amount','Amount Paid','Remaining','Due Date','Status','Paid Date','Remark']];
   // Every bill — former (archived) tenants included, since reports count them.
   allTenants().forEach(t => {

@@ -111,19 +111,48 @@ Insights and Settings sit under *More*):
 - **Cash:** revenue is counted when payment is received.
 - **Utilities billed back** to tenants (electricity, water…) are collected
   on behalf of the provider — the property acts as agent (IFRS 15) — so
-  they are never revenue or net income. They appear in their own section
-  of the income statement and their own Insights card (billed, settled,
-  still unpaid); tenants still see and owe them on their bills.
+  they are never revenue. The utility costs they reimburse (Electricity,
+  Water, Internet in the expenses ledger) are reduced by the same amount —
+  matched per floor, month and kind, as "Less: utilities billed back" — so
+  only the part tenants don't pay back (e.g. common areas) is an expense.
+  They appear in their own section of the income statement and their own
+  Insights card (billed, settled, still unpaid, offset); tenants still see
+  and owe them on their bills.
+- **Categories** (rent / utility billed back / other) are guessed from the
+  name ("Electric Bill" → utility) unless you pick one on the charge or
+  bill. A category picked on a charge is carried onto all its bills —
+  e.g. an all-inclusive "Room + water" charge set to Rent stays revenue.
+- **For month:** a hand-typed bill belongs to its due date's month unless
+  you set "For month" (e.g. "Rent – October" due Sep 28 → October), so it
+  counts in the right month and the charge isn't billed twice.
 - Without a move-in date, a recurring bill is earned over its own month
   (rent due on the 31st is that month's rent).
 - **Per floor:** floor-tagged expenses are direct costs; building-wide
-  expenses are split by headcount (tenants in residence each month) or by
-  revenue share, or left unallocated. Archived tenants' history counts.
+  expenses stay in the building total unless you choose, on the per-floor
+  income statement, to split them by occupied units (distinct units with a
+  tenant living there that month) or by each floor's share of revenue.
+  The Insights Floors table shows floor-tagged expenses (less utilities
+  billed back to that floor's tenants) only. Archived
+  tenants' history counts.
   Floor labels match regardless of case and spacing ("3rd floor" =
   "3rd Floor"). Floors are picked from a dropdown (tenants and expenses:
   a floor, "Whole building", or "+ Add a floor…") and managed under
   Settings › Floors, where renaming a floor updates every tenant and
   expense on it.
+
+**Other settings and rules**
+- **Grace period** (Settings › Late payments, default none): days after the
+  due date before a bill shows as overdue and counts as late in
+  punctuality. Aging buckets still count days from the due date.
+- **Date Paid** is never assumed: it pre-fills with today (visible,
+  editable) when a bill is marked paid, and is required for paid bills
+  entered with a new tenant.
+- Unpaid balances of former (archived) tenants stay in receivables: Home
+  shows them under Outstanding, and the aging card and floor "Owed now"
+  include them.
+- "Behind" on a charge is counted from move-in (or when the charge
+  started) and says how many of those cycles were never billed; post or
+  waive them in the checker.
 
 **For tenants** (access code or one-tap portal link):
 - Their bills, balance, payment history, and printable statement.
