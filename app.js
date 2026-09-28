@@ -3735,17 +3735,19 @@ function _floorTableCard(acc, cash) {
     const onFloor = tenants.filter(t => floorNorm(t.floor) === floorNorm(f));
     const owed = r2(onFloor.reduce((s, t) => s + tenantSummary(t).open, 0));
     const n = onFloor.length;
-    const margin = c.revenue.total > 0 ? Math.round(c.net / c.revenue.total * 100) : null;
+    // Only floor-tagged costs: building-wide costs are not charged to a floor here.
+    const net = r2(c.revenue.total - c.direct.total);
+    const margin = c.revenue.total > 0 ? Math.round(net / c.revenue.total * 100) : null;
     return '<tr><td><strong>' + esc(f || 'No floor') + '</strong><div class="muted">' + n + ' tenant' + (n !== 1 ? 's' : '') + '</div></td>'
       + '<td class="num">' + peso(c.revenue.total) + '</td>'
-      + (hasExp ? '<td class="num">' + peso(c.expenses) + '</td><td class="num' + (c.net < 0 ? ' txt-bad' : '') + '">' + (c.net < 0 ? '&minus;' : '') + peso(Math.abs(c.net)) + (margin !== null ? '<div class="muted">' + margin + '% margin</div>' : '') + '</td>' : '')
+      + (hasExp ? '<td class="num">' + (c.direct.total ? peso(c.direct.total) : '<span class="muted">&mdash;</span>') + '</td><td class="num' + (net < 0 ? ' txt-bad' : '') + '">' + (net < 0 ? '&minus;' : '') + peso(Math.abs(net)) + (margin !== null ? '<div class="muted">' + margin + '% margin</div>' : '') + '</td>' : '')
       + '<td class="num">' + (m && m.rate !== null ? m.rate + '%' : '&mdash;') + '</td>'
       + '<td class="num">' + (owed ? peso(owed) : '<span class="muted">&mdash;</span>') + '</td></tr>';
   }).join('');
   return '<section class="card"><div class="card-head"><h2 class="card-title">Floors</h2><button type="button" class="link-btn" onclick="openIncStmtModal(\'floors-compare\')">Per-floor income statement</button></div>'
-    + '<div class="table-scroll"><table class="mini-table"><thead><tr><th>Floor</th><th class="num">Revenue</th>' + (hasExp ? '<th class="num">Expenses*</th><th class="num">Net</th>' : '')
+    + '<div class="table-scroll"><table class="mini-table"><thead><tr><th>Floor</th><th class="num">Revenue</th>' + (hasExp ? '<th class="num">Floor expenses*</th><th class="num">Net</th>' : '')
     + '<th class="num">Collected</th><th class="num">Owed now</th></tr></thead><tbody>' + rows + '</tbody></table></div>'
-    + '<p class="card-text muted">Revenue on accrual basis. ' + (hasExp ? '*Includes floor-tagged costs plus a headcount share of building-wide costs. ' : '') + 'Collected = cash received vs billed in the period.</p></section>';
+    + '<p class="card-text muted">Revenue on accrual basis. ' + (hasExp ? '*Expenses tagged to that floor only' + (acc.total.shared.total > 0 ? '; building-wide costs of ' + peso(acc.total.shared.total) + ' are not split across floors here (the per-floor income statement can allocate them)' : '') + '. ' : '') + 'Collected = cash received vs billed in the period.</p></section>';
 }
 
 function _punctualityCard(rg, today) {
