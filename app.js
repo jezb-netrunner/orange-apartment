@@ -3380,7 +3380,7 @@ function renderExpensesModule() {
       : `<div class="exp-row" data-id="${esc(x.id)}">
           <span class="exp-date">${shortDate(x.expense_date)}</span>
           <span class="exp-cat exp-cat-${esc(x.category||'other')}">${esc(_expCatLabel(x.category))}</span>
-          <span class="exp-note">${(x.floor||'').trim()?'<span class="exp-floor">'+esc(x.floor)+'</span> ':''}${esc(x.note||'')}</span>
+          <span class="exp-note">${(x.floor||'').trim()?'<span class="exp-floor">'+esc(x.floor)+'</span> ':(expensesFloorAvailable?'<span class="exp-floor muted">Whole building</span> ':'')}${esc(x.note||'')}</span>
           <span class="exp-amt">${peso(x.amount)}</span>
           <span class="exp-actions">
             <button type="button" class="btn-icon" onclick="editExpense(this.closest('[data-id]').dataset.id)" aria-label="Edit expense">${icon('edit')}</button>
