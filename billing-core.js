@@ -1131,7 +1131,7 @@ function _recognizedThrough(t, b, endYM, prorate) {
 //   hasExpenses false = expenses ledger unavailable (income only)
 // Returns { months, floors, columns{key→col}, total, unallocated, perMonth, memo, undated }.
 function computeIncomeStatement(params) {
-  const P = Object.assign({ basis: 'accrual', prorate: false, allocation: 'headcount', hasExpenses: true }, params || {});
+  const P = Object.assign({ basis: 'accrual', prorate: false, allocation: 'none', hasExpenses: true }, params || {});
   const tenants = P.tenants || [];
   const expenses = P.hasExpenses ? (P.expenses || []) : [];
   const months = ymRange(P.from, P.to);

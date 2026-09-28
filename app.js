@@ -533,8 +533,8 @@ function printStatement() {
 // and rent paid ahead sits as unearned until its cycle arrives. Cash basis
 // counts money when received. Scope: the whole building, one floor, all
 // floors side by side, or one page per floor. Floor-tagged expenses are
-// direct costs; untagged ones are shared and allocated by headcount or
-// revenue share (or left unallocated). Numbers come from
+// direct costs; untagged ones are shared and stay in the building total unless
+// the admin chooses to split them by headcount or revenue share. Numbers come from
 // computeIncomeStatement (billing-core.js); this section only renders.
 // ─────────────────────────────────────────────
 let _incStmtPreset = '6m';       // 'this' | 'last' | '3m' | '6m' | 'ytd' | 'all' | 'custom'
@@ -546,7 +546,7 @@ const INCSTMT_PREFS_KEY = 'oa_incstmt_prefs_v2';
 
 function incStmtDefaultPrefs() {
   return {
-    preset:'6m', basis:'accrual', prorate:false, scope:'building', alloc:'headcount',
+    preset:'6m', basis:'accrual', prorate:false, scope:'building', alloc:'none',
     incDetail:true, expDetail:true, monthly:true, memo:true,
     sign:false, note:'', size:'normal', theme:'color', paper:'a4', orient:'portrait'
   };
@@ -590,6 +590,8 @@ function openIncStmtModal(scope) {
       prefs = Object.assign(prefs, saved);
       // Spreading is opt-in; it is saved as `spread` so an old saved default (prorate) is ignored.
       prefs.prorate = typeof saved.spread === 'boolean' ? saved.spread : false;
+      // Splitting building-wide costs is opt-in too (saved as `split`; an old saved default is ignored).
+      prefs.alloc = ['headcount','revenue','none'].includes(saved.split) ? saved.split : 'none';
     }
   } catch {}
   if(scope) prefs.scope = scope;
@@ -600,7 +602,7 @@ function openIncStmtModal(scope) {
   const setVal = (id,v)=>{ document.getElementById(id).value = v; };
   setVal('incstmt-basis', prefs.basis==='cash' ? 'cash' : 'accrual');
   setChk('incstmt-prorate', prefs.prorate);
-  setVal('incstmt-alloc', ['headcount','revenue','none'].includes(prefs.alloc) ? prefs.alloc : 'headcount');
+  setVal('incstmt-alloc', ['headcount','revenue','none'].includes(prefs.alloc) ? prefs.alloc : 'none');
   setChk('incstmt-inc-detail', prefs.incDetail);
   setChk('incstmt-exp-detail', prefs.expDetail);
   setChk('incstmt-monthly', prefs.monthly);
@@ -693,8 +695,9 @@ function incStmtOptsChanged() {
   _syncIncStmtControls();
   const o = getIncStmtOpts();
   try {
-    const {from, to, prorate, ...prefs} = o; // range is per-visit, everything else persists
+    const {from, to, prorate, alloc, ...prefs} = o; // range is per-visit, everything else persists
     prefs.spread = prorate;
+    prefs.split = alloc;
     localStorage.setItem(INCSTMT_PREFS_KEY, JSON.stringify(prefs));
   } catch {}
   clearTimeout(_incStmtPreviewTimer);
@@ -3160,7 +3163,7 @@ function renderReportsModule() {
         btn('Open', 'openIncStmtModal()', { primary: true, icon: 'print' }))
     + card('building', 'Income statement per floor', floors.length
         ? 'Each floor\'s revenue with its own expenses plus a fair share of building-wide costs &mdash; side by side, or one page per floor.'
-        : 'Give tenants a floor/group label to compare floors. Floor-tagged expenses go to their floor; shared costs are split by headcount or revenue.',
+        : 'Give tenants a floor/group label to compare floors. Floor-tagged expenses go to their floor; shared costs stay in the building total unless you choose to split them.',
         btn('Side by side', 'openIncStmtModal(\'floors-compare\')', { icon: 'building' }) + btn('One page per floor', 'openIncStmtModal(\'floors-pages\')', { icon: 'print' }))
     + card('users', 'Statement of account', 'A tenant\'s bills, payments and balance for a period — ready to print or save as PDF.',
         (tenants.length ? '<select id="rep-tenant" class="tb-select" aria-label="Tenant">' + tOpts + '</select>' + btn('Open', 'openStmtModalById(document.getElementById(\'rep-tenant\').value)', { primary: true, icon: 'print' }) : '<span class="muted">No tenants yet.</span>'))
@@ -3535,7 +3538,7 @@ function renderInsightsModule() {
   if(!all.length) return pageHead('Insights') + '<div class="empty-state"><p>Insights appear once you have tenants and bills.</p></div>';
   const rg = _insightRange(insightWindow);
   const hasExp = expensesAvailable && !_expensesLoadError;
-  const base = { tenants: all, expenses, hasExpenses: hasExp, floorRank, floorCanon: appFloorCanon(), allocation: 'headcount' };
+  const base = { tenants: all, expenses, hasExpenses: hasExp, floorRank, floorCanon: appFloorCanon(), allocation: 'none' };
   // Same revenue recognition as the printed income statement, so the two tie out.
   const prorate = _incStmtProrate();
   const acc = computeIncomeStatement(Object.assign({}, base, { from: rg.from, to: rg.to, basis: 'accrual', prorate }));

@@ -117,8 +117,9 @@ Insights and Settings sit under *More*):
 - Without a move-in date, a recurring bill is earned over its own month
   (rent due on the 31st is that month's rent).
 - **Per floor:** floor-tagged expenses are direct costs; building-wide
-  expenses are split by headcount (tenants in residence each month) or by
-  revenue share, or left unallocated, on the per-floor income statement.
+  expenses stay in the building total unless you choose, on the per-floor
+  income statement, to split them by headcount (tenants in residence each
+  month) or by revenue share.
   The Insights Floors table shows floor-tagged expenses only. Archived
   tenants' history counts.
   Floor labels match regardless of case and spacing ("3rd floor" =
