@@ -1289,6 +1289,20 @@ async function loadPortalSettings() {
 
 // Admin-side settings load: one query instead of one per key.
 let _settingsLoadFailed = false;
+// Floors the admin maintains (Settings › Floors), stored as a JSON list in
+// the settings table. The floor pickers offer these plus any floor already
+// used by a tenant or an expense.
+let managedFloors = [];
+function allFloors() {
+  const canon = floorCanon(managedFloors.concat(allTenants().map(t => t.floor), expenses.map(x => x.floor)));
+  const set = new Set();
+  managedFloors.concat(allTenants().map(t => t.floor), expenses.map(x => x.floor)).forEach(f => { const c = canon(f); if(c) set.add(c); });
+  return Array.from(set).sort((a,b)=>floorRank(a)-floorRank(b) || a.localeCompare(b));
+}
+async function _saveManagedFloors(list) {
+  await dbSetSetting('floors', JSON.stringify(list));
+  managedFloors = list;
+}
 function _parseAutoBilling(map) {
   const lead = Number(map.auto_billing_lead_days);
   return {
@@ -1309,7 +1323,7 @@ async function _reloadAutoBillSettings() {
 async function loadAdminSettings() {
   _settingsLoadFailed = false;
   try {
-    const rows = await sbFetch('settings?select=key,value&key=in.(payment_instructions,announcements,property_name,property_subtitle,auto_billing,auto_billing_lead_days)');
+    const rows = await sbFetch('settings?select=key,value&key=in.(payment_instructions,announcements,property_name,property_subtitle,auto_billing,auto_billing_lead_days,floors)');
     const map = {}; (rows||[]).forEach(r=>{ map[r.key]=r.value; });
     paymentInstructions = map.payment_instructions || '';
     announcements       = map.announcements || '';
@@ -1318,6 +1332,7 @@ async function loadAdminSettings() {
     // Automatic billing is on unless explicitly turned off (admin-only keys:
     // read_setting's anon allowlist never exposes them).
     autoBilling = _parseAutoBilling(map);
+    try { const fl = JSON.parse(map.floors || '[]'); managedFloors = Array.isArray(fl) ? fl.filter(x => typeof x === 'string' && x.trim()) : []; } catch { managedFloors = []; }
   } catch {
     // A transient failure must not masquerade as "Not set" — editing on top
     // of that would overwrite the real values with blanks.
@@ -3173,8 +3188,46 @@ function renderSettingsModule() {
     + '<div class="set-row"><div class="set-label">Change protection · rev column (migration 2)</div>' + (tenants.length && tenants.some(t => t.rev == null) ? chip('warn', 'Run supabase-migration-2.sql — background posting is paused') : chip('good', 'Installed')) + '</div>'
     + '<div class="set-row"><div class="set-label">Expense floor tags (migration 3)</div>' + (expensesFloorAvailable === false ? chip('warn', 'Run supabase-migration-3.sql') : expensesFloorAvailable ? chip('good', 'Installed') : chip('muted', 'Unknown')) + '</div>'
     + '</section>';
+  const floorsCard = '<section class="card"><div class="card-head"><h2 class="card-title">' + icon('building') + ' Floors</h2></div>'
+    + '<p class="card-text muted">The floors offered when tagging tenants and expenses. Renaming updates every tenant and expense on that floor.</p>'
+    + (allFloors().length ? allFloors().map(f => {
+        const n = allTenants().filter(t => floorNorm(t.floor) === floorNorm(f)).length, m = expenses.filter(x => floorNorm(x.floor) === floorNorm(f)).length;
+        return '<div class="set-row"><div><div class="set-label">' + esc(f) + '</div><div class="set-hint">' + n + ' tenant' + (n !== 1 ? 's' : '') + ' · ' + m + ' expense' + (m !== 1 ? 's' : '') + '</div></div>'
+          + '<div class="btn-row">' + btn('Rename', 'renameFloor(this.dataset.f)', { icon: 'edit', attrs: ' data-f="' + esc(f) + '"' })
+          + btn('Remove', 'removeFloor(this.dataset.f)', { icon: 'trash', attrs: ' data-f="' + esc(f) + '"' }) + '</div></div>';
+      }).join('') : '<div class="set-hint">No floors yet.</div>')
+    + '<div class="btn-row">' + btn('Add floor', 'addFloorPrompt().then(()=>rerenderAdmin())', { icon: 'plus' }) + '</div>'
+    + '</section>';
   const account = '<section class="card"><div class="card-head"><h2 class="card-title">Account</h2></div><div class="btn-row">' + btn('Sign out', 'logout()', { icon: 'back' }) + '</div></section>';
-  return pageHead('Settings') + '<div class="settings-grid">' + autoCard + portal + db + account + '</div>';
+  return pageHead('Settings') + '<div class="settings-grid">' + autoCard + portal + floorsCard + db + account + '</div>';
+}
+async function renameFloor(f) {
+  if(!_guardSettingsEdit()) return;
+  const raw = prompt('Rename "' + f + '" to:', f);
+  const v = String(raw || '').trim().replace(/\s+/g, ' ');
+  if(!v || v === f) return;
+  if(v.length > 40) { showToast('Keep the floor name to 40 characters.', false); return; }
+  const clash = allFloors().find(x => floorNorm(x) === floorNorm(v) && floorNorm(x) !== floorNorm(f));
+  if(clash && !confirm('"' + clash + '" already exists. Merge "' + f + '" into it?')) return;
+  const target = clash || v;
+  const ts = tenants.filter(t => floorNorm(t.floor) === floorNorm(f));
+  const xs = expenses.filter(x => floorNorm(x.floor) === floorNorm(f));
+  setLoading(true, 'Renaming floor…');
+  let failed = 0;
+  for(const t of ts) { try { await dbUpdateTenantGuarded(t, { floor: target }); t.floor = target; } catch { failed++; } }
+  for(const x of xs) { try { await dbUpdateExpense(x.id, { floor: target }); x.floor = target; } catch { failed++; } }
+  try { await _saveManagedFloors(managedFloors.filter(x => floorNorm(x) !== floorNorm(f) && floorNorm(x) !== floorNorm(target)).concat([target])); } catch { failed++; }
+  setLoading(false);
+  showToast(failed ? failed + ' item(s) could not be updated — refresh and try again.' : 'Floor renamed to "' + target + '".', !failed);
+  rerenderAdmin();
+}
+async function removeFloor(f) {
+  if(!_guardSettingsEdit()) return;
+  const n = allTenants().filter(t => floorNorm(t.floor) === floorNorm(f)).length, m = expenses.filter(x => floorNorm(x.floor) === floorNorm(f)).length;
+  if(n || m) { showToast('"' + f + '" is used by ' + n + ' tenant(s) and ' + m + ' expense(s). Rename it, or move them to another floor first.', false); return; }
+  if(!confirm('Remove floor "' + f + '"?')) return;
+  try { await _saveManagedFloors(managedFloors.filter(x => floorNorm(x) !== floorNorm(f))); showToast('Floor removed.'); } catch(e) { showToast('Could not save: ' + e.message, false); }
+  rerenderAdmin();
 }
 async function saveAutoBilling(which) {
   if(!_guardSettingsEdit()) { rerenderAdmin(); return; }
@@ -3226,10 +3279,38 @@ function _expensesInMonth(ym) {
 function setExpenseMonth(v){ expenseMonth = (v && v!==_currentYM()) ? v : ''; _editingExpenseId = null; rerenderAdmin(); }
 function shiftExpenseMonth(n){ setExpenseMonth(addYM(_expYM(), n)); }
 
+// Options for a floor dropdown: the whole building, every known floor, and
+// "+ Add a floor…" (so a floor is picked, never typed ad hoc).
+function _floorOptions(current) {
+  const floors = allFloors();
+  const cur = current ? (appFloorCanon()(current) || current) : '';
+  if(cur && !floors.includes(cur)) floors.push(cur);
+  return '<option value=""' + (!cur ? ' selected' : '') + '>Whole building (shared)</option>'
+    + floors.map(f => '<option value="' + esc(f) + '"' + (f === cur ? ' selected' : '') + '>' + esc(f) + '</option>').join('')
+    + '<option value="__add__">+ Add a floor…</option>';
+}
+async function expFloorPicked(sel) {
+  if(sel.value !== '__add__') { sel.dataset.last = sel.value; return; }
+  const name = await addFloorPrompt();
+  sel.innerHTML = _floorOptions(name || sel.dataset.last || '');
+  sel.dataset.last = sel.value;
+}
+// Ask for a new floor name and add it to the managed list. Returns the
+// canonical name, or '' if cancelled.
+async function addFloorPrompt() {
+  const raw = prompt('New floor name (e.g. 6th Floor):', '');
+  const v = String(raw || '').trim().replace(/\s+/g, ' ');
+  if(!v) return '';
+  if(v.length > 40) { showToast('Keep the floor name to 40 characters.', false); return ''; }
+  const existing = appFloorCanon()(v);
+  if(existing) { showToast('"' + existing + '" already exists — selected it.'); if(!managedFloors.includes(existing)) { try { await _saveManagedFloors(managedFloors.concat([existing])); } catch {} } return existing; }
+  try { await _saveManagedFloors(managedFloors.concat([v])); showToast('Floor "' + v + '" added.'); return v; }
+  catch(e) { showToast('Could not save the floor: ' + e.message, false); return ''; }
+}
 function _expFormHtml(idSuffix, x) {
   const today = todayISO();
   const floorField = expensesFloorAvailable !== false
-    ? `<div class="field"><label for="exp-floor-${idSuffix}">Floor <span class="opt">(blank = shared)</span></label><input type="text" id="exp-floor-${idSuffix}" list="exp-floor-list" maxlength="40" placeholder="Whole building" value="${esc(x?x.floor||'':'')}" autocomplete="off"></div>`
+    ? `<div class="field"><label for="exp-floor-${idSuffix}">Floor</label><select id="exp-floor-${idSuffix}" onchange="expFloorPicked(this)">${_floorOptions(x ? x.floor || '' : '')}</select></div>`
     : '';
   return `<div class="exp-form">
     <div class="exp-form-grid${floorField?' has-floor':''}">
@@ -3289,10 +3370,8 @@ function renderExpensesModule() {
           </span>
         </div>`).join('')
     : `<div class="exp-empty">No expenses recorded for ${esc(monthLabel)}.</div>`;
-  const floors = floorList();
   return pageHead('Expenses', 'What the building spends', btn('Export CSV', 'exportExpensesCSV()', { icon: 'download' }))
     + loadErrNote + floorNote
-    + `<datalist id="exp-floor-list">${floors.map(f=>`<option value="${esc(f)}">`).join('')}</datalist>`
     + `<div class="month-nav">
         <button type="button" class="btn-icon" onclick="shiftExpenseMonth(-1)" aria-label="Previous month">${icon('back')}</button>
         <input type="month" id="exp-month-filter" value="${ym}" onchange="setExpenseMonth(this.value)" aria-label="Month">
@@ -3332,7 +3411,7 @@ function _readExpenseForm(suffix) {
   if(!date){ showToast('Please pick the expense date.', false); return null; }
   if(!amount || amount<=0){ showToast('Please enter a valid amount.', false); return null; }
   const rec = { expense_date: date, category, amount, note };
-  if(floorEl && expensesFloorAvailable !== false) rec.floor = snapFloor(floorEl.value);
+  if(floorEl && expensesFloorAvailable !== false) rec.floor = floorEl.value === '__add__' ? '' : snapFloor(floorEl.value);
   return rec;
 }
 async function addExpense() {
@@ -3806,16 +3885,23 @@ function floorRank(s) {
 // One spelling per floor across tenants (active first) and expense tags —
 // '3rd floor' and '3rd Floor' are the same floor (see floorCanon).
 function appFloorCanon() {
-  return floorCanon(allTenants().map(t => t.floor).concat(expenses.map(x => x.floor)));
+  return floorCanon(managedFloors.concat(allTenants().map(t => t.floor), expenses.map(x => x.floor)));
 }
 // Snap a typed floor to the spelling already in use, if any.
 function snapFloor(s) {
   const v = String(s || '').trim().replace(/\s+/g, ' ');
   return v ? (appFloorCanon()(v) || v) : '';
 }
-function _fillFloorDatalist() {
-  const dl = document.getElementById('m-floor-list');
-  if(dl) dl.innerHTML = floorList().map(f => '<option value="' + esc(f) + '">').join('');
+function _fillFloorSelect(cur) {
+  const sel = document.getElementById('m-floor');
+  if(!sel) return;
+  sel.innerHTML = _floorOptions(cur).replace('Whole building (shared)', 'No floor');
+  sel.dataset.last = sel.value;
+}
+async function tenantFloorPicked(sel) {
+  if(sel.value !== '__add__') { sel.dataset.last = sel.value; return; }
+  const name = await addFloorPrompt();
+  _fillFloorSelect(name || sel.dataset.last || '');
 }
 // Distinct floor labels currently in use, in floor order.
 function floorList() {
@@ -4439,8 +4525,7 @@ function openAddModal(){
   document.getElementById('m-phone').value='';
   document.getElementById('m-email').value='';
   document.getElementById('m-movein').value='';
-  document.getElementById('m-floor').value='';
-  _fillFloorDatalist();
+  _fillFloorSelect('');
   document.getElementById('m-billing').value='itemized';
   document.getElementById('m-flatrate').value='';
   _syncRecurringFields(null);
@@ -4468,8 +4553,7 @@ function openEditModal(tid, tab){
   document.getElementById('m-phone').value=t.phone||'';
   document.getElementById('m-email').value=t.email||'';
   document.getElementById('m-movein').value=t.move_in_date||'';
-  document.getElementById('m-floor').value=t.floor||'';
-  _fillFloorDatalist();
+  _fillFloorSelect(t.floor||'');
   document.getElementById('m-billing').value=t.billing_model==='inclusive'?'inclusive':'itemized';
   document.getElementById('m-flatrate').value=(t.flat_rate!=null && t.flat_rate!=='')?t.flat_rate:'';
   onBillingModelChange();
@@ -4750,7 +4834,8 @@ async function saveTenant(){
   const phone=document.getElementById('m-phone').value.trim();
   const email=document.getElementById('m-email').value.trim();
   const move_in_date=document.getElementById('m-movein').value||null;
-  const floor=snapFloor(document.getElementById('m-floor').value);
+  const _fv=document.getElementById('m-floor').value;
+  const floor=_fv==='__add__' ? '' : snapFloor(_fv);
   const billing_model=document.getElementById('m-billing').value==='inclusive'?'inclusive':'itemized';
   const _frRaw=document.getElementById('m-flatrate').value;
   if(billing_model==='inclusive'){

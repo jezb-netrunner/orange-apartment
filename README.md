@@ -119,7 +119,10 @@ Insights and Settings sit under *More*):
   expenses are split by headcount (tenants in residence each month) or by
   revenue share, or left unallocated. Archived tenants' history counts.
   Floor labels match regardless of case and spacing ("3rd floor" =
-  "3rd Floor"); typed floors snap to the spelling already in use.
+  "3rd Floor"). Floors are picked from a dropdown (tenants and expenses:
+  a floor, "Whole building", or "+ Add a floor…") and managed under
+  Settings › Floors, where renaming a floor updates every tenant and
+  expense on it.
 
 **For tenants** (access code or one-tap portal link):
 - Their bills, balance, payment history, and printable statement.
