@@ -1697,6 +1697,7 @@ async function logout() {
   _expensesLoadError = false;
   expensesFloorAvailable = null;
   archivedTenants = [];
+  managedFloors = [];
   _archivedLoadError = false;
   expenseMonth = '';
   _editingExpenseId = null;
@@ -3211,10 +3212,21 @@ async function renameFloor(f) {
   if(clash && !confirm('"' + clash + '" already exists. Merge "' + f + '" into it?')) return;
   const target = clash || v;
   const ts = tenants.filter(t => floorNorm(t.floor) === floorNorm(f));
+  const arch = archivedTenants.filter(t => floorNorm(t.floor) === floorNorm(f));
   const xs = expenses.filter(x => floorNorm(x.floor) === floorNorm(f));
   setLoading(true, 'Renaming floor…');
   let failed = 0;
   for(const t of ts) { try { await dbUpdateTenantGuarded(t, { floor: target }); t.floor = target; } catch { failed++; } }
+  // Former tenants too, so past reports use the new name (still-archived rows only, unchanged since loaded).
+  for(const t of arch) {
+    try {
+      let q = 'tenants?id=eq.' + t.id + '&archived_at=not.is.null';
+      const body = { floor: target };
+      if(t.rev != null) { q += '&rev=eq.' + t.rev; body.rev = Number(t.rev) + 1; }
+      const rows = await sbFetch(q, { method: 'PATCH', body: JSON.stringify(body) });
+      if(rows && rows.length) { t.floor = target; if(t.rev != null) t.rev = body.rev; } else failed++;
+    } catch { failed++; }
+  }
   for(const x of xs) { try { await dbUpdateExpense(x.id, { floor: target }); x.floor = target; } catch { failed++; } }
   try { await _saveManagedFloors(managedFloors.filter(x => floorNorm(x) !== floorNorm(f) && floorNorm(x) !== floorNorm(target)).concat([target])); } catch { failed++; }
   setLoading(false);
@@ -3298,6 +3310,7 @@ async function expFloorPicked(sel) {
 // Ask for a new floor name and add it to the managed list. Returns the
 // canonical name, or '' if cancelled.
 async function addFloorPrompt() {
+  if(!_guardSettingsEdit()) return '';   // never overwrite a list that failed to load
   const raw = prompt('New floor name (e.g. 6th Floor):', '');
   const v = String(raw || '').trim().replace(/\s+/g, ' ');
   if(!v) return '';
@@ -3310,7 +3323,7 @@ async function addFloorPrompt() {
 function _expFormHtml(idSuffix, x) {
   const today = todayISO();
   const floorField = expensesFloorAvailable !== false
-    ? `<div class="field"><label for="exp-floor-${idSuffix}">Floor</label><select id="exp-floor-${idSuffix}" onchange="expFloorPicked(this)">${_floorOptions(x ? x.floor || '' : '')}</select></div>`
+    ? `<div class="field"><label for="exp-floor-${idSuffix}">Floor</label><select id="exp-floor-${idSuffix}" data-last="${esc(x ? (appFloorCanon()(x.floor || '') || x.floor || '') : '')}" onchange="expFloorPicked(this)">${_floorOptions(x ? x.floor || '' : '')}</select></div>`
     : '';
   return `<div class="exp-form">
     <div class="exp-form-grid${floorField?' has-floor':''}">
