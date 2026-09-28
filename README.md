@@ -6,25 +6,113 @@ No build step, no framework: `index.html` + `app.js` + `app.css`, backed by
 
 ## What it does
 
-**For the landlord/admin** (email + password login):
-- Tenant records with per-tenant **billing model**:
-  - *Itemized* — rent + utilities billed as separate line items.
-  - *All-inclusive* — one flat monthly rate; management shoulders utilities.
-- Bills with due dates, partial payments, remarks, scanned-bill links.
-- Monthly **bill templates** + one-click "Generate Bills" for the whole building.
-- **Expenses ledger** (electricity, water, maintenance…) with a monthly
-  *collected − expenses = net* readout — the number that tells you whether an
-  all-inclusive rate is still profitable after utilities.
-- Floor/group labels with per-floor outstanding rollups.
-- Insights: a **Key Findings** digest (collection pace, who to chase, habitual
-  late payers, utility cost spikes, what the all-inclusive rates are
-  absorbing), plus billed vs collected, utilities paid vs billed back,
-  payment behavior, top outstanding, overdue aging, and net position.
-- Printable Statements of Account (customizable, live preview), payment
-  reminders ready to paste into SMS/Messenger/Viber, CSV export.
-- Announcements board and payment instructions pushed to every tenant portal.
-- Property name/tagline setting — rebrand the whole portal for any building
-  without touching code.
+**For the landlord/admin** (email + password login). The admin portal is
+split into modules — tabs on desktop, a bottom bar on phones (Reports,
+Insights and Settings sit under *More*):
+
+- **Home** — outstanding / overdue / collected / net at a glance, bills that
+  need attention (mark paid or copy a reminder in one tap), quick actions,
+  and the recurring-billing status.
+- **Tenants** — searchable list with each tenant's balance and rent
+  paid-through date; a **tenant page** with open bills, payment history,
+  recurring charges, details, and the **billing-cycle strip**.
+  Per-tenant **billing model**: *itemized* (rent + utilities as separate
+  lines) or *all-inclusive* (one flat monthly rate; management shoulders
+  utilities). Floor/group labels, archive & restore.
+- **Billing** — every bill with status/month/floor/tenant filters (table on
+  desktop, list on phones), **Receive payment**, quick-add bill, partial
+  payments, CSV export, and the **Recurring & checker** tab.
+- **Expenses** — ledger by month (electricity, water, maintenance…),
+  optionally tagged to a floor, with *collected − spent = net cash*.
+- **Reports** — printable **income statement** (accrual or cash basis;
+  whole building, one floor, all floors side by side, or one page per
+  floor), statements of account, CSV exports.
+- **Insights** — revenue/cash/net vs the prior period, revenue vs expenses
+  by month, money owed by age, where the money goes (incl. how much of the
+  utility spend is billed back), per-floor performance, payment punctuality.
+- **Settings** — automatic billing (on/off, lead time), payment
+  instructions, announcements and property name pushed to every tenant
+  portal.
+
+### Recurring bills (annuity due) and reconciliation
+
+- Each tenant's **recurring charges** (templates) post their bill
+  automatically, *N* days before the admin-set due date (default 7) — rent
+  is paid in advance and covers the cycle ahead. Posting runs whenever an
+  admin opens the portal (and again on the next day if the tab stays open).
+- Automatic posting covers the current and next cycle, and an active charge
+  also catches up a cycle whose posting window passed while nobody opened
+  the portal (up to two months back) — so no month silently goes unbilled.
+  History from before a charge was active is never created behind your back;
+  a charge switched back on (or a tenant restored) after a long pause
+  restarts from the current cycle without posting an overdue one. A deleted
+  recurring bill is never re-posted (its cycle is marked waived; undo it
+  under Recurring charges). Turn auto-posting off globally (Settings) or per
+  charge. Current-cycle bills that still aren't posted for tenants without a
+  move-in date are listed under Billing › Recurring & checker.
+  Background posting needs migration 2's `rev` column (so two devices can't
+  overwrite each other); without it only *Run now* posts.
+- The **checker** reconciles each charge from the tenant's **move-in date**
+  (the reckoning date: cycle *k* runs from move-in + *k* months): cycles
+  started, paid-through date, arrears, cash paid in advance, cycles never
+  billed (post them or waive them in one tap), and overpayments not yet
+  applied (**Apply credit** moves them forward with their original payment
+  dates, so cash reports don't change).
+  The main rent is reckoned from move-in; a charge set up later (parking,
+  a fixed utility, a new rent charge) only from the month it was set up,
+  so adding or switching a charge never creates back-dated arrears. Hand-typed rent bills
+  ("Rent – March", "Upa – March", any non-utility bill for exactly the rent
+  amount, or older history typed under one monthly label such as
+  "Room – March", "Room – April"…) count as that month's rent; balances,
+  deposits and penalties don't. "Water – Sept" counts as the Water charge's
+  bill, but a one-off like "Water heater repair" never does. Changing a charge's amount keeps the old amount for
+  earlier cycles, and a cycle that has a bill falls due on that bill's date.
+- **Undo a payment recorded by mistake:** *Undo* next to it under
+  Payments received (tenant page) takes a Receive-payment receipt off every
+  bill it paid and removes the bills it posted early for later months, which
+  then post normally when due. *Mark as unpaid* removes a bill's most recent
+  payment only (earlier genuine payments stay); individual entries can be
+  removed with ✕. Changing a bill's amount re-syncs its paid status.
+  Payments dated in the future ask for confirmation.
+- **Metered charges** (pending amount) post a placeholder with no amount;
+  it shows as *Needs amount* on Home, the tenant page and Billing (never as
+  overdue to the tenant). Adding the real bill through *Add bill* offers to
+  fill the placeholder instead of creating a second bill.
+- **Move out & archive** asks for the tenant's last day: unpaid bills for
+  cycles after it are cancelled (never owed), money paid ahead — prepaid
+  cycles or an overpayment on a bill — is refunded (a dated refund) or kept
+  as forfeited income on the last day, and reports
+  stop earning rent after that day. Metered bills still waiting for a final
+  reading are flagged first. *Restore* undoes an archive (including its
+  refund/forfeit); a former tenant moving back in later is added as a new
+  tenant, so the first stay's history stays intact.
+- **Stop a charge** (❚❚ under Recurring) when it no longer applies — e.g.
+  utilities after switching to all-inclusive: it is neither posted nor
+  counted as owed, and its bills stay as history. Adding a second rent
+  charge offers to stop the old one.
+- **Several devices:** every write targets the current row (a tab can't
+  write onto a tenant archived or changed elsewhere); a tab that stays open
+  re-reads tenants and the automatic-billing settings before each daily run.
+- Tenants **without a move-in date** keep working exactly as before —
+  their bills still post on their due dates; reconciliation simply stays
+  off (and nothing is written) until a move-in date is set.
+- **Receive payment** applies money to the oldest open bills first; any
+  excess pays the next rent cycles in advance (they post early, marked
+  paid). On the accrual income statement those advances sit as *unearned
+  rent* until their cycle arrives.
+
+### Income statement bases
+
+- **Accrual (default, the general rule):** revenue is recognized in the
+  billing cycle it pays for — optionally spread straight-line over each
+  cycle's days — and the memo shows receivables and unearned (advance) rent
+  at period end.
+- **Cash:** revenue is counted when payment is received.
+- **Per floor:** floor-tagged expenses are direct costs; building-wide
+  expenses are split by headcount (tenants in residence each month) or by
+  revenue share, or left unallocated. Archived tenants' history counts.
+  Floor labels match regardless of case and spacing ("3rd floor" =
+  "3rd Floor"); typed floors snap to the spelling already in use.
 
 **For tenants** (access code or one-tap portal link):
 - Their bills, balance, payment history, and printable statement.
@@ -50,13 +138,15 @@ No build step, no framework: `index.html` + `app.js` + `app.css`, backed by
 2. Run `supabase-migration.sql` (RLS, tenant-login RPC, rate limiting).
 3. Run `supabase-migration-2.sql` (billing models, expenses table, floor labels,
    unique access codes, per-IP login throttling, optimistic concurrency).
-   Both files are idempotent — safe to re-run.
-4. Create the admin user under Supabase **Authentication → Users**.
-5. In `app.js`, set `SB_URL` and `SB_KEY` to your project's URL and publishable
+4. Run `supabase-migration-3.sql` (optional floor tag on expenses for the
+   per-floor income statement). All three files are idempotent — safe to re-run.
+5. Create the admin user under Supabase **Authentication → Users**.
+6. In `app.js`, set `SB_URL` and `SB_KEY` to your project's URL and publishable
    key; update the `connect-src` host in `index.html`'s CSP to match.
-6. Push to GitHub with Pages enabled — `.github/workflows/deploy.yml` deploys
-   on every push to `main` (SQL files are stripped from the published site).
-7. Sign in as admin → **Property → Edit** to set your building's name.
+7. Push to GitHub with Pages enabled — `.github/workflows/deploy.yml` runs the
+   unit tests and deploys on every push to `main` (SQL files and tests are
+   stripped from the published site).
+8. Sign in as admin → **Settings → Property name** to set your building's name.
 
 ## Security model
 
@@ -72,7 +162,8 @@ No build step, no framework: `index.html` + `app.js` + `app.css`, backed by
   rate-limited per code (5/15 min), per IP (20/15 min), and globally
   (circuit breaker). Successful logins are never throttled.
 - Anon can additionally read only an allow-listed set of tenant-facing
-  settings (payment instructions, announcements, property name).
+  settings (payment instructions, announcements, property name). The
+  automatic-billing settings are admin-only.
 - Tenant PATCHes carry an optimistic-concurrency `rev` token so two admin
   devices can't silently overwrite each other's changes.
 - The tenant access code is a bearer credential for a read-only view of that
@@ -85,8 +176,11 @@ No build step, no framework: `index.html` + `app.js` + `app.css`, backed by
 | File | Purpose |
 |---|---|
 | `index.html` | Markup: login, app shell, modals. CSP locked to self + Supabase. |
-| `app.js` | All logic (~4.5k lines, vanilla JS). |
+| `billing-core.js` | Pure billing & accounting engine (no DOM): recurring cycles, auto-post plan, move-in reconciliation, payment allocation, accrual/cash income statement. |
+| `app.js` | UI and data access (vanilla JS): auth, admin modules, tenant portal, modals, printing. |
 | `app.css` | All styles, mobile-first responsive. |
+| `tests/` | `node --test tests/*.test.js` — engine unit tests (run before every deploy). |
 | `supabase-migration.sql` | v1 schema hardening: RLS, login RPC, rate limiting. |
 | `supabase-migration-2.sql` | v2: billing models, expenses, floors, concurrency. |
+| `supabase-migration-3.sql` | v3: optional floor tag on expenses. |
 | `vendor/` | Pinned supabase-js, served locally so the CSP stays `'self'`. |

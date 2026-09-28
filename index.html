@@ -3,7 +3,15 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://bxzfqjspoyvwosmpgeof.supabase.co; img-src 'self' data:; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self';">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://bxzfqjspoyvwosmpgeof.supabase.co; img-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self';">
+<!-- Clickjacking guard. GitHub Pages can't send X-Frame-Options or a CSP
+     frame-ancestors header (browsers ignore frame-ancestors in a <meta>),
+     so refuse to render inside a frame on another site. -->
+<style id="antiframe">html{display:none !important}</style>
+<script>
+  if (window.self === window.top) { var s = document.getElementById('antiframe'); if (s) s.parentNode.removeChild(s); }
+  else { try { window.top.location = window.self.location.href; } catch (e) {} }
+</script>
 <meta name="referrer" content="no-referrer">
 <meta name="robots" content="noindex, nofollow">
 <meta name="description" content="Tenant billing portal for Orange Apartment, Baguio">
@@ -72,8 +80,12 @@
       <button class="btn-logout" onclick="logout()">Sign out</button>
     </div>
   </header>
+  <!-- Admin module navigation (rendered by app.js): tabs on wide screens,
+       a bottom bar on phones. Hidden for tenants. -->
+  <nav class="admin-tabs" id="admin-tabs" aria-label="Admin sections"></nav>
   <main id="main-content"></main>
   <div class="powered-by-app">Powered by JEZ</div>
+  <nav class="bottom-nav" id="bottom-nav" aria-label="Admin sections"></nav>
 </div>
 
 <!-- MODAL -->
@@ -82,9 +94,9 @@
     <div class="modal-eyebrow" id="modal-eyebrow">New Tenant</div>
     <div class="modal-title" id="modal-title">Add a tenant</div>
     <div class="modal-tabs" id="modal-tabs" style="display:none">
-      <button class="modal-tab active" onclick="switchModalTab('info',this)">Tenant Info</button>
-      <button class="modal-tab" onclick="switchModalTab('bills',this)">Bills</button>
-      <button class="modal-tab" onclick="switchModalTab('templates',this)">Templates</button>
+      <button class="modal-tab active" data-tab="info" onclick="switchModalTab('info',this)">Tenant Info</button>
+      <button class="modal-tab" data-tab="bills" onclick="switchModalTab('bills',this)">Bills</button>
+      <button class="modal-tab" data-tab="templates" onclick="switchModalTab('templates',this)">Recurring</button>
     </div>
     <div class="modal-panel active" id="panel-info">
       <div class="form-grid">
@@ -99,8 +111,8 @@
         </div>
         <div class="field"><label for="m-phone">Phone <span style="font-weight:400;color:var(--muted)">(optional)</span></label><input type="text" id="m-phone" maxlength="30" placeholder="e.g. 0917 123 4567"></div>
         <div class="field"><label for="m-email">Email <span style="font-weight:400;color:var(--muted)">(optional)</span></label><input type="email" id="m-email" maxlength="120" placeholder="e.g. tenant@email.com"></div>
-        <div class="field"><label for="m-movein">Move-in Date <span style="font-weight:400;color:var(--muted)">(optional)</span></label><input type="date" id="m-movein"></div>
-        <div class="field"><label for="m-floor">Floor / Group <span style="font-weight:400;color:var(--muted)">(optional)</span></label><input type="text" id="m-floor" maxlength="40" placeholder="e.g. 3rd Floor"></div>
+        <div class="field"><label for="m-movein">Move-in Date <span style="font-weight:400;color:var(--muted)">(optional)</span></label><input type="date" id="m-movein"><div class="field-hint">Reckoning date for billing cycles and paid-through dates.</div></div>
+        <div class="field"><label for="m-floor">Floor / Group <span style="font-weight:400;color:var(--muted)">(optional)</span></label><input type="text" id="m-floor" maxlength="40" placeholder="e.g. 3rd Floor" list="m-floor-list" autocomplete="off"><datalist id="m-floor-list"></datalist></div>
         <div class="field full">
           <label for="m-billing">Billing Model</label>
           <select id="m-billing" onchange="onBillingModelChange()">
@@ -111,14 +123,23 @@
         <div class="field full" id="m-flatrate-wrap" style="display:none">
           <label for="m-flatrate">Monthly Flat Rate (&#8369;)</label>
           <input type="text" id="m-flatrate" inputmode="decimal" autocomplete="off" placeholder="e.g. 6500">
-          <div class="field-hint">Shown to the tenant as their fixed monthly rate, utilities included. A monthly bill template is created automatically for new tenants.</div>
+          <div class="field-hint">Shown to the tenant as their fixed monthly rate, utilities included. If the tenant has no recurring charge yet, one is created and bills post automatically each cycle.</div>
+        </div>
+        <div class="field full" id="m-rent-wrap" style="display:none" data-allowed="1">
+          <label for="m-rent">Monthly Rent (&#8369;) <span style="font-weight:400;color:var(--muted)">(optional)</span></label>
+          <input type="text" id="m-rent" inputmode="decimal" autocomplete="off" placeholder="e.g. 6500">
+          <div class="field-hint">Creates a recurring monthly rent bill that posts automatically each cycle. Utilities and other charges can be added under Recurring later.</div>
+        </div>
+        <div class="field" id="m-dueday-wrap" style="display:none">
+          <label for="m-dueday">Rent Due Day <span style="font-weight:400;color:var(--muted)">(1&ndash;31)</span></label>
+          <input type="number" id="m-dueday" min="1" max="31" inputmode="numeric" placeholder="Move-in day">
         </div>
       </div>
       <div id="new-tenant-bills">
         <hr class="divider">
-        <div class="bills-section-label">Bills</div>
+        <div class="bills-section-label">Opening bills <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted)">(optional &mdash; balances carried over from before)</span></div>
         <div id="bill-forms"></div>
-        <button class="btn-add-bill" onclick="addBillForm()">+ Add another bill</button>
+        <button class="btn-add-bill" onclick="addBillForm()">+ Add a bill</button>
       </div>
       <div class="modal-actions">
         <button class="btn-cancel" onclick="closeModal()">Cancel</button>
@@ -138,7 +159,7 @@
     <div class="modal-panel" id="panel-templates">
       <div class="modal-tab-hint">Changes on this tab save instantly &mdash; no Save button needed.</div>
       <p style="font-size:12px;color:var(--muted);margin-bottom:16px;line-height:1.6;">
-        Templates auto-generate recurring bills each month. Set a label, amount, and the day of month it's due.
+        Recurring charges post a bill every cycle, ahead of the due date (rent is paid in advance). Set a label, amount, and the day of month it's due.
       </p>
       <div id="tmpl-list"></div>
       <button class="btn-add-bill" id="btn-start-new-tmpl" onclick="startNewTemplate()">+ Add template</button>
@@ -293,7 +314,7 @@
   <div class="stmt-box">
     <div class="stmt-eyebrow">Report</div>
     <div class="stmt-title" id="incstmt-title">Income Statement</div>
-    <div class="stmt-sub">Payments collected minus building expenses &mdash; the preview updates live.</div>
+    <div class="stmt-sub">Revenue minus building expenses &mdash; the preview updates live.</div>
     <div class="stmt-layout">
       <div class="stmt-opts">
         <div class="stmt-opt-section">
@@ -312,12 +333,37 @@
           </div>
         </div>
         <div class="stmt-opt-section">
+          <div class="stmt-opt-label">Basis &amp; scope</div>
+          <div class="stmt-mini-field">
+            <label for="incstmt-basis">Basis</label>
+            <select id="incstmt-basis" onchange="incStmtOptsChanged()">
+              <option value="accrual">Accrual (general rule)</option>
+              <option value="cash">Cash</option>
+            </select>
+          </div>
+          <div class="stmt-checks one-col" id="incstmt-prorate-wrap">
+            <label><input type="checkbox" id="incstmt-prorate" onchange="incStmtOptsChanged()"> Spread rent over each billing cycle (straight-line)</label>
+          </div>
+          <div class="stmt-mini-field">
+            <label for="incstmt-scope">Scope</label>
+            <select id="incstmt-scope" onchange="incStmtOptsChanged()"></select>
+          </div>
+          <div class="stmt-mini-field" id="incstmt-alloc-wrap">
+            <label for="incstmt-alloc">Building-wide expenses</label>
+            <select id="incstmt-alloc" onchange="incStmtOptsChanged()">
+              <option value="headcount">Split across floors by headcount</option>
+              <option value="revenue">Split across floors by revenue</option>
+              <option value="none">Don't split (building total only)</option>
+            </select>
+          </div>
+        </div>
+        <div class="stmt-opt-section">
           <div class="stmt-opt-label">Content</div>
           <div class="stmt-checks">
             <label><input type="checkbox" id="incstmt-inc-detail" onchange="incStmtOptsChanged()"> Income by category</label>
             <label><input type="checkbox" id="incstmt-exp-detail" onchange="incStmtOptsChanged()"> Expense breakdown</label>
             <label><input type="checkbox" id="incstmt-monthly" onchange="incStmtOptsChanged()"> Month-by-month table</label>
-            <label><input type="checkbox" id="incstmt-memo" onchange="incStmtOptsChanged()"> Collections memo</label>
+            <label><input type="checkbox" id="incstmt-memo" onchange="incStmtOptsChanged()"> Memo (receivables / collections)</label>
             <label><input type="checkbox" id="incstmt-sign" onchange="incStmtOptsChanged()"> Signature lines</label>
           </div>
           <div class="stmt-mini-field">
@@ -412,6 +458,32 @@
   </div>
 </div>
 
+<!-- RECEIVE PAYMENT MODAL -->
+<div id="pay-modal" role="dialog" aria-modal="true" aria-labelledby="pay-title">
+  <div class="qb-box">
+    <div class="qb-eyebrow">Payment</div>
+    <div class="qb-title" id="pay-title">Receive payment</div>
+    <div class="form-grid">
+      <div class="field full">
+        <label for="pay-tenant">Tenant</label>
+        <select id="pay-tenant" onchange="renderPayPreview()"></select>
+      </div>
+      <div class="field"><label for="pay-amount">Amount received (&#8369;)</label><input type="text" id="pay-amount" inputmode="decimal" autocomplete="off" placeholder="0" oninput="renderPayPreview()"></div>
+      <div class="field"><label for="pay-date">Date received</label><input type="date" id="pay-date" onchange="renderPayPreview()"></div>
+      <div class="field full"><label for="pay-note">Reference <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted)">(optional)</span></label><input type="text" id="pay-note" maxlength="120" placeholder="e.g. GCash ref #1234567" oninput="renderPayPreview()"></div>
+      <div class="field full check-field" id="pay-advance-wrap">
+        <input type="checkbox" id="pay-advance" checked onchange="renderPayPreview()">
+        <label for="pay-advance">Apply any excess as advance rent <span class="opt">(pays the next cycles ahead of time)</span></label>
+      </div>
+    </div>
+    <div id="pay-preview" class="pay-preview" aria-live="polite"></div>
+    <div class="qb-actions">
+      <button class="btn-cancel" onclick="closePayModal()">Cancel</button>
+      <button class="btn-save" id="pay-confirm" onclick="confirmPayment()">Record payment</button>
+    </div>
+  </div>
+</div>
+
 <!-- PAID DATE MODAL -->
 <div id="paiddate-modal" role="dialog" aria-modal="true" aria-labelledby="paiddate-bill-name">
   <div class="paiddate-box">
@@ -424,6 +496,28 @@
     <div class="paiddate-actions">
       <button class="btn-cancel" onclick="closePaidModal()">Cancel</button>
       <button class="btn-save" onclick="confirmPaid()">Confirm Paid</button>
+    </div>
+  </div>
+</div>
+
+<!-- MOVE-OUT / ARCHIVE MODAL -->
+<div id="moveout-modal" role="dialog" aria-modal="true" aria-labelledby="mo-title">
+  <div class="paiddate-box">
+    <div class="paiddate-eyebrow">Move out &amp; archive</div>
+    <div class="paiddate-title" id="mo-title">Tenant</div>
+    <div class="field">
+      <label for="mo-date">Last day in the unit</label>
+      <input type="date" id="mo-date" onchange="renderMoveOut()">
+    </div>
+    <div id="mo-summary" class="mo-summary"></div>
+    <div id="mo-prepaid" style="display:none">
+      <label class="mo-choice"><input type="radio" name="mo-prepaid" value="refund" checked onchange="renderMoveOut()"><span>Refund it to the tenant</span></label>
+      <div class="field" id="mo-refund-wrap"><label for="mo-refund-date">Date refunded</label><input type="date" id="mo-refund-date"></div>
+      <label class="mo-choice"><input type="radio" name="mo-prepaid" value="keep" onchange="renderMoveOut()"><span>Keep it (forfeited) &mdash; counted as income on their last day</span></label>
+    </div>
+    <div class="paiddate-actions">
+      <button class="btn-cancel" onclick="closeMoveOut()">Cancel</button>
+      <button class="btn-save" id="mo-confirm" onclick="confirmMoveOut()">Archive tenant</button>
     </div>
   </div>
 </div>
@@ -476,8 +570,6 @@
   </div>
 </div>
 
-<!-- EXPENSE PANEL lives inside the dashboard markup rendered by app.js -->
-
 
 <!-- supabase-js v2.45.4 vendored from the official npm package (dist/umd/supabase.js)
      so the portal keeps working if the CDN is down and CSP can stay 'self'-only. -->
@@ -485,6 +577,9 @@
      so browsers pick up new versions immediately instead of serving a stale
      cached app.js for up to 10 minutes after a deploy. -->
 <script src="vendor/supabase-js-2.45.4.min.js?v=__ASSET_V__"></script>
+<!-- billing-core.js: pure billing/accounting logic (recurring cycles,
+     reconciliation, allocation, income statement math) used by app.js. -->
+<script src="billing-core.js?v=__ASSET_V__" defer></script>
 <script src="app.js?v=__ASSET_V__" defer></script>
 
 </body>
