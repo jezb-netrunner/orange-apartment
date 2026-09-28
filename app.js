@@ -60,10 +60,13 @@ async function deletePaymentEntry(bi, pi) {
   const ok = await saveBills(editingId, bills=>{
     const b = bills[bi];
     if(!b || !b.payments || !b.payments[pi]) return;
-    // A bill its payments had settled reopens once they no longer cover it.
-    const settled = b.status==='paid' && billTotalPaid(b) >= Number(b.amount) - 0.005;
+    // Marked paid beyond its logged payments: that implied balance was real
+    // money on the paid date — log it first, so removing the mistaken entry
+    // reopens the bill rather than moving the cash to the paid date.
+    const implied = b.status==='paid' ? r2(Number(b.amount) - billTotalPaid(b)) : 0;
     b.payments.splice(pi,1);
-    if(settled && billTotalPaid(b) < Number(b.amount) - 0.005){ b.status='unpaid'; b.paidDate=''; }
+    if(implied > 0.005) b.payments.push({ amount: implied, date: b.paidDate || '', note: 'Balance marked paid' });
+    if(b.status==='paid' && billTotalPaid(b) < Number(b.amount) - 0.005){ b.status='unpaid'; b.paidDate=''; }
     if(/paid in advance/i.test(b.remark||'') && billTotalPaid(b) <= 0.005) b.remark='';
   }, 'Payment entry removed.', _billListT);
   if(ok){ renderBillListItems(); rerenderAdmin(); }
@@ -244,7 +247,7 @@ function buildStatementHTML(t, o) {
 
   const peso = v => '&#8369;'+fmtMoney(v);
   // A bill marked paid is settled in full even if partial payments weren't logged.
-  const paidOf = b => b.status==='paid' ? Number(b.amount||0) : billTotalPaid(b);
+  const paidOf = b => b.status==='paid' ? Number(b.amount||0) : Math.min(billTotalPaid(b), Math.max(0, Number(b.amount||0)));
   const balOf  = b => b.status==='paid' ? 0 : Math.max(0, billRemaining(b));
 
   const billedTotal = bills.reduce((s,b)=>s+Number(b.amount||0),0);
@@ -281,7 +284,7 @@ function buildStatementHTML(t, o) {
     let h = '<tr>'+cols.map(c=>'<td class="'+(c.cls||'')+'">'+c.td(b)+'</td>').join('')+'</tr>';
     if(o.payments && b.payments && b.payments.length) {
       h += '<tr class="payrow"><td colspan="'+cols.length+'">'+
-        b.payments.map(p=>'&#8627; '+peso(p.amount)+' received'+(p.date?' &middot; '+formatDate(p.date):'')+(p.note?' &middot; '+esc(p.note):'')).join('<br>')+
+        b.payments.map(p=>'&#8627; '+(Number(p.amount)<0?'Refunded '+peso(-p.amount):peso(p.amount)+' received')+(p.date?' &middot; '+formatDate(p.date):'')+(p.note?' &middot; '+esc(p.note):'')).join('<br>')+
         '</td></tr>';
     }
     return h;
@@ -1205,7 +1208,17 @@ async function dbUpdateTenantGuarded(t, patch) {
 // Bring the in-memory tenant lists up to date: another device may have
 // added, edited, archived, restored or deleted tenants since this tab
 // signed in. Unchanged rows keep their object (open forms stay valid).
-function _sameRow(a, b) { return Object.keys(b).every(k => JSON.stringify(a[k]) === JSON.stringify(b[k])); }
+// Postgres jsonb doesn't keep object key order, so compare by rev when the
+// column exists, else structurally with keys sorted.
+function _stableJSON(v) {
+  if(Array.isArray(v)) return '[' + v.map(_stableJSON).join(',') + ']';
+  if(v && typeof v === 'object') return '{' + Object.keys(v).sort().map(k => JSON.stringify(k) + ':' + _stableJSON(v[k])).join(',') + '}';
+  return JSON.stringify(v === undefined ? null : v);
+}
+function _sameRow(a, b) {
+  if(b.rev != null && a.rev != null) return String(a.rev) === String(b.rev);
+  return Object.keys(b).every(k => _stableJSON(a[k]) === _stableJSON(b[k]));
+}
 async function _refreshTenantLists() {
   const [rows, arch] = await Promise.all([dbGetAll(), dbGetArchived().catch(() => null)]);
   const byId = new Map(tenants.map(t => [t.id, t]));
@@ -1927,7 +1940,7 @@ function tenantCycleNote(s) {
 function unpostedCurrent(t) {
   if(moveInOf(t)) return [];
   const ym = _currentYM(), today = todayISO();
-  return (t.templates || []).filter(tm => tm && normLabel(tm.label)).map(tm => {
+  return activeTemplates(t).filter(tm => normLabel(tm.label)).map(tm => {
     const due = templateDueDate(t, tm, ym);
     if(diffDays(today, due) > autoBilling.leadDays) return null;
     if(Array.isArray(tm.skip) && tm.skip.includes(ym)) return null;
@@ -1951,7 +1964,7 @@ function attentionItems() {
     if(billOpen(b) <= 0.005) return;
     if(ds === 'overdue' || ds === 'due-today' || ds === 'due-soon') items.push({ t, b, bi, ds });
   }));
-  const rank = x => x.ds === 'overdue' ? 0 : x.ds === 'awaiting' ? 1 : 2;
+  const rank = x => x.ds === 'overdue' ? 0 : x.ds === 'awaiting' ? 2 : 1; // placeholders are never late
   items.sort((a, b) => rank(a) - rank(b) || (a.b.due || '').localeCompare(b.b.due || ''));
   return items;
 }
@@ -2125,7 +2138,7 @@ function tenantsForList() {
     switch(tStatus) {
       case 'owing':    return s.open > 0;
       case 'overdue':  return s.overdue > 0;
-      case 'settled':  return s.open <= 0;
+      case 'settled':  return s.open <= 0 && !s.awaiting;
       case 'advance':  return !!(s.primary && s.primary.status === 'advance');
       case 'behind':   return !!(s.primary && s.primary.status === 'behind');
       case 'issues':   return s.issues > 0;
@@ -2183,9 +2196,11 @@ function renderTenantList() {
   c.innerHTML = keys.map(k => {
     const g = map[k];
     const out = g.reduce((s, t) => s + tenantBalance(t), 0);
+    const aw = g.reduce((s, t) => s + tenantSummary(t).awaiting, 0);
     const allInc = groupMode === 'unit' && g.every(t => t.billing_model === 'inclusive');
     return '<div class="group-head"><span class="group-name">' + labelOf(k) + '</span><span class="group-meta">' + g.length + ' tenant' + (g.length !== 1 ? 's' : '')
-      + (allInc ? ' · all-inclusive' : '') + ' · ' + (out ? peso(out) + ' outstanding' : 'settled') + '</span></div>'
+      + (allInc ? ' · all-inclusive' : '') + ' · ' + (out ? peso(out) + ' outstanding' : aw ? '' : 'settled')
+      + (aw ? (out ? ' · ' : '') + aw + ' bill' + (aw !== 1 ? 's need' : ' needs') + ' an amount' : '') + '</span></div>'
       + g.map(tenantRowHtml).join('');
   }).join('');
 }
@@ -2228,8 +2243,9 @@ function renderTenantDetail(t) {
   const cat = outstandingByCategory(t.bills);
   const settledAll = r2(t.bills.reduce((x, b) => x + billSettled(b), 0));
   const balance = '<div class="kpis kpis-3">'
-    + '<div class="kpi"><div class="kpi-label">Outstanding</div><div class="kpi-value">' + (s.open ? peso(s.open) : 'Settled') + '</div>'
-    +   (s.open && !inclusive ? '<div class="kpi-lines">' + balanceLinesHtml(cat, 'stat-line') + '</div>' : '<div class="kpi-sub">' + s.openCount + ' open bill' + (s.openCount !== 1 ? 's' : '') + '</div>') + '</div>'
+    + '<div class="kpi"><div class="kpi-label">Outstanding</div><div class="kpi-value">' + (s.open ? peso(s.open) : s.awaiting ? 'None yet' : 'Settled') + '</div>'
+    +   (s.open && !inclusive ? '<div class="kpi-lines">' + balanceLinesHtml(cat, 'stat-line') + '</div>'
+         : '<div class="kpi-sub">' + s.openCount + ' open bill' + (s.openCount !== 1 ? 's' : '') + (s.awaiting ? ' · ' + s.awaiting + ' need' + (s.awaiting === 1 ? 's' : '') + ' an amount' : '') + '</div>') + '</div>'
     + '<div class="kpi"><div class="kpi-label">Overdue</div><div class="kpi-value ' + (s.overdue ? 'bad' : 'good') + '">' + (s.overdue ? peso(s.overdue) : 'None') + '</div><div class="kpi-sub">' + (s.overdueCount ? s.overdueCount + ' bill' + (s.overdueCount !== 1 ? 's' : '') + ' past due' : 'nothing past due') + '</div></div>'
     + '<div class="kpi"><div class="kpi-label">Paid to date</div><div class="kpi-value">' + peso(settledAll) + '</div><div class="kpi-sub">all bills, all time</div></div>'
     + '</div>';
@@ -2254,8 +2270,9 @@ function renderTenantDetail(t) {
       const v = Number(p.amount) || 0; logged += v;
       if(!v) return;
       if(p.rid && v > 0) {
-        let g = byRid.get(p.rid);
-        if(!g) { g = { date: isoOrEmpty(p.date), amount: 0, note: p.note || '', bills: [], rid: p.rid }; byRid.set(p.rid, g); receipts.push(g); }
+        const gk = p.rid + '|' + isoOrEmpty(p.date);
+        let g = byRid.get(gk);
+        if(!g) { g = { date: isoOrEmpty(p.date), amount: 0, note: p.note || '', bills: [], rid: p.rid }; byRid.set(gk, g); receipts.push(g); }
         g.amount = r2(g.amount + v);
         if(!g.bills.includes(b)) g.bills.push(b);
       } else receipts.push({ date: isoOrEmpty(p.date), amount: v, note: p.note || '', bills: [b] });
@@ -2357,7 +2374,7 @@ function cycleCardHtml(t, s) {
     }
     let status;
     if(c.variable) status = chip('muted', 'Variable amount') + ' <span class="muted">cycle check only</span>';
-    else if(c.status === 'behind') status = chip('bad', 'Behind · ' + peso(c.arrears)) + (c.paidThrough ? ' Paid through ' + formatDate(c.paidThrough) : ' Nothing paid yet');
+    else if(c.status === 'behind') status = chip('bad', 'Behind · ' + peso(c.arrears)) + (c.paidThrough ? ' Paid through ' + formatDate(c.paidThrough) : c.pool > 0.005 ? ' Payments so far don\'t cover the first cycle' : ' No payments matched to this charge');
     else if(c.status === 'advance') status = chip('good', c.aheadCycles + ' cycle' + (c.aheadCycles !== 1 ? 's' : '') + ' ahead') + ' Paid through <strong>' + formatDate(c.paidThrough) + '</strong>';
     else status = chip('good', 'Current') + (c.paidThrough ? ' Paid through <strong>' + formatDate(c.paidThrough) + '</strong>' : '') + (c.nextDue ? ' · next ' + peso(c.nextAmount) + ' due ' + shortDate(c.nextDue) : '');
     const a = ' data-tid="' + esc(t.id) + '" data-tmpl="' + esc(c.tmplId) + '"';
@@ -2406,6 +2423,8 @@ function recurringChargesCard(t) {
   const tidA = ' data-tid="' + esc(t.id) + '"';
   const list = (t.templates || []);
   const rows = list.map((tmpl, i) => {
+    if(tmpl.retired) return '<div class="rc-row"><div class="rc-main"><div class="rc-label">' + esc(tmpl.label) + ' ' + chip('muted', 'Stopped') + '</div>'
+      + '<div class="rc-sub">No longer billed or owed · its bills stay as history</div></div></div>';
     const np = nextPostInfo(t, tmpl);
     const auto = isAutoTemplate(tmpl);
     return '<div class="rc-row">'
@@ -2495,7 +2514,8 @@ async function reconPostMissing(tid, tmplId, periods) {
   const others = list.map(m => ({ m, bills: (t.bills || []).filter(b => b && billPeriod(b) === m.period && !(b.tmplId && live.has(b.tmplId))) }))
     .filter(x => x.bills.length);
   const warn = others.length ? '\n\n⚠ These months already have other bills — make sure they are not this charge under another name:\n'
-    + others.slice(0, 6).map(x => '• ' + fmtYM(x.m.period) + ': ' + x.bills.map(b => '"' + b.label + '" ₱' + fmtMoney(b.amount)).join(', ')).join('\n') : '';
+    + others.slice(0, 12).map(x => '• ' + fmtYM(x.m.period) + ': ' + x.bills.map(b => '"' + b.label + '" ₱' + fmtMoney(b.amount)).join(', ')).join('\n')
+    + (others.length > 12 ? '\n• …and ' + (others.length - 12) + ' more month' + (others.length - 12 !== 1 ? 's' : '') : '') : '';
   if(!confirm('Post ' + list.length + ' "' + c.label + '" bill' + (list.length !== 1 ? 's' : '') + ' for ' + t.name + '?\n\n' + list.map(m => '• ' + fmtYM(m.period) + ' — due ' + formatDate(m.due) + ' · ₱' + fmtMoney(m.amount)).join('\n')
     + (total ? '\n\nTotal: ₱' + fmtMoney(total) : '') + warn + '\n\nThey post as unpaid with your template due dates.')) return;
   const ok = await saveTenantData(tid, x => backfillCycles(x, tmplId, list.map(m => m.period)), 'Bills posted.');
@@ -2677,8 +2697,12 @@ async function deleteBillAt(tid, bi) {
   const tmpl = _recurringOwner(t, b);
   // A recurring bill for a cycle not yet due (e.g. posted early by a
   // mistaken advance) can go back to posting normally instead of waiving.
-  const future = !!(tmpl && b.due && b.due > todayISO());
+  const got = billSettled(b);
+  // A bill with money on it goes with its payments (cash reports lose them):
+  // say so, and never offer to bill the month again on top.
+  const future = !!(tmpl && b.due && b.due > todayISO()) && got <= 0.005;
   if(!confirm('Delete "' + b.label + '" for ' + t.name + '? This cannot be undone.'
+    + (got > 0.005 ? '\n\n₱' + fmtMoney(got) + ' was paid on this bill' + (b.paidDate ? ' (' + formatDate(b.paidDate) + ')' : '') + ' — deleting it removes that money from the records too. To reverse a payment recorded by mistake, use Undo under Payments received or Mark as unpaid instead.' : '')
     + (tmpl && !future ? '\n\nThis is a recurring bill. Its cycle (' + fmtYM(billPeriod(b)) + ') is marked as waived so it is never posted again automatically — you can undo the waiver under Recurring charges.' : ''))) return false;
   let mode = 'waive';
   if(future) mode = confirm('Should ' + fmtYM(billPeriod(b)) + ' still be billed?\n\nOK: yes — it posts again normally ahead of its due date (' + formatDate(b.due) + ').\nCancel: no — waive it (a free month; undo under Recurring charges).') ? 'repost' : 'waive';
@@ -2810,6 +2834,7 @@ async function _runAutoBilling(opts) {
   // A full run (new day, Run now) works from the database's current state,
   // not this tab's sign-in snapshot: settings and tenants changed on
   // another device (turned off, archived, added, paid) are respected.
+  if(opts.only && !opts.fresh) await _reloadAutoBillSettings(); // a single-tenant run too honours "off" set elsewhere
   if(!opts.only && !opts.fresh) {
     const okSet = await _reloadAutoBillSettings();
     let okList = true;
@@ -2930,7 +2955,11 @@ let _payRid = ''; // receipt id stamped on every entry this payment writes
 // almost always a mistyped date. Ask before recording one.
 function _futureDateOk(d) {
   if(!d || d <= todayISO()) return true;
-  return confirm('The date is in the future ('+formatDate(d)+').\n\nCash reports count money on the date it was received, so it will be missing from this month\'s figures. Record it with this date anyway?');
+  const sameMonth = ymOf(d) === ymOf(todayISO());
+  return confirm('The date is in the future ('+formatDate(d)+').\n\n'
+    + (sameMonth ? 'It is counted in this month\'s figures, on a day that hasn\'t come yet.'
+                 : 'Cash reports count money on the date it was received, so it will appear in '+fmtYM(ymOf(d))+'\'s figures, not this month\'s.')
+    + ' Record it with this date anyway?');
 }
 function openPayModal(tid) {
   if(!tenants.length) { showToast('Add a tenant first.', false); return; }
@@ -3856,12 +3885,16 @@ function renderTableView(c, rows) {
     const remaining = billOpen(b);
     const rowAttr = ' data-tid="'+esc(t.id)+'" data-bi="'+r.bi+'"';
     // Status badge toggles paid/unpaid on click.
-    const statusBtn = '<button type="button" class="mini-status '+dsBadgeClass(ds)+'" onclick="const x=this.closest(\'tr\');toggleStatus(x.dataset.tid,+x.dataset.bi)" '
+    const statusBtn = ds === 'awaiting'
+      ? '<button type="button" class="mini-status '+dsBadgeClass(ds)+'" onclick="const x=this.closest(\'tr\');openEditBillFromTable(x.dataset.tid,+x.dataset.bi)" title="Enter the amount">Needs amount</button>'
+      : '<button type="button" class="mini-status '+dsBadgeClass(ds)+'" onclick="const x=this.closest(\'tr\');toggleStatus(x.dataset.tid,+x.dataset.bi)" '
       + 'title="'+(isPaid?'Click to revert to unpaid':'Click to mark paid')+'">' + (dueStatusLabel[ds]||ds) + '</button>';
     // Amount cell becomes an editable input on click.
     const amountCell = '<td class="td-amount td-amt-edit"'+rowAttr+' onclick="enterAmountEdit(this)" title="Click to edit amount">'+peso(b.amount)+'</td>';
     const actionsCell = '<td class="td-actions"><div class="td-actions-inner">'
-      + (isPaid ? '' : '<button type="button" class="row-quick-btn pay" onclick="const x=this.closest(\'tr\');quickMarkPaid(x.dataset.tid,+x.dataset.bi)" title="Mark paid">✓ Paid</button>')
+      + (isPaid ? '' : ds === 'awaiting'
+          ? '<button type="button" class="row-quick-btn" onclick="const x=this.closest(\'tr\');openEditBillFromTable(x.dataset.tid,+x.dataset.bi)" title="Enter the amount">Enter amount</button>'
+          : '<button type="button" class="row-quick-btn pay" onclick="const x=this.closest(\'tr\');quickMarkPaid(x.dataset.tid,+x.dataset.bi)" title="Mark paid">✓ Paid</button>')
       + '<button type="button" class="btn-icon sm" aria-label="Bill actions" aria-haspopup="menu" onclick="const x=this.closest(\'tr\');openBillMenu(this,x.dataset.tid,+x.dataset.bi)">'+icon('kebab')+'</button>'
       + '</div></td>';
     return '<tr'+rowAttr+'>' +
@@ -3951,11 +3984,14 @@ function _resyncPaidStatus(b, prevAmt) {
 // Change a template's amount, remembering the old one for cycles before
 // the change so past (unbilled) cycles keep their price. The old rate
 // covers everything up to the last posted cycle or last month.
-function _recordRateChange(tmpl, newAmt) {
+function _recordRateChange(t, tmpl, newAmt) {
   const old = tmplRate(tmpl);
-  if(old > 0 && r2(newAmt) !== old) {
-    let until = addYM(_currentYM(), -1);
-    if(isYM(tmpl.postedThrough) && tmpl.postedThrough > until) until = tmpl.postedThrough;
+  // A correction of an amount never billed (a typo) isn't history.
+  const billedAtOld = old > 0 && templateBills(t, tmpl, false).all.some(i => r2((t.bills[i] || {}).amount) === old);
+  if(billedAtOld && r2(newAmt) !== old) {
+    // Cycles already posted keep their bill's amount; unbilled cycles up to
+    // last month were priced at the old rate, from this month on the new one.
+    const until = addYM(_currentYM(), -1);
     const hist = (Array.isArray(tmpl.rates) ? tmpl.rates : []).filter(r => r && isYM(r.until));
     const maxUntil = hist.reduce((m, r) => r.until > m ? r.until : m, '');
     if(until > maxUntil) hist.push({ until, amount: old });
@@ -4027,7 +4063,7 @@ async function toggleStatus(tid,bi){
   const t=tenants.find(t=>t.id===tid);
   if(!t||!t.bills[bi]) return;
   if(t.bills[bi].status==='paid'){ revertToPending(tid,bi); return; }
-  _pendingPaid={tid,bi,t};
+  _pendingPaid={tid,bi,t,bill:t.bills[bi]};
   document.getElementById('paiddate-bill-name').textContent = t.bills[bi].label + ' — ' + t.name;
   document.getElementById('paiddate-input').value=todayISO();
   openModal('paiddate-modal');
@@ -4049,8 +4085,14 @@ async function confirmPaid(){
   if(btn){ btn.disabled=true; btn.textContent='Saving…'; }
   const dateVal=document.getElementById('paiddate-input').value;
   if(!_futureDateOk(dateVal)){ if(btn){ btn.disabled=false; btn.textContent='Confirm Paid'; } return; }
+  // The remembered index must still point at the same, still-unpaid bill.
+  const live = tenants.find(x=>x.id===tid);
+  if(live && live === expectT && (live.bills[bi] !== _pendingPaid.bill || live.bills[bi].status === 'paid')){
+    if(btn){ btn.disabled=false; btn.textContent='Confirm Paid'; }
+    showToast('That bill changed in the meantime — please try again.', false); closePaidModal(); rerenderAdmin(); return;
+  }
   const ok = await saveBills(tid, bills=>{
-    if(!bills[bi]) return;
+    if(!bills[bi] || bills[bi].status==='paid') return;
     bills[bi].status='paid';
     bills[bi].paidDate=dateVal||todayISO();
   }, 'Marked as paid ✓', expectT);
@@ -4086,7 +4128,7 @@ async function revertToPending(tid,bi){
       if(!x || !x.payments || !x.payments.length) return;
       x.payments.pop();
       if(billTotalPaid(x) >= Number(x.amount) - 0.005) still = true;
-      else { x.status='unpaid'; x.paidDate=''; }
+      else { x.status='unpaid'; x.paidDate=''; if(/paid in advance/i.test(x.remark||'') && billTotalPaid(x) <= 0.005) x.remark=''; }
     }, 'Payment removed.', t);
     if(ok === true && still) showToast('Payment removed — the remaining payments still cover this bill, so it stays paid.', false);
     if(ok) rerenderAdmin();
@@ -4139,7 +4181,8 @@ function deleteTenant(tid){
   const today = todayISO();
   document.getElementById('mo-title').textContent = t.name;
   const d = document.getElementById('mo-date'); d.value = today; d.max = today;
-  if(moveInOf(t)) d.min = moveInOf(t); else d.removeAttribute('min');
+  // A tenant who never moved in (move-in still ahead) can be archived too.
+  if(moveInOf(t) && moveInOf(t) <= today) d.min = moveInOf(t); else d.removeAttribute('min');
   const rd = document.getElementById('mo-refund-date'); rd.value = today; rd.max = today;
   const r = document.querySelector('input[name="mo-prepaid"][value="refund"]'); if(r) r.checked = true;
   renderMoveOut();
@@ -4154,12 +4197,16 @@ function renderMoveOut(){
   const pre = document.getElementById('mo-prepaid');
   if(!isISODate(last)){ box.innerHTML = '<p class="muted">Pick the last day they lived in the unit.</p>'; pre.style.display = 'none'; return; }
   const plan = planMoveOut(t, last, {});
+  const mi0 = moveInOf(t);
   const nm = b => esc(b.label) + (billPeriod(b) ? ' (' + fmtYM(billPeriod(b), 'short') + ')' : '');
   const items = [];
   if(plan.removed.length) items.push('<li>' + plan.removed.length + ' unpaid bill' + (plan.removed.length!==1?'s':'') + ' for after move-out will be <strong>removed</strong>: ' + plan.removed.slice(0,4).map(nm).join(', ') + (plan.removed.length>4 ? ' +' + (plan.removed.length-4) + ' more' : '') + '.</li>');
   if(plan.owed > 0.005) items.push('<li>' + peso(plan.owed) + ' still owed from before move-out stays on their account (and in receivables).</li>');
+  if(plan.awaiting.length) items.push('<li class="txt-bad">' + plan.awaiting.length + ' bill' + (plan.awaiting.length!==1?'s':'') + ' still need' + (plan.awaiting.length===1?'s':'') + ' an amount (final meter reading): '
+    + plan.awaiting.map(nm).join(', ') + '. Enter ' + (plan.awaiting.length===1?'it':'them') + ' first — an archived tenant\'s bills can\'t be edited.</li>');
   if(plan.prepaidTotal > 0.005) items.push('<li>' + peso(plan.prepaidTotal) + ' was paid in advance for after move-out (' + plan.prepaid.slice(0,4).map(x => esc(x.label) + (x.period ? ' ' + fmtYM(x.period, 'short') : '')).join(', ') + '). What happens to it?</li>');
   if(!items.length) items.push('<li>Nothing is billed after move-out and nothing is owed.</li>');
+  if(mi0 && mi0 > last) items.unshift('<li>They never moved in (move-in ' + formatDate(mi0) + '): the tenancy is cancelled.</li>');
   box.innerHTML = '<ul>' + items.join('') + '</ul><p class="muted">Their history is kept and still counts in past reports. They can be restored.</p>';
   pre.style.display = plan.prepaidTotal > 0.005 ? 'block' : 'none';
   document.getElementById('mo-refund-wrap').style.display = _moPrepaidChoice()==='refund' ? 'block' : 'none';
@@ -4173,7 +4220,7 @@ async function confirmMoveOut(){
   const today = todayISO();
   if(!isISODate(last) || last > today){ showToast('Pick their last day in the unit (today or earlier).', false); return; }
   const mi = moveInOf(_moveOut.t);
-  if(mi && last < mi){ showToast('The last day can\'t be before the move-in date ('+formatDate(mi)+').', false); return; }
+  if(mi && mi <= today && last < mi){ showToast('The last day can\'t be before the move-in date ('+formatDate(mi)+').', false); return; }
   const choice = _moPrepaidChoice();
   const refundDate = document.getElementById('mo-refund-date').value;
   if(choice==='refund' && (!isISODate(refundDate) || refundDate > today)){ showToast('Pick the date the refund was paid (today or earlier).', false); return; }
@@ -4183,17 +4230,18 @@ async function confirmMoveOut(){
     const t = tenants.find(x=>x.id===_moveOut.tid);
     if(!t || _formStale(_moveOut.t)){ closeMoveOut(); rerenderAdmin(); return; }
     const plan = planMoveOut(t, last, { prepaid: choice, refundDate });
+    if(plan.awaiting.length && !confirm(plan.awaiting.length + ' bill' + (plan.awaiting.length!==1?'s':'') + ' still need' + (plan.awaiting.length===1?'s':'') + ' an amount (final meter reading). Archive anyway?\n\nAn archived tenant\'s bills can\'t be edited; you would need to restore them to enter it.')) return;
     const at = new Date(last + 'T12:00:00').toISOString();
     setLoading(true,'Archiving…');
     try {
-      await dbUpdateTenantGuarded(t, { archived_at: at, bills: plan.bills });
+      await dbUpdateTenantGuarded(t, { archived_at: at, bills: plan.bills, templates: plan.templates });
     } catch(e){
       setLoading(false);
       showToast(e.conflict ? e.message : 'Archive failed: '+e.message, false);
       if(e.conflict){ closeMoveOut(); rerenderAdmin(); }
       return;
     }
-    t.archived_at = at; t.bills = plan.bills;
+    t.archived_at = at; t.bills = plan.bills; t.templates = plan.templates;
     tenants = tenants.filter(x=>x.id!==t.id);
     archivedTenants = archivedTenants.filter(x=>x.id!==t.id).concat([t]);
     setLoading(false); closeMoveOut();
@@ -4204,15 +4252,16 @@ async function confirmMoveOut(){
 }
 async function restoreTenant(tid){
   const a = archivedTenants.find(x=>x.id===tid);
-  if(!confirm('Restore '+(a?a.name:'this tenant')+' as an active tenant?\n\nRecurring bills resume from the next cycle — an overdue current cycle is not posted automatically. If you only need to correct past records, archive them again when you are done.')) return;
+  if(!confirm('Restore '+(a?a.name:'this tenant')+' as an active tenant? This undoes the archive'+(a && (a.bills||[]).some(b=>b&&b.preMoveOut)?', including the move-out refund/forfeit':'')+'.\n\nIf they are moving back in after time away, add them as a new tenant instead — their old record keeps its history.\n\nRecurring bills resume from the current cycle; an overdue one is left to the checker.')) return;
   // Their access code may have been given to someone since (codes are
   // only unique among active tenants): restore with a fresh one.
   if(!a) return;
+  // Restore undoes the archive (and its move-out changes). A former tenant
+  // coming back after time away is a new stay — add them as a new tenant,
+  // so the first stay's dates (and past reports) stay as they were.
   const patch = {archived_at: null};
-  // A returning tenant starts a new tenancy: count cycles from today so the
-  // months they were away aren't reconciled as unpaid.
-  if(moveInOf(a) && confirm('Is '+a.name+' moving back in (a new stay)?\n\nOK: their tenancy counts from today — the move-in date becomes '+formatDate(todayISO())+', so the months away are not treated as unpaid.\nCancel: keep the original move-in date ('+formatDate(a.move_in_date)+') — e.g. to undo an archive made by mistake.'))
-    patch.move_in_date = todayISO();
+  const um = undoMoveOut(a);
+  if(um.restored) patch.bills = um.bills;
   const holder = tenants.find(x=>x.code===a.code);
   if(holder){
     let fresh = randCode();
@@ -4240,6 +4289,7 @@ async function restoreTenant(tid){
     return;
   }
   if(patch.code) a.code = patch.code;
+  if(patch.bills) a.bills = patch.bills;
   try {
     tenants = await dbGetAll() || [];
   } catch(e){
@@ -4406,7 +4456,7 @@ function billListItemHtml(b, i, extraClass) {
   const paymentsHtml = (b.payments||[]).map((p,pi)=>`
     <div class="payment-entry">
       <span class="payment-entry-date">${formatDate(p.date)}</span>
-      <span class="payment-entry-amt">&#8369;${Number(p.amount).toLocaleString()} paid</span>
+      <span class="payment-entry-amt">${Number(p.amount)<0?'Refunded &#8369;'+(-Number(p.amount)).toLocaleString():'&#8369;'+Number(p.amount).toLocaleString()+' paid'}</span>
       ${p.note?`<span class="payment-entry-note">${esc(p.note)}</span>`:'<span class="payment-entry-note"></span>'}
       <button class="payment-entry-del" onclick="deletePaymentEntry(${i},${pi})" title="Remove this payment" aria-label="Remove this payment">&#10005;</button>
     </div>`).join('');
@@ -4542,11 +4592,12 @@ async function saveBillEdit(i){
       b.payments = (b.payments||[]).slice(0, -1);
       if(billTotalPaid(b) >= _amt - 0.005){ b.status = 'paid'; b.paidDate = prev.paidDate; sync = 'still'; }
     }
+    if(b.status !== 'paid' && /paid in advance/i.test(b.remark||'') && billTotalPaid(b) <= 0.005) b.remark = '';
     // A corrected Date Paid moves the settling payment entries with it, so
     // cash reports (which follow payment dates) agree with the bill.
     const pays = b.payments || [];
     if(newStatus==='paid' && prev.status==='paid' && paidDate && prev.paidDate && paidDate!==prev.paidDate && pays.length)
-      b.payments = pays.map(p => (pays.length===1 || p.date===prev.paidDate) ? {...p, date: paidDate} : p);
+      b.payments = pays.map(p => p.date===prev.paidDate ? {...p, date: paidDate} : p);
     // Amount changed: re-sync paid status with the logged payments.
     if(!dropPayments) sync = _resyncPaidStatus(b, Number(prev.amount));
     bills[i] = b;
@@ -4714,7 +4765,11 @@ async function saveTenant(){
     else if(prevT && (prevT.billing_model!=='inclusive' || Number(prevT.flat_rate)!==flat_rate))
       want = confirm('Post the all-inclusive rate (₱'+fmtMoney(flat_rate)+') automatically every month?\n\nA recurring "Monthly Rent (All-Inclusive)" charge due on day '+tmplDayNew+' is set up, and each bill posts ahead of its due date. Cancel keeps billing manual.');
     if(want){
-      templates.push({id:uid(), label: billing_model==='inclusive' ? 'Monthly Rent (All-Inclusive)' : 'Monthly Rent', amount:recurringAmt, dayOfMonth:tmplDayNew, pendingAmount:false, since:_currentYM()});
+      const nt = {id:uid(), label: billing_model==='inclusive' ? 'Monthly Rent (All-Inclusive)' : 'Monthly Rent', amount:recurringAmt, dayOfMonth:tmplDayNew, pendingAmount:false};
+      // A new tenant's rent is reckoned from move-in; one set up later for an
+      // existing tenant only from now (no back-dated arrears).
+      if(savingId) nt.since = _sinceFor({ move_in_date, bills }, nt);
+      templates.push(nt);
       autoTemplate = true;
     }
   }
@@ -4722,20 +4777,20 @@ async function saveTenant(){
   // the admin stops them — ask, naming them.
   if(prevT && (prevT.billing_model==='inclusive'?'inclusive':'itemized')!==billing_model && existingTemplates.length){
     const hits = billing_model==='inclusive'
-      ? templates.filter(x=>isAutoTemplate(x) && billCategory(x)==='utilities')
-      : templates.filter(x=>isAutoTemplate(x) && /all.?inclusive/i.test(x.label||''));
+      ? templates.filter(x=>!x.retired && billCategory(x)==='utilities')
+      : templates.filter(x=>!x.retired && /all.?inclusive/i.test(x.label||''));
     const names = hits.map(x=>'"'+x.label+'"').join(', ');
     if(hits.length && confirm(billing_model==='inclusive'
-        ? 'Utilities are included in an all-inclusive rate, but '+names+' still post'+(hits.length===1?'s':'')+' automatically every month.\n\nStop posting '+(hits.length===1?'it':'them')+' automatically? Bills already posted are kept.'
-        : names+' still post'+(hits.length===1?'s':'')+' the all-inclusive rate every month.\n\nStop posting it automatically now that billing is itemized? Set up the itemized charges under Recurring. Bills already posted are kept.'))
-      hits.forEach(x=>{ x.auto=false; });
+        ? 'Utilities are included in an all-inclusive rate, but '+names+' '+(hits.length===1?'is':'are')+' still charged every month.\n\nStop '+(hits.length===1?'it':'them')+'? '+(hits.length===1?'It is':'They are')+' no longer posted or owed; bills already posted are kept.'
+        : names+' still charge'+(hits.length===1?'s':'')+' the all-inclusive rate every month.\n\nStop it now that billing is itemized? It is no longer posted or owed (bills already posted are kept). Set up the itemized charges under Recurring.'))
+      hits.forEach(x=>{ x.retired=true; });
   }
   // Flat rate changed on an all-inclusive tenant: offer to carry the new
   // rate into the main recurring charge so future cycles bill the right amount.
   if(prevT && billing_model==='inclusive' && flat_rate>0 && Number(prevT.flat_rate)!==flat_rate && !autoTemplate){
-    const tp = primaryTemplate({templates, billing_model});
+    const tp = primaryTemplate({templates, billing_model, flat_rate: prevT.flat_rate});
     if(tp && Number(tp.amount)!==flat_rate){
-      if(confirm('Also change the recurring "'+tp.label+'" bill from ₱'+Number(tp.amount).toLocaleString()+' to ₱'+flat_rate.toLocaleString()+'?\n\nOnly bills posted from now on use the new rate; existing bills and past cycles keep their amounts.')) _recordRateChange(tp, flat_rate);
+      if(confirm('Also change the recurring "'+tp.label+'" bill from ₱'+Number(tp.amount).toLocaleString()+' to ₱'+flat_rate.toLocaleString()+'?\n\nOnly bills posted from now on use the new rate; existing bills and past cycles keep their amounts.')) _recordRateChange({ bills, templates }, tp, flat_rate);
     } else if(!tp && templates.length) showToast('No recurring charge follows the new rate — update the amount under Recurring.', false);
   }
   const fields = {name,unit,code,phone,email,move_in_date,floor,billing_model,flat_rate,bills,templates};
@@ -4832,10 +4887,10 @@ function _placeholderFor(t, label, due) {
   const tm = templateOfBill(t, probe);
   const ym = due ? String(due).slice(0, 7) : '';
   const cands = (t.bills || []).map((b, i) => ({ b, i })).filter(x => billAwaitingAmount(x.b)
-    && (tm ? (templateOfBill(t, x.b) === tm) : normLabel(x.b.label) === normLabel(label))
-    && (!ym || billPeriod(x.b) === ym));
+    && (tm ? (templateOfBill(t, x.b) === tm) : normLabel(x.b.label) === normLabel(label)));
   cands.sort((a, b) => (billPeriod(a.b) || '').localeCompare(billPeriod(b.b) || ''));
-  return cands.length ? cands[0].i : -1;
+  const inMonth = ym ? cands.find(x => billPeriod(x.b) === ym) : null;
+  return inMonth ? inMonth.i : cands.length ? cands[0].i : -1;
 }
 async function saveQuickBill(addAnother){
   const tid   = document.getElementById('qb-tenant').value;
@@ -4929,7 +4984,7 @@ function buildTimeline(bills, showAll) {
       // Cycle label so several bills paid on one day (advance payments) read apart.
       '<div class="timeline-label">'+esc(b.label)+(isYM(b.period)?' <span style="font-weight:500;color:var(--muted)">· '+fmtYM(b.period,'short')+'</span>':'')+'</div>'+
       '<div class="timeline-date">'+(b.paidDate?'Paid '+formatDate(b.paidDate):b.due?'Billed '+formatDate(b.due):'')+'</div>'+
-      ((b.payments&&b.payments.length)?b.payments.map(p=>'<div style="font-size:11px;color:var(--muted);margin-top:2px;">&#8369;'+Number(p.amount).toLocaleString()+' &nbsp;&middot;&nbsp; '+formatDate(p.date)+(p.note?' &nbsp;&middot;&nbsp; '+esc(p.note):'')+' </div>').join(''):'')+
+      ((b.payments&&b.payments.length)?b.payments.map(p=>'<div style="font-size:11px;color:var(--muted);margin-top:2px;">'+(Number(p.amount)<0?'Refunded &#8369;'+(-Number(p.amount)).toLocaleString():'&#8369;'+Number(p.amount).toLocaleString())+' &nbsp;&middot;&nbsp; '+formatDate(p.date)+(p.note?' &nbsp;&middot;&nbsp; '+esc(p.note):'')+' </div>').join(''):'')+
       (b.remark?'<div style="font-size:11px;color:var(--muted);margin-top:3px;font-style:italic;">'+esc(b.remark)+'</div>':'')+
       '</div><div class="timeline-amount">&#8369;'+Number(b.amount).toLocaleString()+'</div></div>'
     ).join('')+'</div>'
@@ -4971,7 +5026,7 @@ function renderTenant(){
   const isLater        = b => !!(b.due && b.due.slice(0,7) > curYM);
   const pastDue        = allActiveBills.filter(b=>!(b.due&&b.due.startsWith(curYM)) && !isLater(b))
                           .reduce((s,b)=>s+Math.max(0,billRemaining(b)),0);
-  const upcomingBills  = allActiveBills.filter(isLater).sort((a,b)=>a.due.localeCompare(b.due));
+  const upcomingBills  = allActiveBills.filter(b=>isLater(b) && !billAwaitingAmount(b)).sort((a,b)=>a.due.localeCompare(b.due));
   const nextUp         = upcomingBills[0] || null;
   let monthCardValue='', monthCardSub='', monthCardCls='';
   if(curMonthUnpaid.length){
@@ -5414,7 +5469,7 @@ async function copyReminder(tid){
 function quickMarkPaid(tid, bi) {
   const t = tenants.find(t=>t.id===tid);
   if(!t||!t.bills[bi]) return;
-  _pendingPaid = {tid, bi};
+  _pendingPaid = {tid, bi, t, bill: t.bills[bi]};
   document.getElementById('paiddate-bill-name').textContent = t.bills[bi].label + ' — ' + t.name;
   document.getElementById('paiddate-input').value = todayISO();
   openModal('paiddate-modal');
@@ -5443,12 +5498,13 @@ function renderTemplateList() {
         <div class="tmpl-meta">
           ${tmpl.pendingAmount ? '<span style="color:var(--orange-text);font-weight:600;">Pending amount</span>' : '&#8369;'+Number(tmpl.amount).toLocaleString()}
           &nbsp;·&nbsp; Due on day ${tmplDay(tmpl)} of each month
-          &nbsp;·&nbsp; ${isAutoTemplate(tmpl) ? '<span style="color:var(--green);font-weight:600;">Auto-posts</span>' : 'Manual'}
+          &nbsp;·&nbsp; ${tmpl.retired ? '<span style="color:var(--muted);font-weight:600;">Stopped — not billed or owed</span>' : isAutoTemplate(tmpl) ? '<span style="color:var(--green);font-weight:600;">Auto-posts</span>' : 'Manual'}
           ${isYM(tmpl.postedThrough) ? '&nbsp;·&nbsp; posted through '+fmtYM(tmpl.postedThrough,'short') : ''}
         </div>
       </div>
       <div style="display:flex;gap:5px">
         <button class="btn-icon" onclick="editTemplateInline(${i})" aria-label="Edit">&#9998;</button>
+        <button class="btn-icon" onclick="setTemplateStopped(${i}, ${tmpl.retired ? 'false' : 'true'})" aria-label="${tmpl.retired ? 'Resume charge' : 'Stop charge'}" title="${tmpl.retired ? 'Resume this charge' : 'Stop this charge (keep its history)'}">${tmpl.retired ? '&#9654;' : '&#10074;&#10074;'}</button>
         <button class="btn-icon del" onclick="deleteTemplate(${i})" aria-label="Delete">&#10005;</button>
       </div>
     </div>
@@ -5511,7 +5567,18 @@ async function saveTemplateEdit(i) {
   // it still count as this charge's history.
   const _prev = templatesCopy[i];
   const _aliases = new Set(Array.isArray(_prev.aliases) ? _prev.aliases : []);
-  if(normLabel(_prev.label) && normLabel(_prev.label) !== normLabel(_label)) _aliases.add(_prev.label);
+  const _renamed = normLabel(_prev.label) && normLabel(_prev.label) !== normLabel(_label);
+  // Renaming back to an earlier name undoes the rename: the name in between
+  // is kept only if bills were actually posted under it.
+  const _revert = Array.from(_aliases).some(a => normLabel(a) === normLabel(_label));
+  const _postedUnderPrev = (t.bills||[]).some(b => b && b.tmplId === _prev.id && normLabel(b.label) === normLabel(_prev.label));
+  if(_renamed && (!_revert || _postedUnderPrev)) _aliases.add(_prev.label);
+  // Taking a name hand-typed bills already use makes them this charge's.
+  if(_renamed && !_revert) {
+    const clash = (t.bills||[]).filter(b => b && !b.tmplId && normLabel(b.label) === normLabel(_label) && (templateOfBill(t, b) || {}).id !== _prev.id);
+    if(clash.length && !confirm(clash.length + ' existing bill' + (clash.length !== 1 ? 's are' : ' is') + ' already labelled "' + _label + '". After the rename '
+      + (clash.length !== 1 ? 'they' : 'it') + ' will count as this charge\'s bill' + (clash.length !== 1 ? 's' : '') + '.\n\nRename anyway?')) return;
+  }
   // An old name that is (now) another charge's name belongs to that charge.
   const _others = new Set(templatesCopy.filter((x,k)=>k!==i && x).map(x=>normLabel(x.label)));
   _aliases.forEach(a => { if(normLabel(a) === normLabel(_label) || _others.has(normLabel(a))) _aliases.delete(a); });
@@ -5523,7 +5590,7 @@ async function saveTemplateEdit(i) {
     auto: _autoEl ? _autoEl.checked : isAutoTemplate(_prev)
   };
   // A rate change keeps the old amount for past cycles (see tmplRateAt).
-  if(!_isPending && !_prev.pendingAmount) _recordRateChange(_next, amt); else _next.amount = amt;
+  if(!_isPending && !_prev.pendingAmount) _recordRateChange(t, _next, amt); else _next.amount = amt;
   // A metered charge switched to a fixed amount is reckoned from now on.
   if(_prev.pendingAmount && !_isPending) _next.since = _sinceFor(t, _next);
   _next.pendingAmount = _isPending;
@@ -5538,14 +5605,37 @@ async function saveTemplateEdit(i) {
   } catch(e){ if(e.conflict){ showToast(e.message,false); renderTemplateList(); rerenderAdmin(); } else templateSaveErr(e); }
 }
 
+// Stop a charge: no longer posted, and no longer owed (the checker leaves
+// it alone); its bills, waivers and old names stay. Resume restarts it
+// from the current cycle.
+async function setTemplateStopped(i, stop) {
+  await _autoBillIdle();
+  if(_formStale(_tmplListT)){ renderTemplateList(); rerenderAdmin(); return; }
+  const t = tenants.find(t=>t.id===editingId); if(!t||!t.templates||!t.templates[i]) return;
+  const tm = t.templates[i];
+  if(!confirm(stop ? 'Stop "' + tm.label + '"?\n\nIt is no longer posted or counted as owed. Bills already posted are kept. You can resume it later.'
+                   : 'Resume "' + tm.label + '"?\n\nIt is billed again from the current cycle; the months it was stopped are not billed.')) return;
+  const templatesCopy = structuredClone(t.templates);
+  const x = templatesCopy[i];
+  if(stop) x.retired = true;
+  else { delete x.retired; x.since = _sinceFor(t, x); }
+  try {
+    await dbUpdateTenantGuarded(t, {templates: templatesCopy});
+    t.templates = templatesCopy;
+    showToast(stop ? 'Charge stopped.' : 'Charge resumed.');
+    if(!stop) await runAutoBilling({ only: t.id });
+    renderTemplateList(); rerenderAdmin();
+  } catch(e){ if(e.conflict){ showToast(e.message,false); renderTemplateList(); rerenderAdmin(); } else templateSaveErr(e); }
+}
+
 async function deleteTemplate(i) {
   const _t0 = tenants.find(t=>t.id===editingId);
   const _d = _t0 && _t0.templates && _t0.templates[i];
   const _sk = _d && Array.isArray(_d.skip) ? _d.skip : [];
   const _al = _d && Array.isArray(_d.aliases) ? _d.aliases : [];
   const _lost = (_sk.length || _al.length)
-    ? '\n\nNot kept: ' + [_sk.length ? 'its waived month' + (_sk.length!==1?'s':'') + ' (' + _sk.map(fmtYM).join(', ') + ')' : '', _al.length ? 'its earlier name' + (_al.length!==1?'s':'') + ' (' + _al.join(', ') + ')' : ''].filter(Boolean).join(' and ')
-      + ' — a re-added charge would list waived months as unbilled again. To stop billing but keep them, edit the charge and untick "Post automatically" instead.'
+    ? '\n\nNot kept: ' + [_sk.length ? 'its waived month' + (_sk.length!==1?'s':'') + ' (' + _sk.map(p => fmtYM(p)).join(', ') + ')' : '', _al.length ? 'its earlier name' + (_al.length!==1?'s':'') + ' (' + _al.join(', ') + ')' : ''].filter(Boolean).join(' and ')
+      + ' — a re-added charge would list waived months as unbilled again. To stop billing but keep them, use Stop (❚❚) instead.'
     : '';
   if(!confirm('Delete this recurring charge?\n\nBills already posted are kept. No new bills will post for it. If you add a charge with the same name later, those bills count as its history.' + _lost)) return;
   await _autoBillIdle();
@@ -5612,6 +5702,11 @@ async function saveNewTemplate() {
   templatesCopy.forEach(x => { if(x && Array.isArray(x.aliases)) x.aliases = x.aliases.filter(a => normLabel(a) !== normLabel(label)); });
   const _nt = {id:uid(), label, amount:amt, dayOfMonth:day, pendingAmount:_ntPending, auto: _ntAuto ? _ntAuto.checked : true};
   _nt.since = _sinceFor(t, _nt); // a new charge isn't owed for months before it existed
+  // A second rent charge (a new rate set up as a new charge): offer to stop
+  // the old one so the tenant isn't charged rent twice.
+  const _oldRent = billCategory(_nt) === 'rent' ? templatesCopy.filter(x => x && !x.retired && billCategory(x) === 'rent') : [];
+  if(_oldRent.length && confirm(t.name + ' already has ' + _oldRent.map(x => '"' + x.label + '"').join(', ') + '.\n\nOK: stop ' + (_oldRent.length === 1 ? 'it' : 'them') + ' so only "' + label + '" is charged from now on (bills already posted stay as history).\nCancel: keep charging both.'))
+    _oldRent.forEach(x => { x.retired = true; });
   templatesCopy.push(_nt);
   try {
     await dbUpdateTenantGuarded(t, {templates: templatesCopy});
@@ -5654,7 +5749,7 @@ function refreshGenPreview() {
 
   const entries = [];
   tenants.forEach(t => {
-    const tmpls = (t.templates||[]).filter(x=>x && normLabel(x.label));
+    const tmpls = activeTemplates(t).filter(x=>normLabel(x.label));
     if(!tmpls.length) return;
     const rows = tmpls.map(tmpl => {
       // Same due-date and duplicate rules as automatic billing: day capped to
@@ -5662,7 +5757,7 @@ function refreshGenPreview() {
       const dueDate = templateDueDate(t, tmpl, val);
       const waived = Array.isArray(tmpl.skip) && tmpl.skip.includes(val) && !templateBillExists(t, tmpl, val);
       const alreadyExists = waived || templateBillExists(t, tmpl, val);
-      return {tmpl, dueDate, alreadyExists, waived, selected: !alreadyExists};
+      return {tmpl, dueDate, alreadyExists, waived, selected: !alreadyExists, amount: tmplRateAt(tmpl, val)};
     });
     entries.push({t, rows});
   });
@@ -5704,7 +5799,7 @@ function _genTotals(rows) {
     if(!r.selected) return;
     count++;
     if(r.tmpl.pendingAmount) pendingCount++;
-    else amount += Number(r.tmpl.amount)||0;
+    else amount += Number(r.amount)||0;
   });
   return {count, amount, pendingCount, skipped};
 }
@@ -5743,7 +5838,7 @@ function renderGenPreview() {
         <div class="gen-bill-label">${esc(r.tmpl.label)}</div>
         <div class="gen-bill-due">Due ${formatDate(r.dueDate)}</div>
       </div>
-      <div class="gen-bill-amount">${r.tmpl.pendingAmount ? '<span style="color:var(--orange);font-size:12px;font-weight:600;">Pending amount</span>' : '&#8369;'+Number(r.tmpl.amount).toLocaleString()}</div>
+      <div class="gen-bill-amount">${r.tmpl.pendingAmount ? '<span style="color:var(--orange);font-size:12px;font-weight:600;">Pending amount</span>' : '&#8369;'+Number(r.amount).toLocaleString()}</div>
     </div>`;
 
   const tenantHtml = (e, gi, ei) => {

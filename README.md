@@ -58,12 +58,14 @@ Insights and Settings sit under *More*):
   billed (post them or waive them in one tap), and overpayments not yet
   applied (**Apply credit** moves them forward with their original payment
   dates, so cash reports don't change).
-  The main rent is reckoned from move-in; any other charge (parking, a
-  fixed utility) only from its first bill or the month it was set up, so
-  adding a charge never creates back-dated arrears. Hand-typed rent bills
-  ("Rent – March", "Upa – March", or any non-utility bill for exactly the
-  rent amount) count as that month's rent; balances, deposits and
-  penalties don't. Changing a charge's amount keeps the old amount for
+  The main rent is reckoned from move-in; a charge set up later (parking,
+  a fixed utility, a new rent charge) only from the month it was set up,
+  so adding or switching a charge never creates back-dated arrears. Hand-typed rent bills
+  ("Rent – March", "Upa – March", any non-utility bill for exactly the rent
+  amount, or older history typed under one monthly label such as
+  "Room – March", "Room – April"…) count as that month's rent; balances,
+  deposits and penalties don't. "Water – Sept" counts as the Water charge's
+  bill, but a one-off like "Water heater repair" never does. Changing a charge's amount keeps the old amount for
   earlier cycles, and a cycle that has a bill falls due on that bill's date.
 - **Undo a payment recorded by mistake:** *Undo* next to it under
   Payments received (tenant page) takes a Receive-payment receipt off every
@@ -79,8 +81,14 @@ Insights and Settings sit under *More*):
 - **Move out & archive** asks for the tenant's last day: unpaid bills for
   cycles after it are removed, money paid ahead for them is refunded (a
   dated refund) or kept as forfeited income on the last day, and reports
-  stop earning rent after that day. Restoring asks whether it's a new stay
-  (move-in becomes today).
+  stop earning rent after that day. Metered bills still waiting for a final
+  reading are flagged first. *Restore* undoes an archive (including its
+  refund/forfeit); a former tenant moving back in later is added as a new
+  tenant, so the first stay's history stays intact.
+- **Stop a charge** (❚❚ under Recurring) when it no longer applies — e.g.
+  utilities after switching to all-inclusive: it is neither posted nor
+  counted as owed, and its bills stay as history. Adding a second rent
+  charge offers to stop the old one.
 - **Several devices:** every write targets the current row (a tab can't
   write onto a tenant archived or changed elsewhere); a tab that stays open
   re-reads tenants and the automatic-billing settings before each daily run.

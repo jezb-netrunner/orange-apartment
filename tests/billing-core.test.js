@@ -482,9 +482,11 @@ test('move-out: unpaid later cycles are removed; prepaid ones are refunded (date
   ] });
   t.templates.push({ id: 'E', label: 'Electricity', amount: 0, pendingAmount: true, dayOfMonth: 20 });
   const keep = BC.planMoveOut(t, '2026-09-30', { prepaid: 'keep' });
-  assert.equal(keep.removed.length, 2);
+  assert.equal(keep.removed.length, 1);          // Oct rent; the meter placeholder is usage before move-out
+  assert.equal(keep.awaiting.length, 1);
   assert.equal(keep.owed, 6000);
   assert.equal(keep.prepaidTotal, 6000);
+  assert.equal(keep.templates[0].postedThrough, undefined);
   const refund = BC.planMoveOut(t, '2026-09-30', { prepaid: 'refund', refundDate: '2026-09-30' });
   const nov = refund.bills.find(b => b.period === '2026-11');
   assert.equal(nov.amount, 0);
@@ -537,4 +539,94 @@ test('a new metered charge is reckoned from the month it was set up', () => {
     bills: months('2026-01', '2026-09').map(ym => paidBill(ym, { due: ym + '-10', paidDate: ym + '-10' })) });
   const e = BC.reconcileTenant(t, { today: '2026-09-27', leadDays: 3 }).charges.find(c => c.tmplId === 'E');
   assert.equal(e.missing.length, 0);
+});
+
+// ── Round-4 (fix verification) regressions ──
+test('"rent" must be a word; one-offs named after a charge are not its monthly bill', () => {
+  assert.equal(BC.billCategory({ label: 'Aircon rental' }), 'other');
+  assert.equal(BC.billCategory({ label: 'Electric bill (current)' }), 'utilities');
+  assert.equal(BC.billCategory({ label: 'Renta - Oktubre' }), 'rent');
+  const t = tenant({ templates: [rentT({ postedThrough: '2026-09' }), { id: 'W', label: 'Water', amount: 0, pendingAmount: true, dayOfMonth: 1, postedThrough: '2026-09' }],
+    bills: [bill({ label: 'Aircon rental', amount: 500, due: '2026-10-05' }), bill({ label: 'Water refill (5 gal)', amount: 60, due: '2026-10-01' })] });
+  assert.equal(BC.templateBillExists(t, t.templates[0], '2026-10'), false);
+  assert.equal(BC.templateBillExists(t, t.templates[1], '2026-10'), false);
+  assert.ok(BC.templateOfBill(t, { label: 'Water (Aug-Sep 2026)' }));
+  assert.equal(BC.templateOfBill(t, { label: 'Water heater repair' }), null);
+});
+
+test('a charge with a start month is reckoned from it — the main rent too — never from an older bill', () => {
+  const t = tenant({ move_in_date: '2026-01-05', templates: [
+      rentT({ id: 'OLD', label: 'Monthly Rent (old rate)', retired: true }),
+      rentT({ id: 'NEW', amount: 7000, since: '2026-10' }),
+      { id: 'E', label: 'Electricity', amount: 1000, dayOfMonth: 10, since: '2026-10' }],
+    bills: months('2026-01', '2026-09').map(ym => paidBill(ym, { tmplId: 'OLD', period: ym }))
+      .concat([paidBill('2026-06', { label: 'Electricity - June', amount: 800 })]) });
+  const r = BC.reconcileTenant(t, { today: '2026-09-27', leadDays: 3 });
+  assert.equal(r.charges.length, 2);                   // the stopped charge isn't reconciled
+  const nw = r.charges.find(c => c.tmplId === 'NEW'), e = r.charges.find(c => c.tmplId === 'E');
+  assert.equal(nw.startYM, '2026-10'); assert.equal(nw.arrears, 0); assert.equal(nw.missing.length, 0);
+  assert.equal(e.startYM, '2026-10'); assert.equal(e.arrears, 0);
+  assert.equal(BC.primaryTemplate(t).id, 'NEW');
+});
+
+test('legacy rent typed under a monthly label at an older amount still counts', () => {
+  const t = tenant({ move_in_date: '2026-03-01', templates: [rentT({ dayOfMonth: 1 })],
+    bills: months('2026-03', '2026-09').map(ym => paidBill(ym, { label: 'Room - ' + ym, amount: 5500, due: ym + '-01' })) });
+  const c = BC.reconcileTenant(t, { today: '2026-09-20', leadDays: 3 }).charges[0];
+  assert.equal(c.missing.length, 0);
+  assert.equal(c.arrears, 0);
+});
+
+test('all-inclusive main charge: never handed to a small add-on; first activation respects a hand-typed bill', () => {
+  const t = { billing_model: 'inclusive', flat_rate: 8000, templates: [
+    { id: 'R', label: 'Room + utilities', amount: 0, pendingAmount: true, dayOfMonth: 1 },
+    { id: 'P', label: 'Parking', amount: 500, dayOfMonth: 1 }] };
+  assert.equal(BC.primaryTemplate(t), null);
+  t.templates[0] = { id: 'R', label: 'Room + utilities', amount: 8000, dayOfMonth: 1 };
+  assert.equal(BC.primaryTemplate(t).id, 'R');
+  const t2 = { billing_model: 'inclusive', flat_rate: 7200, templates: [{ id: 'I', label: 'Monthly Rent (All-Inclusive)', amount: 7200, dayOfMonth: 3 }],
+    bills: [bill({ label: 'Monthly Bill - October', amount: 6500, due: '2026-10-03' })] };
+  assert.equal(BC.planAutoPost(t2, { today: '2026-09-28', leadDays: 7, uid }).bills.length, 0);
+});
+
+test('move-out: fixed utilities count as cycles; keep settles at what was paid; restore puts it back', () => {
+  const t = tenant({ move_in_date: '2026-03-01', templates: [rentT({ dayOfMonth: 1, postedThrough: '2026-10' }), { id: 'I', label: 'Internet', amount: 1000, dayOfMonth: 1, postedThrough: '2026-10' }],
+    bills: [bill({ due: '2026-10-01', tmplId: 'T1', period: '2026-10', payments: [{ amount: 2000, date: '2026-09-05', note: 'adv', rid: 'R' }], remark: 'Partly paid in advance' }),
+            bill({ label: 'Internet', amount: 1000, due: '2026-10-01', tmplId: 'I', period: '2026-10' })] });
+  const k = BC.planMoveOut(t, '2026-09-27', { prepaid: 'keep' });
+  assert.equal(k.removed.length, 1);                   // Internet Oct
+  const oct = k.bills.find(b => b.tmplId === 'T1');
+  assert.equal(oct.amount, 2000); assert.equal(oct.status, 'paid'); assert.equal(BC.billOpen(oct), 0);
+  assert.equal(k.templates.find(x => x.id === 'I').postedThrough, '2026-09');
+  const back = BC.undoMoveOut(Object.assign({}, t, { bills: k.bills }));
+  assert.equal(back.restored, 1);
+  assert.equal(back.bills.find(b => b.tmplId === 'T1').amount, 6000);
+});
+
+test('an archived tenant\'s unpaid later bill is not revenue (memo still ties out)', () => {
+  const f = { id: 'F', floor: '1st', archived_at: '2026-06-20T02:00:00Z', templates: [],
+    bills: months('2026-01', '2026-06').map(ym => bill({ amount: 5800, due: ym + '-01', status: 'paid', paidDate: ym + '-02' }))
+      .concat([bill({ amount: 5800, due: '2026-07-01', tmplId: 'X', period: '2026-07' })]) };
+  f.templates = [{ id: 'X', label: 'Monthly Rent', amount: 5800, dayOfMonth: 1 }];
+  for(const prorate of [true, false]) {
+    const is = BC.computeIncomeStatement({ tenants: [f], expenses: [], from: '2026-01', to: '2026-07', basis: 'accrual', prorate, allocation: 'none' });
+    assert.equal(is.total.revenue.total, 34800);
+    const m = is.memo.__total, cash = 34800;
+    assert.equal(BC.r2(is.total.revenue.total - cash), BC.r2(m.receivable - m.unearned - m.billedAhead - m.credits));
+  }
+});
+
+test('undo keeps a marked-paid balance as real money and hands the early-bill mark on', () => {
+  const t = tenant({ templates: [rentT({ postedThrough: '2026-11' })], bills: [
+    bill({ amount: 7500, due: '2026-08-15', status: 'paid', paidDate: '2026-09-01', payments: [{ amount: 2000, date: '2026-08-10', rid: 'M' }] }),
+    bill({ due: '2026-11-05', tmplId: 'T1', period: '2026-11', rid: 'R1', payments: [{ amount: 2000, date: '2026-09-20', rid: 'R1' }, { amount: 4000, date: '2026-09-25', rid: 'R2' }], status: 'paid', paidDate: '2026-09-25' })] });
+  const u = BC.undoReceipt(t, 'M', { today: '2026-09-27' });
+  const aug = u.bills[0];
+  assert.equal(aug.status, 'unpaid');
+  assert.deepEqual(BC.billCashEvents(aug).map(e => [e.date, e.amount]), [['2026-09-01', 5500]]);
+  const u1 = BC.undoReceipt(t, 'R1', { today: '2026-09-27' });
+  const nov = u1.bills.find(b => b.period === '2026-11');
+  assert.equal(nov.rid, 'R2');
+  const u2 = BC.undoReceipt(Object.assign({}, t, { bills: u1.bills, templates: u1.templates }), 'R2', { today: '2026-09-27' });
+  assert.equal(u2.bills.some(b => b.period === '2026-11'), false);
 });
