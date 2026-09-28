@@ -546,7 +546,7 @@ const INCSTMT_PREFS_KEY = 'oa_incstmt_prefs_v2';
 
 function incStmtDefaultPrefs() {
   return {
-    preset:'6m', basis:'accrual', prorate:true, scope:'building', alloc:'headcount',
+    preset:'6m', basis:'accrual', prorate:false, scope:'building', alloc:'headcount',
     incDetail:true, expDetail:true, monthly:true, memo:true,
     sign:false, note:'', size:'normal', theme:'color', paper:'a4', orient:'portrait'
   };
@@ -586,7 +586,11 @@ function openIncStmtModal(scope) {
   let prefs = incStmtDefaultPrefs();
   try {
     const saved = JSON.parse(localStorage.getItem(INCSTMT_PREFS_KEY));
-    if(saved && typeof saved==='object') prefs = Object.assign(prefs, saved);
+    if(saved && typeof saved==='object') {
+      prefs = Object.assign(prefs, saved);
+      // Spreading is opt-in; it is saved as `spread` so an old saved default (prorate) is ignored.
+      prefs.prorate = typeof saved.spread === 'boolean' ? saved.spread : false;
+    }
   } catch {}
   if(scope) prefs.scope = scope;
   const hasFloors = _fillIncScopeOptions(prefs.scope);
@@ -689,7 +693,8 @@ function incStmtOptsChanged() {
   _syncIncStmtControls();
   const o = getIncStmtOpts();
   try {
-    const {from, to, ...prefs} = o; // range is per-visit, everything else persists
+    const {from, to, prorate, ...prefs} = o; // range is per-visit, everything else persists
+    prefs.spread = prorate;
     localStorage.setItem(INCSTMT_PREFS_KEY, JSON.stringify(prefs));
   } catch {}
   clearTimeout(_incStmtPreviewTimer);
@@ -3494,10 +3499,11 @@ const INSIGHT_WINDOWS = { '3m':'3 months', '6m':'6 months', '12m':'12 months', '
 let insightWindow = '6m';
 let _vizMonthly = null; // data behind the monthly chart's tooltip
 
-// The income statement's saved "spread rent over each cycle" choice (on by default).
+// The income statement's saved "spread rent over each cycle" choice (off by default:
+// each charge counts in its billing month).
 function _incStmtProrate() {
-  try { const p = JSON.parse(localStorage.getItem(INCSTMT_PREFS_KEY)); if(p && typeof p.prorate === 'boolean') return p.prorate; } catch {}
-  return true;
+  try { const p = JSON.parse(localStorage.getItem(INCSTMT_PREFS_KEY)); if(p && typeof p.spread === 'boolean') return p.spread; } catch {}
+  return false;
 }
 function _insightRange(win) {
   const cur = _currentYM();
