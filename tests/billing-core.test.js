@@ -215,24 +215,26 @@ test('income statement: accrual vs cash, advances are unearned', () => {
   assert.equal(acc.total.revenue.total, 6000);                 // water billed back is pass-through, not revenue
   assert.equal(acc.total.passThrough.billed, 500);
   assert.equal(acc.total.passThrough.outstanding, 500);
-  assert.equal(acc.total.expenses, 700);
-  assert.equal(acc.total.net, 5300);
+  // The ₱500 water billed back offsets the ₱700 water cost: only ₱200 is the building's.
+  assert.equal(acc.total.recovered.water, 500);
+  assert.equal(acc.total.expenses, 200);
+  assert.equal(acc.total.net, 5800);
   assert.equal(acc.memo.__total.receivable, 0);
   assert.equal(acc.memo.__total.unearned, 6000);
   const cash = BC.computeIncomeStatement(Object.assign({ basis: 'cash' }, base));
   assert.equal(cash.total.revenue.total, 12000);
-  assert.equal(cash.total.net, 11300);
+  assert.equal(cash.total.net, 11300);                          // nothing recovered in cash yet
 });
 
-test('income statement: per-floor with direct + shared allocation by headcount', () => {
+test('income statement: per-floor with direct + shared allocation by occupied units', () => {
   const a = tenant({ id: 'A', floor: '1st', move_in_date: '2026-01-01', bills: [bill({ due: '2026-09-01', status: 'paid', paidDate: '2026-09-01' })] });
   const b = tenant({ id: 'B', floor: '2nd', move_in_date: '2026-01-01', bills: [bill({ amount: 4000, due: '2026-09-01' })] });
-  const c = tenant({ id: 'C', floor: '2nd', move_in_date: '2026-01-01', bills: [] });
+  const c = tenant({ id: 'C', unit: '2', floor: '2nd', move_in_date: '2026-01-01', bills: [] });
   const ex = [
     { expense_date: '2026-09-02', category: 'electricity', amount: 900, floor: '' },   // shared
     { expense_date: '2026-09-03', category: 'maintenance', amount: 300, floor: '2nd' } // direct
   ];
-  const is = BC.computeIncomeStatement({ tenants: [a, b, c], expenses: ex, from: '2026-09', to: '2026-09', basis: 'accrual', prorate: false, allocation: 'headcount' });
+  const is = BC.computeIncomeStatement({ tenants: [a, b, c], expenses: ex, from: '2026-09', to: '2026-09', basis: 'accrual', prorate: false, allocation: 'units' });
   assert.equal(is.columns['1st'].shared.electricity, 300);
   assert.equal(is.columns['2nd'].shared.electricity, 600);
   assert.equal(is.columns['2nd'].direct.maintenance, 300);
@@ -468,7 +470,7 @@ test('floors match regardless of case and spacing', () => {
   const is = BC.computeIncomeStatement({ tenants: [mk('a', '3rd Floor'), mk('b', '3rd Floor'), mk('c', '2nd Floor')],
     expenses: [{ expense_date: '2026-07-10', category: 'repairs', amount: 8000, floor: '3rd floor' },
                { expense_date: '2026-07-11', category: 'repairs', amount: 2000, floor: ' 3RD  FLOOR ' }],
-    from: '2026-07', to: '2026-07', basis: 'accrual', prorate: false, allocation: 'headcount' });
+    from: '2026-07', to: '2026-07', basis: 'accrual', prorate: false, allocation: 'units' });
   assert.deepEqual(is.floors.slice().sort(), ['2nd Floor', '3rd Floor']);
   assert.equal(is.columns['3rd Floor'].net, 10000);
 });
@@ -715,4 +717,53 @@ test('default accrual: a mid-month move-in keeps a flat rent whole in each billi
     const m = BC.computeIncomeStatement({ tenants: [t], expenses: [], from: ym, to: ym });
     assert.equal(m.total.revenue.total, 4000, ym);
   }
+});
+
+test('utility costs are offset per floor and kind by what tenants are billed back', () => {
+  const a = tenant({ id: 'A', floor: '1st', move_in_date: '2026-01-01', bills: [
+    bill({ label: 'Electric Bill', amount: 3000, due: '2026-09-20' }),
+    bill({ label: 'Water', amount: 900, due: '2026-09-20' })] });
+  const b = tenant({ id: 'B', unit: '2', floor: '2nd', move_in_date: '2026-01-01', bills: [bill({ label: 'Utilities', amount: 400, due: '2026-09-20' })] });
+  const ex = [
+    { expense_date: '2026-09-05', category: 'electricity', amount: 2500, floor: '1st' },  // tenants billed more than cost: capped
+    { expense_date: '2026-09-05', category: 'water', amount: 1000, floor: '1st' },
+    { expense_date: '2026-09-06', category: 'electricity', amount: 1000, floor: '' },      // building-wide, not allocated
+    { expense_date: '2026-09-07', category: 'maintenance', amount: 800, floor: '' }];
+  const is = BC.computeIncomeStatement({ tenants: [a, b], expenses: ex, from: '2026-09', to: '2026-09' });
+  assert.equal(is.columns['1st'].recovered.electricity, 2500);
+  assert.equal(is.columns['1st'].recovered.water, 900);
+  assert.equal(is.columns['1st'].expenses, 100);
+  // 1st floor's leftover ₱500 electricity billing and 2nd floor's generic ₱400 offset the building-wide ₱1,000.
+  assert.equal(is.unallocated.recovered, 900);
+  assert.equal(is.total.expenses, 5300 - 3400 - 900);
+  assert.equal(is.total.recovered.maintenance, 0);
+  const sumMonth = is.perMonth.__total.reduce((s, m) => s + m.expenses, 0);
+  assert.equal(sumMonth, is.total.expenses);
+});
+
+test('a category picked on a charge or bill overrides the label guess', () => {
+  assert.equal(BC.billCategory({ label: 'Room + water' }), 'utilities');
+  assert.equal(BC.billCategory({ label: 'Room + water', category: 'rent' }), 'rent');
+  assert.equal(BC.billCategory({ label: 'Water refill', category: 'other' }), 'other');
+  const t = tenant({ templates: [rentT({ category: 'rent', label: 'Room + water' })] });
+  assert.equal(BC.makeTemplateBill(t.templates[0], '2026-09', '2026-09-01').category, 'rent');
+});
+
+test('allocation by occupied units counts distinct units, not tenant records', () => {
+  const mk = (id, unit, floor) => tenant({ id, unit, floor, move_in_date: '2026-01-01', bills: [] });
+  const is = BC.computeIncomeStatement({ tenants: [mk('a', '101', '1st'), mk('b', '101', '1st'), mk('c', '201', '2nd')],
+    expenses: [{ expense_date: '2026-09-02', category: 'maintenance', amount: 1000, floor: '' }], from: '2026-09', to: '2026-09', allocation: 'units' });
+  assert.equal(is.columns['1st'].shared.total, 500);
+  assert.deepEqual(is.unitsByMonth['2026-09'], { '1st': 1, '2nd': 1 });
+});
+
+test('grace period: paid within it is on time; unpaid within it is not yet late', () => {
+  const t = tenant({ bills: [
+    bill({ due: '2026-08-01', status: 'paid', paidDate: '2026-08-04' }),
+    bill({ due: '2026-09-25' })] });
+  const strict = BC.paymentReliability([t], '2026-08', '2026-09', '2026-09-28');
+  assert.equal(strict[0].late, 2);
+  const g5 = BC.paymentReliability([t], '2026-08', '2026-09', '2026-09-28', 5);
+  assert.equal(g5[0].n, 1);
+  assert.equal(g5[0].late, 0);
 });

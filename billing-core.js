@@ -87,8 +87,10 @@ const BILL_CATEGORIES = [
   { key:'utilities', label:'Utilities'     },
   { key:'other',     label:'Other Charges' }
 ];
-// Categories are inferred from the label so existing data just works.
+// A category the admin picked on a charge or bill wins; otherwise it is
+// inferred from the label so existing data just works.
 function billCategory(b) {
+  if(b && BILL_CATEGORIES.some(c => c.key === b.category)) return b.category;
   const l = String((b && b.label) || '').toLowerCase();
   if(/\brent|\bupa\b/.test(l)) return 'rent';   // rent, rental, renta (not "current")
   if(/electric|kuryente|power|beneco|meralco|water|tubig|internet|wi-?fi|gas\b|cable|utilit/.test(l)) return 'utilities';
@@ -135,6 +137,15 @@ function billCashEvents(b) {
 // behalf of the provider — under IFRS 15 the landlord is an agent, so they
 // are not revenue. Reports keep them apart as pass-through billings.
 function isPassThrough(b) { return billCategory(b) === 'utilities'; }
+// Which utility cost a billed-back charge reimburses (matches expense
+// categories); 'other' for generic ones ("Utilities", "LPG").
+function utilityKind(b) {
+  const l = String((b && b.label) || '').toLowerCase();
+  if(/electric|kuryente|power|beneco|meralco|kwh/.test(l)) return 'electricity';
+  if(/water|tubig|maynilad/.test(l)) return 'water';
+  if(/internet|wi-?fi|cable|fiber|pldt|globe|converge/.test(l)) return 'internet';
+  return 'other';
+}
 
 // Is this label the monthly rent itself, not an item rented ("Parking rent",
 // "Aircon rental")? The rent word leads, after an optional month and/or
@@ -278,10 +289,13 @@ function _isLooseRent(b, t, liveIds, owner, rates) {
     const tm = ((t && t.templates) || []).find(x => x && x.id === b.tmplId);
     return !!(tm && tm.retired && isRentLabel(tm.label));
   }
-  if(owner(b) || _NOT_MONTHLY_RENT.test(b.label || '')) return false;
+  if(owner(b) || _NOT_MONTHLY_RENT.test(b.label || '') || _notRentPicked(b)) return false;
   if(isRentLabel(b.label)) return true;
   return billCategory(b) !== 'utilities' && !!rates && rates.includes(r2(b.amount));
 }
+
+// The admin marked this bill as a utility or other charge: never the rent.
+function _notRentPicked(b) { return !!b && (b.category === 'utilities' || b.category === 'other'); }
 
 // Bills that belong to a template (see billOfTemplate). With `fallback`, a
 // period that has no such bill also accepts one hand-typed rent bill (see
@@ -304,7 +318,7 @@ function templateBills(t, tmpl, fallback) {
     const rates = _tmplRates(tmpl);
     // History from before the charge's first own bill may be hand-typed
     // under any monthly label ("Room - March", "Room - April", …): a label
-    // repeated over 3+ months counts as that month's rent, at any amount.
+    // repeated over 2+ months counts as that month's rent, at any amount.
     const firstOwn = Array.from(byPeriod.keys()).filter(isYM).sort()[0] || '9999-12';
     const series = _monthlySeries(bills, liveIds, owner, rates);
     // Rent-worded / rent-amount bills first; a series bill only fills a
@@ -329,7 +343,7 @@ function _monthlySeries(bills, liveIds, owner, rates) {
   const stem = b => String(b.label || '').toLowerCase().split(/[^a-z]+/).filter(w => w && !MONTHS.test(w)).join(' ') || '#month';
   const floor = rates && rates.length ? Math.max.apply(null, rates) * 0.5 : Infinity;
   const ok = b => b && !(b.tmplId && liveIds.has(b.tmplId)) && !owner(b) && !_NOT_MONTHLY_RENT.test(b.label || '')
-    && billCategory(b) !== 'utilities' && billPeriod(b) && _num(b.amount) >= floor;
+    && billCategory(b) !== 'utilities' && !_notRentPicked(b) && billPeriod(b) && _num(b.amount) >= floor;
   const months = new Map();
   bills.forEach(b => {
     if(!ok(b)) return;
@@ -371,7 +385,7 @@ function _handTypedMonth(t, tmpl, ym) {
   // of at least half the rent (an "Aircon cleaning" ₱800 never is).
   const floor = Math.max(tmplRate(tmpl), _num(t.flat_rate)) * 0.5;
   return (t.bills || []).some(b => b && billPeriod(b) === ym && !(b.tmplId && liveIds.has(b.tmplId)) && !owner(b)
-    && !_NOT_MONTHLY_RENT.test(b.label || '') && billCategory(b) !== 'utilities'
+    && !_NOT_MONTHLY_RENT.test(b.label || '') && billCategory(b) !== 'utilities' && !_notRentPicked(b)
     && (isRentLabel(b.label) || (floor > 0 && _num(b.amount) >= floor)));
 }
 
@@ -401,7 +415,8 @@ function makeTemplateBill(tmpl, ym, due) {
     paidDate: '',
     payments: [],
     tmplId: tmpl.id,
-    period: ym
+    period: ym,
+    ...(BILL_CATEGORIES.some(c => c.key === tmpl.category) ? { category: tmpl.category } : {})
   };
 }
 
@@ -1127,9 +1142,14 @@ function _recognizedThrough(t, b, endYM, prorate) {
 //   allTime     include undated items too
 //   basis       'accrual' (default) | 'cash'
 //   prorate     accrual: spread recurring charges over their cycle days
-//   allocation  shared (untagged) expenses → floors: 'headcount' | 'revenue' | 'none'
+//   allocation  shared (untagged) expenses → floors: 'none' (default) |
+//               'units' (occupied units on each floor that month) | 'revenue'
 //   hasExpenses false = expenses ledger unavailable (income only)
-// Returns { months, floors, columns{key→col}, total, unallocated, perMonth, memo, undated }.
+// Utility costs in the expenses ledger are offset by the utilities billed
+// back to tenants (pass-through, see isPassThrough), matched per floor, month
+// and kind; only the part tenants don't pay back is an operating expense.
+// Returns { months, floors, columns{key→col}, total, unallocated, unitsByMonth,
+//   perMonth, memo, undated }.
 function computeIncomeStatement(params) {
   const P = Object.assign({ basis: 'accrual', prorate: false, allocation: 'none', hasExpenses: true }, params || {});
   const tenants = P.tenants || [];
@@ -1148,11 +1168,14 @@ function computeIncomeStatement(params) {
   expenses.forEach(x => { const f = canon(x.floor); if(f) floorSet.add(f); });
   const floors = Array.from(floorSet);
 
-  const col = () => ({ revenue: _emptyRev(), direct: _emptyExp(), shared: _emptyExp(), expenses: 0, net: 0,
-    passThrough: { billed: 0, settled: 0, outstanding: 0 } });
+  const col = () => ({ revenue: _emptyRev(), direct: _emptyExp(), shared: _emptyExp(), recovered: _emptyExp(), expenses: 0, net: 0,
+    passThrough: { billed: 0, settled: 0, outstanding: 0, offset: 0 } });
   const columns = {}; floors.forEach(f => { columns[f] = col(); });
   const revByMonth = {}; floors.forEach(f => { revByMonth[f] = {}; months.forEach(m => { revByMonth[f][m] = 0; }); });
   const undated = {}; floors.forEach(f => { undated[f] = _emptyRev(); });
+  // Utilities billed back per floor → month → kind, to offset utility costs.
+  const ptByMonth = {}; floors.forEach(f => { ptByMonth[f] = {}; months.forEach(m => { ptByMonth[f][m] = {}; }); });
+  const addPt = (f, ym, kind, v) => { const o = ptByMonth[f][ym]; if(o) o[kind] = r2((o[kind] || 0) + v); };
 
   // Revenue
   tenants.forEach(t => {
@@ -1162,12 +1185,17 @@ function computeIncomeStatement(params) {
       const cat = billCategory(b);
       if(cat === 'utilities') {
         // Pass-through: billed in its period, settled when paid — never revenue.
-        const pt = columns[f].passThrough, p = billPeriod(b);
+        const pt = columns[f].passThrough, p = billPeriod(b), kind = utilityKind(b);
         if(p ? inRange.has(p) : P.allTime) {
           pt.billed = r2(pt.billed + r2(b.amount));
           if(b.status !== 'paid') pt.outstanding = r2(pt.outstanding + billOpen(b));
+          if(accrual && p) addPt(f, p, kind, r2(b.amount));
         }
-        billCashEvents(b).forEach(e => { const ym = ymOf(e.date); if(ym ? inRange.has(ym) : P.allTime) pt.settled = r2(pt.settled + e.amount); });
+        billCashEvents(b).forEach(e => {
+          const ym = ymOf(e.date);
+          if(ym ? inRange.has(ym) : P.allTime) pt.settled = r2(pt.settled + e.amount);
+          if(!accrual && ym) addPt(f, ym, kind, e.amount);
+        });
         return;
       }
       if(accrual) {
@@ -1196,9 +1224,8 @@ function computeIncomeStatement(params) {
   const periodRev = {}; floors.forEach(f => { periodRev[f] = columns[f].revenue.total; });
   const weightsFor = ym => {
     const w = {};
-    if(P.allocation === 'headcount') {
-      floors.forEach(f => { w[f] = 0; });
-      tenants.forEach(t => { if(occupiedInMonth(t, ym)) w[fk(t)] += 1; });
+    if(P.allocation === 'units') {
+      floors.forEach(f => { w[f] = unitsIn(ym)[f] || 0; });
     } else if(P.allocation === 'revenue') {
       floors.forEach(f => { w[f] = Math.max(0, revByMonth[f][ym] || 0); });
       if(!floors.some(f => w[f] > 0)) floors.forEach(f => { w[f] = Math.max(0, periodRev[f]); });
@@ -1206,7 +1233,26 @@ function computeIncomeStatement(params) {
     const sum = floors.reduce((s, f) => s + w[f], 0);
     return sum > 0 ? { w, sum } : null;
   };
+  // Occupied units per floor in a month: distinct unit labels of tenants
+  // living there (move-in on/before the month's end, not yet moved out).
+  const unitsCache = {};
+  const unitsIn = ym => {
+    if(unitsCache[ym]) return unitsCache[ym];
+    const sets = {};
+    tenants.forEach(t => {
+      if(!t || !occupiedInMonth(t, ym)) return;
+      const f = fk(t);
+      (sets[f] = sets[f] || new Set()).add(normLabel(t.unit) || ('#' + t.id));
+    });
+    const out = {}; Object.keys(sets).forEach(f => { out[f] = sets[f].size; });
+    return (unitsCache[ym] = out);
+  };
   const wCache = {};
+  // Utility costs per floor → month → kind (direct and allocated share), and unallocated.
+  const UTIL = ['electricity', 'water', 'internet'];
+  const utilExp = {}; floors.forEach(f => { utilExp[f] = {}; months.forEach(m => { utilExp[f][m] = {}; }); });
+  const utilUnalloc = {}; months.forEach(m => { utilUnalloc[m] = {}; });
+  const addUtil = (o, cat, v) => { if(UTIL.includes(cat)) o[cat] = r2((o[cat] || 0) + v); };
   const expByMonth = {}; floors.forEach(f => { expByMonth[f] = {}; months.forEach(m => { expByMonth[f][m] = 0; }); });
   const totalExpByMonth = {}; months.forEach(m => { totalExpByMonth[m] = 0; });
   const total = col();
@@ -1222,12 +1268,13 @@ function computeIncomeStatement(params) {
       _addExp(total.direct, cat, amt);
       _addExp(columns[tag].direct, cat, amt);
       expByMonth[tag][ym] = r2(expByMonth[tag][ym] + amt);
+      addUtil(utilExp[tag][ym], cat, amt);
       return;
     }
     _addExp(total.shared, cat, amt);
     if(!(ym in wCache)) wCache[ym] = weightsFor(ym);
     const W = wCache[ym];
-    if(!W) { _addExp(unallocated, cat, amt); return; }
+    if(!W) { _addExp(unallocated, cat, amt); addUtil(utilUnalloc[ym], cat, amt); return; }
     let left = amt;
     const live = floors.filter(f => W.w[f] > 0);
     live.forEach((f, i) => {
@@ -1235,19 +1282,51 @@ function computeIncomeStatement(params) {
       left = r2(left - part);
       _addExp(columns[f].shared, cat, part);
       expByMonth[f][ym] = r2(expByMonth[f][ym] + part);
+      addUtil(utilExp[f][ym], cat, part);
+    });
+  });
+
+  // Offset utility costs with what tenants were billed for them (IFRS 15
+  // agent): same kind first, then generic "utilities" bills against any
+  // utility cost left. Billing left over on a floor offsets building-wide
+  // utility costs that were not allocated to floors.
+  const recoveredUnalloc = _emptyExp();
+  const offset = (pt, cost, onRec) => {
+    UTIL.forEach(k => { const r = Math.min(pt[k] || 0, cost[k] || 0); if(r > EPS) { pt[k] = r2(pt[k] - r); cost[k] = r2(cost[k] - r); onRec(k, r); } });
+    UTIL.forEach(k => { const r = Math.min(pt.other || 0, cost[k] || 0); if(r > EPS) { pt.other = r2(pt.other - r); cost[k] = r2(cost[k] - r); onRec(k, r); } });
+  };
+  months.forEach(m => {
+    const left = {};
+    floors.forEach(f => {
+      const pt = Object.assign({}, ptByMonth[f][m]);
+      offset(pt, utilExp[f][m], (k, r) => {
+        _addExp(columns[f].recovered, k, r);
+        expByMonth[f][m] = r2(expByMonth[f][m] - r);
+        totalExpByMonth[m] = r2(totalExpByMonth[m] - r);
+      });
+      Object.keys(pt).forEach(k => { left[k] = r2((left[k] || 0) + pt[k]); });
+    });
+    offset(left, utilUnalloc[m], (k, r) => {
+      _addExp(recoveredUnalloc, k, r);
+      totalExpByMonth[m] = r2(totalExpByMonth[m] - r);
     });
   });
 
   floors.forEach(f => {
     const c = columns[f];
-    c.expenses = r2(c.direct.total + c.shared.total);
+    c.expenses = r2(c.direct.total + c.shared.total - c.recovered.total);
+    c.passThrough.offset = c.recovered.total;
     c.net = r2(c.revenue.total - c.expenses);
   });
   floors.forEach(f => {
     ['rent', 'utilities', 'other'].forEach(k => _addRev(total.revenue, k, columns[f].revenue[k]));
     ['billed', 'settled', 'outstanding'].forEach(k => { total.passThrough[k] = r2(total.passThrough[k] + columns[f].passThrough[k]); });
   });
-  total.expenses = r2(total.direct.total + total.shared.total);
+  floors.forEach(f => EXPENSE_CATEGORY_KEYS.forEach(k => { if(columns[f].recovered[k]) _addExp(total.recovered, k, columns[f].recovered[k]); }));
+  EXPENSE_CATEGORY_KEYS.forEach(k => { if(recoveredUnalloc[k]) _addExp(total.recovered, k, recoveredUnalloc[k]); });
+  total.passThrough.offset = total.recovered.total;
+  unallocated.recovered = recoveredUnalloc.total;
+  total.expenses = r2(total.direct.total + total.shared.total - total.recovered.total);
   total.net = r2(total.revenue.total - total.expenses);
 
   // Month-by-month rows per floor and for the whole building.
@@ -1308,7 +1387,8 @@ function computeIncomeStatement(params) {
   floors.sort((a, b) => { if(!a) return 1; if(!b) return -1; const r = rank(a) - rank(b); return (isNaN(r) ? 0 : r) || a.localeCompare(b); });
 
   return { months, from: rFrom, to: rTo, basis: accrual ? 'accrual' : 'cash', prorate: !!(accrual && P.prorate),
-    floors, columns, total, unallocated, perMonth, memo, undated };
+    floors, columns, total, unallocated, perMonth, memo, undated,
+    unitsByMonth: P.allocation === 'units' ? Object.fromEntries(months.map(m => [m, unitsIn(m)])) : null };
 }
 
 // ── ANALYTICS HELPERS (Insights module) ───────────────────────────────────
@@ -1335,10 +1415,11 @@ function agingBuckets(tenants, today) {
 }
 
 // Per-tenant punctuality over bills DUE in the window [fromYM, toYM] and
-// already due by `today`: paid on/before the due date = on time; paid late,
+// already due by `today`: paid on/before the due date (plus `graceDays`) = on time; paid later,
 // or still unpaid past the due date (late until today), = late. Future paid
 // dates are typos → skipped.
-function paymentReliability(tenants, fromYM, toYM, today) {
+function paymentReliability(tenants, fromYM, toYM, today, graceDays) {
+  const grace = Math.max(0, Math.round(_num(graceDays)));
   const out = [];
   (tenants || []).forEach(t => {
     let n = 0, late = 0, lateDays = 0, unpaidLate = 0;
@@ -1347,14 +1428,15 @@ function paymentReliability(tenants, fromYM, toYM, today) {
       const due = isoOrEmpty(b.due);
       if(!due || due >= today) return;
       const p = ymOf(due);
+      const inGrace = addDaysISO(due, grace) >= today;
       if(p < fromYM || p > toYM) return;
       if(b.status === 'paid') {
         const pd = isoOrEmpty(b.paidDate);
         if(!pd || pd > today) return;
         const d = diffDays(due, pd);
         n++;
-        if(d > 0) { late++; lateDays += d; }
-      } else if(billOpen(b) > EPS) {
+        if(d > grace) { late++; lateDays += d; }
+      } else if(billOpen(b) > EPS && !inGrace) {
         n++; late++; unpaidLate++;
         lateDays += diffDays(due, today);
       }
@@ -1368,7 +1450,7 @@ function paymentReliability(tenants, fromYM, toYM, today) {
 const BillingCore = {
   isYM, isISODate, isoOrEmpty, ymOf, addYM, daysInMonth, dateInMonth, lastDayOf, diffDays, addDaysISO, ymRange, r2,
   BILL_CATEGORIES, billCategory, billTotalPaid, billRemaining, billSettled, billOpen, billAwaitingAmount, billPeriod, normLabel, billCashEvents,
-  tmplDay, tmplRate, tmplRateAt, isAutoTemplate, isRentLabel, moveInOf, templateDueDate, primaryTemplate, templateBills, templateBillExists, makeTemplateBill,
+  tmplDay, tmplRate, tmplRateAt, utilityKind, isAutoTemplate, isRentLabel, moveInOf, templateDueDate, primaryTemplate, templateBills, templateBillExists, makeTemplateBill,
   billOfTemplate, templateOfBill, bumpPostedThrough, planAutoPost, cycleWindow, reconcileCharge, reconcileTenant, allocatePayment, applyCredit, undoReceipt, backfillCycles, waiveCycles,
   planMoveOut, undoMoveOut, moveOutOf, activeTemplates, isPassThrough, billCoverageWindow, billRecognition, occupiedInMonth, floorKey, floorNorm, floorCanon, computeIncomeStatement, agingBuckets, paymentReliability,
   EXPENSE_CATEGORY_KEYS

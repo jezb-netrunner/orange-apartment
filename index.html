@@ -352,7 +352,7 @@
             <label for="incstmt-alloc">Building-wide expenses</label>
             <select id="incstmt-alloc" onchange="incStmtOptsChanged()">
               <option value="none">Don't split (building total only)</option>
-              <option value="headcount">Split across floors by headcount</option>
+              <option value="units">Split by occupied units on each floor</option>
               <option value="revenue">Split across floors by revenue</option>
             </select>
           </div>
@@ -439,6 +439,7 @@
       </div>
       <div class="field"><label for="qb-amount">Amount (&#8369;)</label><input type="text" id="qb-amount" placeholder="0" inputmode="decimal" autocomplete="off"></div>
       <div class="field"><label for="qb-due">Due Date</label><input type="date" id="qb-due"></div>
+      <div class="field"><label for="qb-period">For month <span class="opt">(blank = due date's month)</span></label><input type="month" id="qb-period"></div>
       <div class="field full" style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
         <input type="checkbox" id="qb-paid" onchange="qbTogglePaid(this)" style="width:15px;height:15px;accent-color:var(--blue);cursor:pointer;">
         <label for="qb-paid" style="margin-bottom:0;cursor:pointer;">Already paid</label>
@@ -447,6 +448,12 @@
     </div>
     <details class="qb-more" id="qb-more">
       <summary>More options</summary>
+      <div class="field"><label for="qb-cat">Category</label><select id="qb-cat">
+        <option value="">From the name</option>
+        <option value="rent">Rent (revenue)</option>
+        <option value="utilities">Utility billed back (not revenue)</option>
+        <option value="other">Other charge (revenue)</option>
+      </select></div>
       <div class="field"><label for="qb-remark">Remark <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted)">(optional)</span></label><input type="text" id="qb-remark" maxlength="200" placeholder="e.g. Penalties apply"></div>
       <div class="field"><label for="qb-scan">Google Drive Scan Link <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted)">(optional)</span></label><input type="text" id="qb-scan" placeholder="https://drive.google.com/..."></div>
     </details>
