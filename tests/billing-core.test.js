@@ -212,10 +212,12 @@ test('income statement: accrual vs cash, advances are unearned', () => {
   ] });
   const base = { tenants: [t], expenses: [{ expense_date: '2026-09-15', category: 'water', amount: 700 }], from: '2026-09', to: '2026-09' };
   const acc = BC.computeIncomeStatement(Object.assign({ basis: 'accrual', prorate: false }, base));
-  assert.equal(acc.total.revenue.total, 6500);
+  assert.equal(acc.total.revenue.total, 6000);                 // water billed back is pass-through, not revenue
+  assert.equal(acc.total.passThrough.billed, 500);
+  assert.equal(acc.total.passThrough.outstanding, 500);
   assert.equal(acc.total.expenses, 700);
-  assert.equal(acc.total.net, 5800);
-  assert.equal(acc.memo.__total.receivable, 500);
+  assert.equal(acc.total.net, 5300);
+  assert.equal(acc.memo.__total.receivable, 0);
   assert.equal(acc.memo.__total.unearned, 6000);
   const cash = BC.computeIncomeStatement(Object.assign({ basis: 'cash' }, base));
   assert.equal(cash.total.revenue.total, 12000);
@@ -347,7 +349,7 @@ test('memo identity holds for random data: recognized − cash = receivable − 
       const is = BC.computeIncomeStatement({ tenants: [t], expenses: [], from: '2026-06', to: '2026-08', basis: 'accrual', prorate });
       const m = is.memo.__total;
       let R = 0, C = 0;
-      bills.forEach(b => {
+      bills.filter(b => !BC.isPassThrough(b)).forEach(b => {
         BC.billRecognition(t, b, prorate).forEach(g => { if(!g.ym || g.ym <= '2026-08') R += g.amount; });
         BC.billCashEvents(b).forEach(e => { if(!e.date || e.date <= '2026-08-31') C += e.amount; });
       });
@@ -691,4 +693,15 @@ test('auto-post pays a new cycle from money logged ahead; ordinary suffixes stil
   assert.ok(BC.templateOfBill(n, { label: 'Internet - Oct 2026 (PLDT)' }));
   assert.ok(BC.templateOfBill(n, { label: 'Internet - Sept (prorated)' }));
   assert.equal(BC.templateOfBill(n, { label: 'Internet router replacement' }), null);
+});
+
+test('without a move-in date, rent due on the 31st is that month\'s revenue in full', () => {
+  const t = tenant({ templates: [rentT({ amount: 19000, dayOfMonth: 31 })],
+    bills: [bill({ amount: 19000, due: '2026-01-31', status: 'paid', paidDate: '2026-01-28' }),
+            bill({ label: 'Electric Bill', amount: 1844, due: '2026-01-23', status: 'paid', paidDate: '2026-01-28' })] });
+  for(const prorate of [true, false]) {
+    const is = BC.computeIncomeStatement({ tenants: [t], expenses: [], from: '2026-01', to: '2026-01', basis: 'accrual', prorate });
+    assert.equal(is.total.revenue.total, 19000);
+    assert.equal(is.total.passThrough.billed, 1844);
+  }
 });

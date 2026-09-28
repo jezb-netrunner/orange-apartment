@@ -108,6 +108,13 @@ Insights and Settings sit under *More*):
   cycle's days — and the memo shows receivables and unearned (advance) rent
   at period end.
 - **Cash:** revenue is counted when payment is received.
+- **Utilities billed back** to tenants (electricity, water…) are collected
+  on behalf of the provider — the property acts as agent (IFRS 15) — so
+  they are never revenue or net income. They appear in their own section
+  of the income statement and their own Insights card (billed, settled,
+  still unpaid); tenants still see and owe them on their bills.
+- Without a move-in date, a recurring bill is earned over its own month
+  (rent due on the 31st is that month's rent).
 - **Per floor:** floor-tagged expenses are direct costs; building-wide
   expenses are split by headcount (tenants in residence each month) or by
   revenue share, or left unallocated. Archived tenants' history counts.

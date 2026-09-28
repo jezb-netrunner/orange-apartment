@@ -131,6 +131,11 @@ function billCashEvents(b) {
 }
 
 // ── Templates ──
+// Utilities billed back to tenants (electricity, water…) are collected on
+// behalf of the provider — under IFRS 15 the landlord is an agent, so they
+// are not revenue. Reports keep them apart as pass-through billings.
+function isPassThrough(b) { return billCategory(b) === 'utilities'; }
+
 // Is this label the monthly rent itself, not an item rented ("Parking rent",
 // "Aircon rental")? The rent word leads, after an optional month and/or
 // monthly/room/house/unit: "Rent - Oct", "Monthly Rental", "Room rent",
@@ -1018,11 +1023,9 @@ function billCoverageWindow(t, b) {
   if(!period) return null;
   const mi = moveInOf(t);
   if(mi && period >= ymOf(mi)) return cycleWindow(mi, period); // move-in is the reckoning date
-  let due = isoOrEmpty(b.due);
-  if(!due) return null;
-  if(ymOf(due) < period) due = dateInMonth(period, 1);   // due before its own month: the cycle is still that month
-  const nextYM = addYM(ymOf(due), 1);
-  return { start: due, end: dateInMonth(nextYM, Number(due.slice(8, 10))) };
+  // No move-in date to reckon from: the bill pays for its own calendar
+  // month (rent due on the 31st is January's rent — never mostly February's).
+  return { start: dateInMonth(period, 1), end: dateInMonth(addYM(period, 1), 1) };
 }
 
 // A former tenant's last day in the unit (archived_at, local date).
@@ -1145,7 +1148,8 @@ function computeIncomeStatement(params) {
   expenses.forEach(x => { const f = canon(x.floor); if(f) floorSet.add(f); });
   const floors = Array.from(floorSet);
 
-  const col = () => ({ revenue: _emptyRev(), direct: _emptyExp(), shared: _emptyExp(), expenses: 0, net: 0 });
+  const col = () => ({ revenue: _emptyRev(), direct: _emptyExp(), shared: _emptyExp(), expenses: 0, net: 0,
+    passThrough: { billed: 0, settled: 0, outstanding: 0 } });
   const columns = {}; floors.forEach(f => { columns[f] = col(); });
   const revByMonth = {}; floors.forEach(f => { revByMonth[f] = {}; months.forEach(m => { revByMonth[f][m] = 0; }); });
   const undated = {}; floors.forEach(f => { undated[f] = _emptyRev(); });
@@ -1156,6 +1160,16 @@ function computeIncomeStatement(params) {
     (t.bills || []).forEach(b => {
       if(!b) return;
       const cat = billCategory(b);
+      if(cat === 'utilities') {
+        // Pass-through: billed in its period, settled when paid — never revenue.
+        const pt = columns[f].passThrough, p = billPeriod(b);
+        if(p ? inRange.has(p) : P.allTime) {
+          pt.billed = r2(pt.billed + r2(b.amount));
+          if(b.status !== 'paid') pt.outstanding = r2(pt.outstanding + billOpen(b));
+        }
+        billCashEvents(b).forEach(e => { const ym = ymOf(e.date); if(ym ? inRange.has(ym) : P.allTime) pt.settled = r2(pt.settled + e.amount); });
+        return;
+      }
       if(accrual) {
         billRecognition(t, b, P.prorate).forEach(g => {
           if(g.ym ? inRange.has(g.ym) : P.allTime) {
@@ -1231,6 +1245,7 @@ function computeIncomeStatement(params) {
   });
   floors.forEach(f => {
     ['rent', 'utilities', 'other'].forEach(k => _addRev(total.revenue, k, columns[f].revenue[k]));
+    ['billed', 'settled', 'outstanding'].forEach(k => { total.passThrough[k] = r2(total.passThrough[k] + columns[f].passThrough[k]); });
   });
   total.expenses = r2(total.direct.total + total.shared.total);
   total.net = r2(total.revenue.total - total.expenses);
@@ -1249,7 +1264,7 @@ function computeIncomeStatement(params) {
   const memoFor = list => {
     let billed = 0, collected = 0, outstanding = 0, receivable = 0, unearned = 0, billedAhead = 0, credits = 0;
     list.forEach(t => (t.bills || []).forEach(b => {
-      if(!b) return;
+      if(!b || isPassThrough(b)) return;   // pass-through utilities are reported apart
       // After move-out only received money counts (see _postMoveOut).
       const pm = _postMoveOut(t, b);
       const p = pm ? pm.ym : billPeriod(b);
@@ -1355,7 +1370,7 @@ const BillingCore = {
   BILL_CATEGORIES, billCategory, billTotalPaid, billRemaining, billSettled, billOpen, billAwaitingAmount, billPeriod, normLabel, billCashEvents,
   tmplDay, tmplRate, tmplRateAt, isAutoTemplate, isRentLabel, moveInOf, templateDueDate, primaryTemplate, templateBills, templateBillExists, makeTemplateBill,
   billOfTemplate, templateOfBill, bumpPostedThrough, planAutoPost, cycleWindow, reconcileCharge, reconcileTenant, allocatePayment, applyCredit, undoReceipt, backfillCycles, waiveCycles,
-  planMoveOut, undoMoveOut, moveOutOf, activeTemplates, billCoverageWindow, billRecognition, occupiedInMonth, floorKey, floorNorm, floorCanon, computeIncomeStatement, agingBuckets, paymentReliability,
+  planMoveOut, undoMoveOut, moveOutOf, activeTemplates, isPassThrough, billCoverageWindow, billRecognition, occupiedInMonth, floorKey, floorNorm, floorCanon, computeIncomeStatement, agingBuckets, paymentReliability,
   EXPENSE_CATEGORY_KEYS
 };
 if(typeof module !== 'undefined' && module.exports) module.exports = BillingCore;

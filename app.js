@@ -778,12 +778,13 @@ function buildIncomeStatementHTML(o) {
   const expNote = (!hasExpenses
     ? '<div class="warn-note">The expenses ledger is not set up yet, so this statement shows income only. Run supabase-migration-2.sql in the Supabase SQL Editor, then log expenses to get a full income statement.</div>' : '')
     + (_archivedLoadError ? '<div class="warn-note">Archived tenants could not be loaded, so income from former tenants is missing. Refresh the page before relying on these figures.</div>' : '');
-  const basisNote = accrual
+  const basisNote = (accrual
     ? (o.prorate
-        ? 'Accrual basis: rent and fixed recurring charges are spread straight-line over the billing cycle they pay for (from the move-in day, or from the due date when no move-in date is recorded); utilities and one-off charges are recognized in their billing month.'
+        ? 'Accrual basis: rent and fixed recurring charges are spread straight-line over the billing cycle they pay for (from the move-in day; without a move-in date, over the bill\'s own month); one-off charges are recognized in their billing month.'
         : 'Accrual basis: each charge is recognized in the billing month it belongs to.')
       + ' Payments made ahead are held as unearned revenue until they are earned.'
-    : 'Cash basis: revenue is counted when payment is received, whatever period it pays for.';
+    : 'Cash basis: revenue is counted when payment is received, whatever period it pays for.')
+    + ' Utilities billed back to tenants are pass-through (collected for the provider) and are not revenue.';
 
   // One self-contained statement for the building ('__total') or one floor.
   const singleDoc = (key, pageBreak) => {
@@ -797,7 +798,6 @@ function buildIncomeStatementHTML(o) {
     rows.push('<tr class="grouphead"><td colspan="2">'+revHead+'</td></tr>');
     if(o.incDetail) {
       rows.push('<tr class="catrow rent"><td>Rent</td><td class="num">'+peso(c.revenue.rent)+'</td></tr>');
-      if(c.revenue.utilities) rows.push('<tr class="catrow"><td>Utilities billed back</td><td class="num">'+peso(c.revenue.utilities)+'</td></tr>');
       if(c.revenue.other)     rows.push('<tr class="catrow"><td>Other charges</td><td class="num">'+peso(c.revenue.other)+'</td></tr>');
     }
     rows.push('<tr class="subtotal"><td>Total revenue</td><td class="num">'+peso(c.revenue.total)+'</td></tr>');
@@ -828,6 +828,14 @@ function buildIncomeStatementHTML(o) {
     }
     const net = r2(c.revenue.total - expTotal);
     let tableNotes = '';
+    const ptc = c.passThrough || { billed:0, settled:0, outstanding:0 };
+    const passHtml = (ptc.billed > 0.005 || ptc.settled > 0.005)
+      ? '<div class="sec"><div class="sec-label">Utilities billed back to tenants &middot; pass-through, not revenue</div><table class="ptable"><tbody>'
+        + '<tr><td>Billed to tenants</td><td class="num">'+peso(ptc.billed)+'</td></tr>'
+        + '<tr><td>Settled in period</td><td class="num">'+peso(ptc.settled)+'</td></tr>'
+        + '<tr><td>Still unpaid</td><td class="num">'+peso(ptc.outstanding)+'</td></tr>'
+        + '</tbody></table><div class="tbl-note">Collected on behalf of the utility provider (IFRS 15: the property acts as agent), so excluded from revenue and net income.</div></div>'
+      : '';
     if(undated.total>0) tableNotes += '<div class="tbl-note">Includes '+peso(undated.total)+(accrual?' billed with no due date.':' received with no recorded payment date.')+'</div>';
     if(!isTotal && hasExpenses) {
       const sharedAll = R.total.shared.total;
@@ -893,7 +901,7 @@ function buildIncomeStatementHTML(o) {
     const headLabel = hasExpenses ? (net<0 ? 'Net Loss' : 'Net Income') : 'Total Revenue';
     return '<div class="doc'+(pageBreak?' pb':'')+'">'
       + docHead('Income Statement'+(isTotal?'':' &middot; Floor'), basisLabel, isTotal?'Property':'Floor', scopeName, isTotal?esc(propertySubtitle):esc(propertyName), headLabel, headVal)
-      + '<table>'+rows.join('')+'</table>' + tableNotes + expNote + periodHtml + memoHtml
+      + '<table>'+rows.join('')+'</table>' + tableNotes + expNote + periodHtml + memoHtml + passHtml
       + '<div class="tbl-note basis-note">'+basisNote+'</div>'
       + noteHtml + signHtml
       + '<div class="doc-foot"><span>'+esc(propertyName)+' &middot; Income Statement'+(isTotal?'':' &middot; '+esc(_floorLabel(key)))+'</span><span>'+rangeLabel+'</span></div>'
@@ -913,7 +921,6 @@ function buildIncomeStatementHTML(o) {
     rows.push('<tr class="grouphead"><td colspan="'+(keys.length+2)+'">'+revHead+'</td></tr>');
     if(o.incDetail) {
       rows.push(line('Rent', c=>peso(c.revenue.rent), 'catrow rent'));
-      if(T.revenue.utilities) rows.push(line('Utilities billed back', c=>peso(c.revenue.utilities), 'catrow'));
       if(T.revenue.other) rows.push(line('Other charges', c=>peso(c.revenue.other), 'catrow'));
     }
     rows.push(line('Total revenue', c=>peso(c.revenue.total), 'subtotal'));
@@ -947,11 +954,17 @@ function buildIncomeStatementHTML(o) {
         + '</tbody></table></div>';
     }
     const headVal = hasExpenses ? T.net : T.revenue.total;
+    const PT = T.passThrough || { billed:0, settled:0, outstanding:0 };
+    const pl = (label, k) => '<tr><td>'+label+'</td>'+cols.map(c=>'<td class="num">'+peso((c.passThrough||{})[k]||0)+'</td>').join('')+'<td class="num tot">'+peso(PT[k])+'</td></tr>';
+    const passRows = (PT.billed > 0.005 || PT.settled > 0.005)
+      ? '<div class="sec"><div class="sec-label">Utilities billed back to tenants &middot; pass-through, not revenue</div><table class="ptable cmp"><thead>'+th+'</thead><tbody>'
+        + pl('Billed to tenants','billed') + pl('Settled in period','settled') + pl('Still unpaid','outstanding') + '</tbody></table></div>'
+      : '';
     return '<div class="doc">'
       + docHead('Income Statement &middot; By Floor', basisLabel, 'Property', esc(propertyName), keys.length+' floor'+(keys.length!==1?'s':''), hasExpenses?(headVal<0?'Net Loss':'Net Income'):'Total Revenue', headVal)
       + '<table class="cmp"><thead>'+th+'</thead><tbody>'+rows.join('')+'</tbody></table>'
       + (hasExpenses && T.shared.total>0 ? '<div class="tbl-note">Building-wide costs of '+peso(T.shared.total)+' are '+_ALLOC_TEXT[o.alloc]+'. Floor-tagged expenses are charged to their floor directly.</div>' : '')
-      + expNote + memoRows
+      + expNote + memoRows + passRows
       + '<div class="tbl-note basis-note">'+basisNote+'</div>'
       + noteHtml + signHtml
       + '<div class="doc-foot"><span>'+esc(propertyName)+' &middot; Income Statement by Floor</span><span>'+rangeLabel+'</span></div>'
@@ -1891,14 +1904,17 @@ function fmtYM(ym, style) {
 // Financial history includes archived tenants: a tenant who moved out
 // still earned and paid in the months they lived here.
 function allTenants() { return tenants.concat(archivedTenants); }
-function cashInMonth(list, ym) {
+// Money collected / billed for the property itself. Utilities billed back
+// to tenants are pass-through (collected for the provider, IFRS 15 agent)
+// and are counted apart with passThrough=true.
+function cashInMonth(list, ym, passThrough) {
   let s = 0;
-  list.forEach(t => (t.bills || []).forEach(b => billCashEvents(b).forEach(e => { if(ymOf(e.date) === ym) s += e.amount; })));
+  list.forEach(t => (t.bills || []).forEach(b => { if(!!passThrough !== isPassThrough(b)) return; billCashEvents(b).forEach(e => { if(ymOf(e.date) === ym) s += e.amount; }); }));
   return r2(s);
 }
-function billedInMonth(list, ym) {
+function billedInMonth(list, ym, passThrough) {
   let s = 0;
-  list.forEach(t => (t.bills || []).forEach(b => { if(billPeriod(b) === ym) s += Number(b.amount) || 0; }));
+  list.forEach(t => (t.bills || []).forEach(b => { if(!!passThrough !== isPassThrough(b)) return; if(billPeriod(b) === ym) s += Number(b.amount) || 0; }));
   return r2(s);
 }
 function _moneyToday() { return todayISO(); }
@@ -2016,6 +2032,7 @@ function renderHome() {
   const cat = outstandingByCategory(tenants.flatMap(t => t.bills));
   const all = allTenants();
   const collected = cashInMonth(all, ym), billed = billedInMonth(all, ym);
+  const utilSettled = cashInMonth(all, ym, true);
   const rate = billed > 0 ? Math.round(collected / billed * 100) : null;
   const expOk = expensesAvailable && !_expensesLoadError;
   const spent = expOk ? _expensesInMonth(ym) : 0;
@@ -2027,7 +2044,7 @@ function renderHome() {
     + '<button type="button" class="kpi" onclick="goBills(\'overdue\')"><div class="kpi-label">Overdue</div><div class="kpi-value ' + (overdue ? 'bad' : 'good') + '">' + (overdue ? peso(overdue) : 'None') + '</div>'
     +   '<div class="kpi-sub">' + (overdueN ? overdueN + ' bill' + (overdueN !== 1 ? 's' : '') + ' past due' : 'nothing past due') + '</div></button>'
     + '<button type="button" class="kpi" onclick="go(\'reports\')"><div class="kpi-label">Collected · ' + monthShort + '</div><div class="kpi-value good">' + peso(collected) + '</div>'
-    +   '<div class="kpi-sub">of ' + peso(billed) + ' billed' + (rate !== null ? ' · ' + rate + '%' : '') + '</div></button>'
+    +   '<div class="kpi-sub">of ' + peso(billed) + ' billed' + (rate !== null ? ' · ' + rate + '%' : '') + (utilSettled ? ' · utilities ' + peso(utilSettled) + ' passed through' : '') + '</div></button>'
     + (expOk
         ? '<button type="button" class="kpi" onclick="go(\'expenses\')"><div class="kpi-label">Net · ' + monthShort + '</div><div class="kpi-value ' + (net < 0 ? 'bad' : '') + '">' + (net < 0 ? '&minus;' : '') + peso(Math.abs(net)) + '</div>'
           + '<div class="kpi-sub">collected &minus; ' + peso(spent) + ' expenses</div></button>'
@@ -3457,7 +3474,7 @@ function renderInsightsModule() {
   const archNote = _archivedLoadError ? '<div class="hint-note">' + icon('alert') + ' Archived tenants could not be loaded — former tenants\' history is missing from these figures. Refresh to retry.</div>' : '';
   return pageHead('Insights', 'How the building is doing · revenue on accrual basis' + (prorate ? ', spread over each billing cycle' : '') + ', as in the income statement') + archNote + win + kpis
     + _monthlyChartCard(acc, hasExp)
-    + '<div class="insight-grid">' + _agingCard(today) + (hasExp ? _expenseMixCard(acc) : '') + '</div>'
+    + '<div class="insight-grid">' + _agingCard(today) + (hasExp ? _expenseMixCard(acc) : '') + _passThroughCard(acc) + '</div>'
     + _floorTableCard(acc, cash)
     + _punctualityCard(rg, today);
 }
@@ -3586,19 +3603,28 @@ function _expenseMixCard(acc) {
   const T = acc.total;
   const cats = EXPENSE_CATEGORIES.map(c => ({ label: c.label, value: r2(T.direct[c.key] + T.shared[c.key]) })).filter(x => x.value > 0).sort((a, b) => b.value - a.value);
   const spent = T.expenses;
-  const utilSpent = r2(['electricity', 'water', 'internet'].reduce((s, k) => s + T.direct[k] + T.shared[k], 0));
-  const recovered = T.revenue.utilities;
-  const pct = utilSpent > 0 ? Math.round(recovered / utilSpent * 100) : null;
-  const nInc = tenants.filter(t => t.billing_model === 'inclusive').length;
-  const meter = pct === null ? '' : '<div class="meter-block"><div class="meter-head"><span>Utilities billed back to tenants</span><strong>' + pct + '%</strong></div>'
-    + '<div class="meter"><span style="width:' + Math.min(100, pct) + '%"></span></div>'
-    + '<div class="card-text muted">' + peso(recovered) + ' recharged of ' + peso(utilSpent) + ' spent on electricity, water and internet'
-    + (nInc ? ' — the rest is covered by rent (' + nInc + ' all-inclusive tenant' + (nInc !== 1 ? 's' : '') + ').' : '.') + '</div></div>';
+  const meter = '';
   return '<section class="card"><div class="card-head"><h2 class="card-title">Where the money goes</h2><button type="button" class="link-btn" onclick="go(\'expenses\')">Expenses</button></div>'
     + (cats.length ? '<p class="card-text">' + peso(spent) + ' spent' + (T.revenue.total > 0 ? ' — ' + Math.round(spent / T.revenue.total * 100) + '% of revenue.' : '.') + '</p>'
         + _hbars(cats.map(c => Object.assign(c, { sub: '· ' + Math.round(c.value / spent * 100) + '%' })), x => peso(x.value), 's2')
         : '<div class="empty-inline">No expenses logged in this period.</div>')
     + meter + '</section>';
+}
+
+// Utilities billed back to tenants: collected for the provider, so kept
+// out of revenue (IFRS 15 — the landlord acts as agent) and shown here.
+function _passThroughCard(acc) {
+  const P = acc.total.passThrough;
+  if(!(P.billed > 0.005 || P.settled > 0.005 || P.outstanding > 0.005)) return '';
+  const T = acc.total;
+  const utilSpent = r2(['electricity', 'water', 'internet'].reduce((s, k) => s + T.direct[k] + T.shared[k], 0));
+  return '<section class="card"><div class="card-head"><h2 class="card-title">Utilities billed back</h2></div>'
+    + '<p class="card-text">Electricity, water and similar bills charged to tenants are collected for the provider — pass-through, not revenue (IFRS 15, agent). They are kept out of revenue and net income.</p>'
+    + '<div class="mini-stats"><div><span class="muted">Billed to tenants</span><strong>' + peso(P.billed) + '</strong></div>'
+    + '<div><span class="muted">Settled</span><strong>' + peso(P.settled) + '</strong></div>'
+    + '<div><span class="muted">Still unpaid</span><strong>' + peso(P.outstanding) + '</strong></div></div>'
+    + (utilSpent > 0 ? '<p class="card-text muted">Utility costs the property itself paid (Expenses) in this period: ' + peso(utilSpent) + '.</p>' : '')
+    + '</section>';
 }
 
 function _floorTableCard(acc, cash) {
