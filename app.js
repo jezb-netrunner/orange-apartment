@@ -778,12 +778,13 @@ function buildIncomeStatementHTML(o) {
   const expNote = (!hasExpenses
     ? '<div class="warn-note">The expenses ledger is not set up yet, so this statement shows income only. Run supabase-migration-2.sql in the Supabase SQL Editor, then log expenses to get a full income statement.</div>' : '')
     + (_archivedLoadError ? '<div class="warn-note">Archived tenants could not be loaded, so income from former tenants is missing. Refresh the page before relying on these figures.</div>' : '');
-  const basisNote = accrual
+  const basisNote = (accrual
     ? (o.prorate
-        ? 'Accrual basis: rent and fixed recurring charges are spread straight-line over the billing cycle they pay for (from the move-in day, or from the due date when no move-in date is recorded); utilities and one-off charges are recognized in their billing month.'
+        ? 'Accrual basis: rent and fixed recurring charges are spread straight-line over the billing cycle they pay for (from the move-in day; without a move-in date, over the bill\'s own month); one-off charges are recognized in their billing month.'
         : 'Accrual basis: each charge is recognized in the billing month it belongs to.')
       + ' Payments made ahead are held as unearned revenue until they are earned.'
-    : 'Cash basis: revenue is counted when payment is received, whatever period it pays for.';
+    : 'Cash basis: revenue is counted when payment is received, whatever period it pays for.')
+    + ' Utilities billed back to tenants are pass-through (collected for the provider) and are not revenue.';
 
   // One self-contained statement for the building ('__total') or one floor.
   const singleDoc = (key, pageBreak) => {
@@ -797,7 +798,6 @@ function buildIncomeStatementHTML(o) {
     rows.push('<tr class="grouphead"><td colspan="2">'+revHead+'</td></tr>');
     if(o.incDetail) {
       rows.push('<tr class="catrow rent"><td>Rent</td><td class="num">'+peso(c.revenue.rent)+'</td></tr>');
-      if(c.revenue.utilities) rows.push('<tr class="catrow"><td>Utilities billed back</td><td class="num">'+peso(c.revenue.utilities)+'</td></tr>');
       if(c.revenue.other)     rows.push('<tr class="catrow"><td>Other charges</td><td class="num">'+peso(c.revenue.other)+'</td></tr>');
     }
     rows.push('<tr class="subtotal"><td>Total revenue</td><td class="num">'+peso(c.revenue.total)+'</td></tr>');
@@ -828,6 +828,14 @@ function buildIncomeStatementHTML(o) {
     }
     const net = r2(c.revenue.total - expTotal);
     let tableNotes = '';
+    const ptc = c.passThrough || { billed:0, settled:0, outstanding:0 };
+    const passHtml = (ptc.billed > 0.005 || ptc.settled > 0.005)
+      ? '<div class="sec"><div class="sec-label">Utilities billed back to tenants &middot; pass-through, not revenue</div><table class="ptable"><tbody>'
+        + '<tr><td>Billed to tenants</td><td class="num">'+peso(ptc.billed)+'</td></tr>'
+        + '<tr><td>Settled in period</td><td class="num">'+peso(ptc.settled)+'</td></tr>'
+        + '<tr><td>Still unpaid</td><td class="num">'+peso(ptc.outstanding)+'</td></tr>'
+        + '</tbody></table><div class="tbl-note">Collected on behalf of the utility provider (IFRS 15: the property acts as agent), so excluded from revenue and net income.</div></div>'
+      : '';
     if(undated.total>0) tableNotes += '<div class="tbl-note">Includes '+peso(undated.total)+(accrual?' billed with no due date.':' received with no recorded payment date.')+'</div>';
     if(!isTotal && hasExpenses) {
       const sharedAll = R.total.shared.total;
@@ -893,7 +901,7 @@ function buildIncomeStatementHTML(o) {
     const headLabel = hasExpenses ? (net<0 ? 'Net Loss' : 'Net Income') : 'Total Revenue';
     return '<div class="doc'+(pageBreak?' pb':'')+'">'
       + docHead('Income Statement'+(isTotal?'':' &middot; Floor'), basisLabel, isTotal?'Property':'Floor', scopeName, isTotal?esc(propertySubtitle):esc(propertyName), headLabel, headVal)
-      + '<table>'+rows.join('')+'</table>' + tableNotes + expNote + periodHtml + memoHtml
+      + '<table>'+rows.join('')+'</table>' + tableNotes + expNote + periodHtml + memoHtml + passHtml
       + '<div class="tbl-note basis-note">'+basisNote+'</div>'
       + noteHtml + signHtml
       + '<div class="doc-foot"><span>'+esc(propertyName)+' &middot; Income Statement'+(isTotal?'':' &middot; '+esc(_floorLabel(key)))+'</span><span>'+rangeLabel+'</span></div>'
@@ -913,7 +921,6 @@ function buildIncomeStatementHTML(o) {
     rows.push('<tr class="grouphead"><td colspan="'+(keys.length+2)+'">'+revHead+'</td></tr>');
     if(o.incDetail) {
       rows.push(line('Rent', c=>peso(c.revenue.rent), 'catrow rent'));
-      if(T.revenue.utilities) rows.push(line('Utilities billed back', c=>peso(c.revenue.utilities), 'catrow'));
       if(T.revenue.other) rows.push(line('Other charges', c=>peso(c.revenue.other), 'catrow'));
     }
     rows.push(line('Total revenue', c=>peso(c.revenue.total), 'subtotal'));
@@ -947,11 +954,17 @@ function buildIncomeStatementHTML(o) {
         + '</tbody></table></div>';
     }
     const headVal = hasExpenses ? T.net : T.revenue.total;
+    const PT = T.passThrough || { billed:0, settled:0, outstanding:0 };
+    const pl = (label, k) => '<tr><td>'+label+'</td>'+cols.map(c=>'<td class="num">'+peso((c.passThrough||{})[k]||0)+'</td>').join('')+'<td class="num tot">'+peso(PT[k])+'</td></tr>';
+    const passRows = (PT.billed > 0.005 || PT.settled > 0.005)
+      ? '<div class="sec"><div class="sec-label">Utilities billed back to tenants &middot; pass-through, not revenue</div><table class="ptable cmp"><thead>'+th+'</thead><tbody>'
+        + pl('Billed to tenants','billed') + pl('Settled in period','settled') + pl('Still unpaid','outstanding') + '</tbody></table></div>'
+      : '';
     return '<div class="doc">'
       + docHead('Income Statement &middot; By Floor', basisLabel, 'Property', esc(propertyName), keys.length+' floor'+(keys.length!==1?'s':''), hasExpenses?(headVal<0?'Net Loss':'Net Income'):'Total Revenue', headVal)
       + '<table class="cmp"><thead>'+th+'</thead><tbody>'+rows.join('')+'</tbody></table>'
       + (hasExpenses && T.shared.total>0 ? '<div class="tbl-note">Building-wide costs of '+peso(T.shared.total)+' are '+_ALLOC_TEXT[o.alloc]+'. Floor-tagged expenses are charged to their floor directly.</div>' : '')
-      + expNote + memoRows
+      + expNote + memoRows + passRows
       + '<div class="tbl-note basis-note">'+basisNote+'</div>'
       + noteHtml + signHtml
       + '<div class="doc-foot"><span>'+esc(propertyName)+' &middot; Income Statement by Floor</span><span>'+rangeLabel+'</span></div>'
@@ -1276,6 +1289,20 @@ async function loadPortalSettings() {
 
 // Admin-side settings load: one query instead of one per key.
 let _settingsLoadFailed = false;
+// Floors the admin maintains (Settings › Floors), stored as a JSON list in
+// the settings table. The floor pickers offer these plus any floor already
+// used by a tenant or an expense.
+let managedFloors = [];
+function allFloors() {
+  const canon = floorCanon(managedFloors.concat(allTenants().map(t => t.floor), expenses.map(x => x.floor)));
+  const set = new Set();
+  managedFloors.concat(allTenants().map(t => t.floor), expenses.map(x => x.floor)).forEach(f => { const c = canon(f); if(c) set.add(c); });
+  return Array.from(set).sort((a,b)=>floorRank(a)-floorRank(b) || a.localeCompare(b));
+}
+async function _saveManagedFloors(list) {
+  await dbSetSetting('floors', JSON.stringify(list));
+  managedFloors = list;
+}
 function _parseAutoBilling(map) {
   const lead = Number(map.auto_billing_lead_days);
   return {
@@ -1296,7 +1323,7 @@ async function _reloadAutoBillSettings() {
 async function loadAdminSettings() {
   _settingsLoadFailed = false;
   try {
-    const rows = await sbFetch('settings?select=key,value&key=in.(payment_instructions,announcements,property_name,property_subtitle,auto_billing,auto_billing_lead_days)');
+    const rows = await sbFetch('settings?select=key,value&key=in.(payment_instructions,announcements,property_name,property_subtitle,auto_billing,auto_billing_lead_days,floors)');
     const map = {}; (rows||[]).forEach(r=>{ map[r.key]=r.value; });
     paymentInstructions = map.payment_instructions || '';
     announcements       = map.announcements || '';
@@ -1305,6 +1332,7 @@ async function loadAdminSettings() {
     // Automatic billing is on unless explicitly turned off (admin-only keys:
     // read_setting's anon allowlist never exposes them).
     autoBilling = _parseAutoBilling(map);
+    try { const fl = JSON.parse(map.floors || '[]'); managedFloors = Array.isArray(fl) ? fl.filter(x => typeof x === 'string' && x.trim()) : []; } catch { managedFloors = []; }
   } catch {
     // A transient failure must not masquerade as "Not set" — editing on top
     // of that would overwrite the real values with blanks.
@@ -1669,6 +1697,7 @@ async function logout() {
   _expensesLoadError = false;
   expensesFloorAvailable = null;
   archivedTenants = [];
+  managedFloors = [];
   _archivedLoadError = false;
   expenseMonth = '';
   _editingExpenseId = null;
@@ -1891,14 +1920,17 @@ function fmtYM(ym, style) {
 // Financial history includes archived tenants: a tenant who moved out
 // still earned and paid in the months they lived here.
 function allTenants() { return tenants.concat(archivedTenants); }
-function cashInMonth(list, ym) {
+// Money collected / billed for the property itself. Utilities billed back
+// to tenants are pass-through (collected for the provider, IFRS 15 agent)
+// and are counted apart with passThrough=true.
+function cashInMonth(list, ym, passThrough) {
   let s = 0;
-  list.forEach(t => (t.bills || []).forEach(b => billCashEvents(b).forEach(e => { if(ymOf(e.date) === ym) s += e.amount; })));
+  list.forEach(t => (t.bills || []).forEach(b => { if(!!passThrough !== isPassThrough(b)) return; billCashEvents(b).forEach(e => { if(ymOf(e.date) === ym) s += e.amount; }); }));
   return r2(s);
 }
-function billedInMonth(list, ym) {
+function billedInMonth(list, ym, passThrough) {
   let s = 0;
-  list.forEach(t => (t.bills || []).forEach(b => { if(billPeriod(b) === ym) s += Number(b.amount) || 0; }));
+  list.forEach(t => (t.bills || []).forEach(b => { if(!!passThrough !== isPassThrough(b)) return; if(billPeriod(b) === ym) s += Number(b.amount) || 0; }));
   return r2(s);
 }
 function _moneyToday() { return todayISO(); }
@@ -2016,6 +2048,7 @@ function renderHome() {
   const cat = outstandingByCategory(tenants.flatMap(t => t.bills));
   const all = allTenants();
   const collected = cashInMonth(all, ym), billed = billedInMonth(all, ym);
+  const utilSettled = cashInMonth(all, ym, true);
   const rate = billed > 0 ? Math.round(collected / billed * 100) : null;
   const expOk = expensesAvailable && !_expensesLoadError;
   const spent = expOk ? _expensesInMonth(ym) : 0;
@@ -2027,7 +2060,7 @@ function renderHome() {
     + '<button type="button" class="kpi" onclick="goBills(\'overdue\')"><div class="kpi-label">Overdue</div><div class="kpi-value ' + (overdue ? 'bad' : 'good') + '">' + (overdue ? peso(overdue) : 'None') + '</div>'
     +   '<div class="kpi-sub">' + (overdueN ? overdueN + ' bill' + (overdueN !== 1 ? 's' : '') + ' past due' : 'nothing past due') + '</div></button>'
     + '<button type="button" class="kpi" onclick="go(\'reports\')"><div class="kpi-label">Collected · ' + monthShort + '</div><div class="kpi-value good">' + peso(collected) + '</div>'
-    +   '<div class="kpi-sub">of ' + peso(billed) + ' billed' + (rate !== null ? ' · ' + rate + '%' : '') + '</div></button>'
+    +   '<div class="kpi-sub">of ' + peso(billed) + ' billed' + (rate !== null ? ' · ' + rate + '%' : '') + (utilSettled ? ' · utilities ' + peso(utilSettled) + ' passed through' : '') + '</div></button>'
     + (expOk
         ? '<button type="button" class="kpi" onclick="go(\'expenses\')"><div class="kpi-label">Net · ' + monthShort + '</div><div class="kpi-value ' + (net < 0 ? 'bad' : '') + '">' + (net < 0 ? '&minus;' : '') + peso(Math.abs(net)) + '</div>'
           + '<div class="kpi-sub">collected &minus; ' + peso(spent) + ' expenses</div></button>'
@@ -3156,8 +3189,57 @@ function renderSettingsModule() {
     + '<div class="set-row"><div class="set-label">Change protection · rev column (migration 2)</div>' + (tenants.length && tenants.some(t => t.rev == null) ? chip('warn', 'Run supabase-migration-2.sql — background posting is paused') : chip('good', 'Installed')) + '</div>'
     + '<div class="set-row"><div class="set-label">Expense floor tags (migration 3)</div>' + (expensesFloorAvailable === false ? chip('warn', 'Run supabase-migration-3.sql') : expensesFloorAvailable ? chip('good', 'Installed') : chip('muted', 'Unknown')) + '</div>'
     + '</section>';
+  const floorsCard = '<section class="card"><div class="card-head"><h2 class="card-title">' + icon('building') + ' Floors</h2></div>'
+    + '<p class="card-text muted">The floors offered when tagging tenants and expenses. Renaming updates every tenant and expense on that floor.</p>'
+    + (allFloors().length ? allFloors().map(f => {
+        const n = allTenants().filter(t => floorNorm(t.floor) === floorNorm(f)).length, m = expenses.filter(x => floorNorm(x.floor) === floorNorm(f)).length;
+        return '<div class="set-row"><div><div class="set-label">' + esc(f) + '</div><div class="set-hint">' + n + ' tenant' + (n !== 1 ? 's' : '') + ' · ' + m + ' expense' + (m !== 1 ? 's' : '') + '</div></div>'
+          + '<div class="btn-row">' + btn('Rename', 'renameFloor(this.dataset.f)', { icon: 'edit', attrs: ' data-f="' + esc(f) + '"' })
+          + btn('Remove', 'removeFloor(this.dataset.f)', { icon: 'trash', attrs: ' data-f="' + esc(f) + '"' }) + '</div></div>';
+      }).join('') : '<div class="set-hint">No floors yet.</div>')
+    + '<div class="btn-row">' + btn('Add floor', 'addFloorPrompt().then(()=>rerenderAdmin())', { icon: 'plus' }) + '</div>'
+    + '</section>';
   const account = '<section class="card"><div class="card-head"><h2 class="card-title">Account</h2></div><div class="btn-row">' + btn('Sign out', 'logout()', { icon: 'back' }) + '</div></section>';
-  return pageHead('Settings') + '<div class="settings-grid">' + autoCard + portal + db + account + '</div>';
+  return pageHead('Settings') + '<div class="settings-grid">' + autoCard + portal + floorsCard + db + account + '</div>';
+}
+async function renameFloor(f) {
+  if(!_guardSettingsEdit()) return;
+  const raw = prompt('Rename "' + f + '" to:', f);
+  const v = String(raw || '').trim().replace(/\s+/g, ' ');
+  if(!v || v === f) return;
+  if(v.length > 40) { showToast('Keep the floor name to 40 characters.', false); return; }
+  const clash = allFloors().find(x => floorNorm(x) === floorNorm(v) && floorNorm(x) !== floorNorm(f));
+  if(clash && !confirm('"' + clash + '" already exists. Merge "' + f + '" into it?')) return;
+  const target = clash || v;
+  const ts = tenants.filter(t => floorNorm(t.floor) === floorNorm(f));
+  const arch = archivedTenants.filter(t => floorNorm(t.floor) === floorNorm(f));
+  const xs = expenses.filter(x => floorNorm(x.floor) === floorNorm(f));
+  setLoading(true, 'Renaming floor…');
+  let failed = 0;
+  for(const t of ts) { try { await dbUpdateTenantGuarded(t, { floor: target }); t.floor = target; } catch { failed++; } }
+  // Former tenants too, so past reports use the new name (still-archived rows only, unchanged since loaded).
+  for(const t of arch) {
+    try {
+      let q = 'tenants?id=eq.' + t.id + '&archived_at=not.is.null';
+      const body = { floor: target };
+      if(t.rev != null) { q += '&rev=eq.' + t.rev; body.rev = Number(t.rev) + 1; }
+      const rows = await sbFetch(q, { method: 'PATCH', body: JSON.stringify(body) });
+      if(rows && rows.length) { t.floor = target; if(t.rev != null) t.rev = body.rev; } else failed++;
+    } catch { failed++; }
+  }
+  for(const x of xs) { try { await dbUpdateExpense(x.id, { floor: target }); x.floor = target; } catch { failed++; } }
+  try { await _saveManagedFloors(managedFloors.filter(x => floorNorm(x) !== floorNorm(f) && floorNorm(x) !== floorNorm(target)).concat([target])); } catch { failed++; }
+  setLoading(false);
+  showToast(failed ? failed + ' item(s) could not be updated — refresh and try again.' : 'Floor renamed to "' + target + '".', !failed);
+  rerenderAdmin();
+}
+async function removeFloor(f) {
+  if(!_guardSettingsEdit()) return;
+  const n = allTenants().filter(t => floorNorm(t.floor) === floorNorm(f)).length, m = expenses.filter(x => floorNorm(x.floor) === floorNorm(f)).length;
+  if(n || m) { showToast('"' + f + '" is used by ' + n + ' tenant(s) and ' + m + ' expense(s). Rename it, or move them to another floor first.', false); return; }
+  if(!confirm('Remove floor "' + f + '"?')) return;
+  try { await _saveManagedFloors(managedFloors.filter(x => floorNorm(x) !== floorNorm(f))); showToast('Floor removed.'); } catch(e) { showToast('Could not save: ' + e.message, false); }
+  rerenderAdmin();
 }
 async function saveAutoBilling(which) {
   if(!_guardSettingsEdit()) { rerenderAdmin(); return; }
@@ -3209,10 +3291,39 @@ function _expensesInMonth(ym) {
 function setExpenseMonth(v){ expenseMonth = (v && v!==_currentYM()) ? v : ''; _editingExpenseId = null; rerenderAdmin(); }
 function shiftExpenseMonth(n){ setExpenseMonth(addYM(_expYM(), n)); }
 
+// Options for a floor dropdown: the whole building, every known floor, and
+// "+ Add a floor…" (so a floor is picked, never typed ad hoc).
+function _floorOptions(current) {
+  const floors = allFloors();
+  const cur = current ? (appFloorCanon()(current) || current) : '';
+  if(cur && !floors.includes(cur)) floors.push(cur);
+  return '<option value=""' + (!cur ? ' selected' : '') + '>Whole building (shared)</option>'
+    + floors.map(f => '<option value="' + esc(f) + '"' + (f === cur ? ' selected' : '') + '>' + esc(f) + '</option>').join('')
+    + '<option value="__add__">+ Add a floor…</option>';
+}
+async function expFloorPicked(sel) {
+  if(sel.value !== '__add__') { sel.dataset.last = sel.value; return; }
+  const name = await addFloorPrompt();
+  sel.innerHTML = _floorOptions(name || sel.dataset.last || '');
+  sel.dataset.last = sel.value;
+}
+// Ask for a new floor name and add it to the managed list. Returns the
+// canonical name, or '' if cancelled.
+async function addFloorPrompt() {
+  if(!_guardSettingsEdit()) return '';   // never overwrite a list that failed to load
+  const raw = prompt('New floor name (e.g. 6th Floor):', '');
+  const v = String(raw || '').trim().replace(/\s+/g, ' ');
+  if(!v) return '';
+  if(v.length > 40) { showToast('Keep the floor name to 40 characters.', false); return ''; }
+  const existing = appFloorCanon()(v);
+  if(existing) { showToast('"' + existing + '" already exists — selected it.'); if(!managedFloors.includes(existing)) { try { await _saveManagedFloors(managedFloors.concat([existing])); } catch {} } return existing; }
+  try { await _saveManagedFloors(managedFloors.concat([v])); showToast('Floor "' + v + '" added.'); return v; }
+  catch(e) { showToast('Could not save the floor: ' + e.message, false); return ''; }
+}
 function _expFormHtml(idSuffix, x) {
   const today = todayISO();
   const floorField = expensesFloorAvailable !== false
-    ? `<div class="field"><label for="exp-floor-${idSuffix}">Floor <span class="opt">(blank = shared)</span></label><input type="text" id="exp-floor-${idSuffix}" list="exp-floor-list" maxlength="40" placeholder="Whole building" value="${esc(x?x.floor||'':'')}" autocomplete="off"></div>`
+    ? `<div class="field"><label for="exp-floor-${idSuffix}">Floor</label><select id="exp-floor-${idSuffix}" data-last="${esc(x ? (appFloorCanon()(x.floor || '') || x.floor || '') : '')}" onchange="expFloorPicked(this)">${_floorOptions(x ? x.floor || '' : '')}</select></div>`
     : '';
   return `<div class="exp-form">
     <div class="exp-form-grid${floorField?' has-floor':''}">
@@ -3272,10 +3383,8 @@ function renderExpensesModule() {
           </span>
         </div>`).join('')
     : `<div class="exp-empty">No expenses recorded for ${esc(monthLabel)}.</div>`;
-  const floors = floorList();
   return pageHead('Expenses', 'What the building spends', btn('Export CSV', 'exportExpensesCSV()', { icon: 'download' }))
     + loadErrNote + floorNote
-    + `<datalist id="exp-floor-list">${floors.map(f=>`<option value="${esc(f)}">`).join('')}</datalist>`
     + `<div class="month-nav">
         <button type="button" class="btn-icon" onclick="shiftExpenseMonth(-1)" aria-label="Previous month">${icon('back')}</button>
         <input type="month" id="exp-month-filter" value="${ym}" onchange="setExpenseMonth(this.value)" aria-label="Month">
@@ -3315,7 +3424,7 @@ function _readExpenseForm(suffix) {
   if(!date){ showToast('Please pick the expense date.', false); return null; }
   if(!amount || amount<=0){ showToast('Please enter a valid amount.', false); return null; }
   const rec = { expense_date: date, category, amount, note };
-  if(floorEl && expensesFloorAvailable !== false) rec.floor = snapFloor(floorEl.value);
+  if(floorEl && expensesFloorAvailable !== false) rec.floor = floorEl.value === '__add__' ? '' : snapFloor(floorEl.value);
   return rec;
 }
 async function addExpense() {
@@ -3457,7 +3566,7 @@ function renderInsightsModule() {
   const archNote = _archivedLoadError ? '<div class="hint-note">' + icon('alert') + ' Archived tenants could not be loaded — former tenants\' history is missing from these figures. Refresh to retry.</div>' : '';
   return pageHead('Insights', 'How the building is doing · revenue on accrual basis' + (prorate ? ', spread over each billing cycle' : '') + ', as in the income statement') + archNote + win + kpis
     + _monthlyChartCard(acc, hasExp)
-    + '<div class="insight-grid">' + _agingCard(today) + (hasExp ? _expenseMixCard(acc) : '') + '</div>'
+    + '<div class="insight-grid">' + _agingCard(today) + (hasExp ? _expenseMixCard(acc) : '') + _passThroughCard(acc) + '</div>'
     + _floorTableCard(acc, cash)
     + _punctualityCard(rg, today);
 }
@@ -3586,19 +3695,28 @@ function _expenseMixCard(acc) {
   const T = acc.total;
   const cats = EXPENSE_CATEGORIES.map(c => ({ label: c.label, value: r2(T.direct[c.key] + T.shared[c.key]) })).filter(x => x.value > 0).sort((a, b) => b.value - a.value);
   const spent = T.expenses;
-  const utilSpent = r2(['electricity', 'water', 'internet'].reduce((s, k) => s + T.direct[k] + T.shared[k], 0));
-  const recovered = T.revenue.utilities;
-  const pct = utilSpent > 0 ? Math.round(recovered / utilSpent * 100) : null;
-  const nInc = tenants.filter(t => t.billing_model === 'inclusive').length;
-  const meter = pct === null ? '' : '<div class="meter-block"><div class="meter-head"><span>Utilities billed back to tenants</span><strong>' + pct + '%</strong></div>'
-    + '<div class="meter"><span style="width:' + Math.min(100, pct) + '%"></span></div>'
-    + '<div class="card-text muted">' + peso(recovered) + ' recharged of ' + peso(utilSpent) + ' spent on electricity, water and internet'
-    + (nInc ? ' — the rest is covered by rent (' + nInc + ' all-inclusive tenant' + (nInc !== 1 ? 's' : '') + ').' : '.') + '</div></div>';
+  const meter = '';
   return '<section class="card"><div class="card-head"><h2 class="card-title">Where the money goes</h2><button type="button" class="link-btn" onclick="go(\'expenses\')">Expenses</button></div>'
     + (cats.length ? '<p class="card-text">' + peso(spent) + ' spent' + (T.revenue.total > 0 ? ' — ' + Math.round(spent / T.revenue.total * 100) + '% of revenue.' : '.') + '</p>'
         + _hbars(cats.map(c => Object.assign(c, { sub: '· ' + Math.round(c.value / spent * 100) + '%' })), x => peso(x.value), 's2')
         : '<div class="empty-inline">No expenses logged in this period.</div>')
     + meter + '</section>';
+}
+
+// Utilities billed back to tenants: collected for the provider, so kept
+// out of revenue (IFRS 15 — the landlord acts as agent) and shown here.
+function _passThroughCard(acc) {
+  const P = acc.total.passThrough;
+  if(!(P.billed > 0.005 || P.settled > 0.005 || P.outstanding > 0.005)) return '';
+  const T = acc.total;
+  const utilSpent = r2(['electricity', 'water', 'internet'].reduce((s, k) => s + T.direct[k] + T.shared[k], 0));
+  return '<section class="card"><div class="card-head"><h2 class="card-title">Utilities billed back</h2></div>'
+    + '<p class="card-text">Electricity, water and similar bills charged to tenants are collected for the provider — pass-through, not revenue (IFRS 15, agent). They are kept out of revenue and net income.</p>'
+    + '<div class="mini-stats"><div><span class="muted">Billed to tenants</span><strong>' + peso(P.billed) + '</strong></div>'
+    + '<div><span class="muted">Settled</span><strong>' + peso(P.settled) + '</strong></div>'
+    + '<div><span class="muted">Still unpaid</span><strong>' + peso(P.outstanding) + '</strong></div></div>'
+    + (utilSpent > 0 ? '<p class="card-text muted">Utility costs the property itself paid (Expenses) in this period: ' + peso(utilSpent) + '.</p>' : '')
+    + '</section>';
 }
 
 function _floorTableCard(acc, cash) {
@@ -3780,16 +3898,23 @@ function floorRank(s) {
 // One spelling per floor across tenants (active first) and expense tags —
 // '3rd floor' and '3rd Floor' are the same floor (see floorCanon).
 function appFloorCanon() {
-  return floorCanon(allTenants().map(t => t.floor).concat(expenses.map(x => x.floor)));
+  return floorCanon(managedFloors.concat(allTenants().map(t => t.floor), expenses.map(x => x.floor)));
 }
 // Snap a typed floor to the spelling already in use, if any.
 function snapFloor(s) {
   const v = String(s || '').trim().replace(/\s+/g, ' ');
   return v ? (appFloorCanon()(v) || v) : '';
 }
-function _fillFloorDatalist() {
-  const dl = document.getElementById('m-floor-list');
-  if(dl) dl.innerHTML = floorList().map(f => '<option value="' + esc(f) + '">').join('');
+function _fillFloorSelect(cur) {
+  const sel = document.getElementById('m-floor');
+  if(!sel) return;
+  sel.innerHTML = _floorOptions(cur).replace('Whole building (shared)', 'No floor');
+  sel.dataset.last = sel.value;
+}
+async function tenantFloorPicked(sel) {
+  if(sel.value !== '__add__') { sel.dataset.last = sel.value; return; }
+  const name = await addFloorPrompt();
+  _fillFloorSelect(name || sel.dataset.last || '');
 }
 // Distinct floor labels currently in use, in floor order.
 function floorList() {
@@ -4413,8 +4538,7 @@ function openAddModal(){
   document.getElementById('m-phone').value='';
   document.getElementById('m-email').value='';
   document.getElementById('m-movein').value='';
-  document.getElementById('m-floor').value='';
-  _fillFloorDatalist();
+  _fillFloorSelect('');
   document.getElementById('m-billing').value='itemized';
   document.getElementById('m-flatrate').value='';
   _syncRecurringFields(null);
@@ -4442,8 +4566,7 @@ function openEditModal(tid, tab){
   document.getElementById('m-phone').value=t.phone||'';
   document.getElementById('m-email').value=t.email||'';
   document.getElementById('m-movein').value=t.move_in_date||'';
-  document.getElementById('m-floor').value=t.floor||'';
-  _fillFloorDatalist();
+  _fillFloorSelect(t.floor||'');
   document.getElementById('m-billing').value=t.billing_model==='inclusive'?'inclusive':'itemized';
   document.getElementById('m-flatrate').value=(t.flat_rate!=null && t.flat_rate!=='')?t.flat_rate:'';
   onBillingModelChange();
@@ -4724,7 +4847,8 @@ async function saveTenant(){
   const phone=document.getElementById('m-phone').value.trim();
   const email=document.getElementById('m-email').value.trim();
   const move_in_date=document.getElementById('m-movein').value||null;
-  const floor=snapFloor(document.getElementById('m-floor').value);
+  const _fv=document.getElementById('m-floor').value;
+  const floor=_fv==='__add__' ? '' : snapFloor(_fv);
   const billing_model=document.getElementById('m-billing').value==='inclusive'?'inclusive':'itemized';
   const _frRaw=document.getElementById('m-flatrate').value;
   if(billing_model==='inclusive'){
