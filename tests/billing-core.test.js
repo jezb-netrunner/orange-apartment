@@ -705,3 +705,14 @@ test('without a move-in date, rent due on the 31st is that month\'s revenue in f
     assert.equal(is.total.passThrough.billed, 1844);
   }
 });
+
+test('default accrual: a mid-month move-in keeps a flat rent whole in each billing month', () => {
+  const t = tenant({ move_in_date: '2026-06-15', templates: [rentT({ amount: 4000, dayOfMonth: 15 })],
+    bills: ['06', '07', '08'].map(m => bill({ amount: 4000, due: `2026-${m}-15`, status: 'paid', paidDate: `2026-${m}-15` })) });
+  // Spreading over the 15th-to-15th cycle is what produced the decimals.
+  assert.notEqual(BC.computeIncomeStatement({ tenants: [t], expenses: [], from: '2026-06', to: '2026-06', prorate: true }).total.revenue.total, 4000);
+  for(const ym of ['2026-06', '2026-07', '2026-08']) {
+    const m = BC.computeIncomeStatement({ tenants: [t], expenses: [], from: ym, to: ym });
+    assert.equal(m.total.revenue.total, 4000, ym);
+  }
+});

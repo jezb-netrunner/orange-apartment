@@ -104,8 +104,9 @@ Insights and Settings sit under *More*):
 ### Income statement bases
 
 - **Accrual (default, the general rule):** revenue is recognized in the
-  billing cycle it pays for — optionally spread straight-line over each
-  cycle's days — and the memo shows receivables and unearned (advance) rent
+  billing month it belongs to (a flat ₱4,000 rent shows as ₱4,000 in its
+  month, even with a mid-month move-in). Spreading it straight-line over
+  each cycle's days is an opt-in option. The memo shows receivables and unearned (advance) rent
   at period end.
 - **Cash:** revenue is counted when payment is received.
 - **Utilities billed back** to tenants (electricity, water…) are collected
