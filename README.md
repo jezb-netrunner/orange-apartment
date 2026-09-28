@@ -79,8 +79,9 @@ Insights and Settings sit under *More*):
   overdue to the tenant). Adding the real bill through *Add bill* offers to
   fill the placeholder instead of creating a second bill.
 - **Move out & archive** asks for the tenant's last day: unpaid bills for
-  cycles after it are removed, money paid ahead for them is refunded (a
-  dated refund) or kept as forfeited income on the last day, and reports
+  cycles after it are cancelled (never owed), money paid ahead — prepaid
+  cycles or an overpayment on a bill — is refunded (a dated refund) or kept
+  as forfeited income on the last day, and reports
   stop earning rent after that day. Metered bills still waiting for a final
   reading are flagged first. *Restore* undoes an archive (including its
   refund/forfeit); a former tenant moving back in later is added as a new

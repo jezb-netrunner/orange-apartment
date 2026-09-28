@@ -90,7 +90,7 @@ const BILL_CATEGORIES = [
 // Categories are inferred from the label so existing data just works.
 function billCategory(b) {
   const l = String((b && b.label) || '').toLowerCase();
-  if(/\brenta?\b|\bupa\b/.test(l)) return 'rent';   // whole word: not rental or current
+  if(/\brent|\bupa\b/.test(l)) return 'rent';   // rent, rental, renta (not "current")
   if(/electric|kuryente|power|beneco|meralco|water|tubig|internet|wi-?fi|gas\b|cable|utilit/.test(l)) return 'utilities';
   return 'other';
 }
@@ -131,6 +131,18 @@ function billCashEvents(b) {
 }
 
 // ── Templates ──
+// Is this label the monthly rent itself, not an item rented ("Parking rent",
+// "Aircon rental")? The rent word leads, after an optional month and/or
+// monthly/room/house/unit: "Rent - Oct", "Monthly Rental", "Room rent",
+// "October rent", "Upa - Marso".
+const _RENT_LEAD = new Set(['monthly', 'room', 'house', 'unit', 'apartment', 'bedspace', 'space']);
+function isRentLabel(label) {
+  const w = String(label || '').toLowerCase().split(/[^a-z]+/).filter(Boolean);
+  let i = 0;
+  while(i < w.length && _PERIOD_WORDS.has(w[i]) && !/^(rent|rental|rentals|renta|upa)$/.test(w[i])) i++;
+  while(i < w.length && _RENT_LEAD.has(w[i])) i++;
+  return i < w.length && /^(rent|rents|rental|rentals|renta|upa)$/.test(w[i]);
+}
 function tmplDay(tmpl) {
   const d = Math.floor(Number(tmpl && tmpl.dayOfMonth));
   return d >= 1 && d <= 31 ? d : 1;
@@ -178,9 +190,9 @@ function primaryTemplate(t) {
   const list = all.filter(x => tmplRate(x) > 0);
   const score = x => (/^\s*(monthly\s+)?rent\b/i.test(x.label || '') ? 1 : 0);
   const best = arr => arr.slice().sort((a, b) => score(b) - score(a) || tmplRate(b) - tmplRate(a))[0] || null;
-  const rent = best(list.filter(x => billCategory(x) === 'rent'));
+  const rent = best(list.filter(x => isRentLabel(x.label)));
   if(rent) return rent;
-  if(all.some(x => billCategory(x) === 'rent')) return null;
+  if(((t && t.templates) || []).some(x => x && isRentLabel(x.label))) return null;
   if(!t || t.billing_model !== 'inclusive') return null;
   // All-inclusive with a custom-named main charge: the one that matches
   // the flat rate — never a small add-on (Parking) standing in for it.
@@ -205,7 +217,7 @@ function _liveIds(t) { return new Set(((t && t.templates) || []).map(x => x && x
 function _labelOwner(t) {
   const list = ((t && t.templates) || []).filter(x => x && normLabel(x.label));
   const cur = new Map();
-  list.forEach(x => { const n = normLabel(x.label); if(!cur.has(n)) cur.set(n, x); });
+  list.filter(x => !x.retired).concat(list.filter(x => x.retired)).forEach(x => { const n = normLabel(x.label); if(!cur.has(n)) cur.set(n, x); });
   return b => {
     const l = normLabel(b && b.label);
     if(!l) return null;
@@ -216,7 +228,7 @@ function _labelOwner(t) {
     let best = null, len = 0;
     list.forEach(x => {
       const n = normLabel(x.label);
-      if(n.length > len && l.startsWith(n) && /[^a-z0-9]/.test(l.charAt(n.length)) && _periodSuffix(l.slice(n.length))) { best = x; len = n.length; }
+      if(n.length > len && l.startsWith(n) && /[^a-z0-9]/.test(l.charAt(n.length)) && !_oneOffSuffix(l.slice(n.length))) { best = x; len = n.length; }
     });
     return best;
   };
@@ -227,10 +239,12 @@ function _labelOwner(t) {
 const _PERIOD_WORDS = new Set(('jan feb mar apr may jun jul aug sep sept oct nov dec january february march april june july august '
   + 'september october november december enero pebrero marso abril mayo hunyo hulyo agosto setyembre oktubre nobyembre disyembre '
   + 'bill billing reading for of the month monthly to and').split(' '));
-function _periodSuffix(rest) {
-  const words = String(rest).toLowerCase().split(/[^a-z]+/).filter(Boolean);
-  return words.every(w => _PERIOD_WORDS.has(w));
-}
+// Does what follows a charge's name make it a one-off rather than that
+// month's bill? ("heater repair", "refill (5 gal)", "router replacement",
+// "common area share") — while "- Oct 2026 (PLDT)", "(15 cu.m.)" and
+// "- Sept (prorated)" still belong to the charge.
+const _ONE_OFF = /\b(repair|repairs|replacement|replace|refill|installation|install|dispenser|heater|router|modem|sticker|remote|gate|key|keycard|card|share|common|meter|maintenance|cleaning|clean|upgrade|setup|activation|reconnection|connection|transfer|gallon|gallons|gal|tank|pump|device|equipment|parts)\b/;
+function _oneOffSuffix(rest) { return _ONE_OFF.test(String(rest).toLowerCase()); }
 const _sameTmpl = (a, b) => !!a && !!b && (a === b || (!!a.id && a.id === b.id));
 // Does bill `b` belong to template `tmpl`? Bills tagged with a live
 // template follow their tag; everything else by label (see _labelOwner).
@@ -251,11 +265,17 @@ const _NOT_MONTHLY_RENT = /deposit|advance|penalt|late|fee|surcharge|interest|re
 // as rent ("Rent - March", "Upa - March") or, when it isn't a utility,
 // for exactly an amount the rent has had ("Monthly Bill - March" ₱6,000).
 function _isLooseRent(b, t, liveIds, owner, rates) {
-  if(!b || (b.tmplId && liveIds.has(b.tmplId)) || owner(b)) return false;
-  if(_NOT_MONTHLY_RENT.test(b.label || '')) return false;
-  const cat = billCategory(b);
-  if(cat === 'rent') return true;
-  return cat !== 'utilities' && !!rates && rates.includes(r2(b.amount));
+  if(!b) return false;
+  // A bill of a STOPPED rent charge stands for the rent that replaced it
+  // (no double billing of a cycle the old charge already posted or was
+  // paid ahead for).
+  if(b.tmplId && liveIds.has(b.tmplId)) {
+    const tm = ((t && t.templates) || []).find(x => x && x.id === b.tmplId);
+    return !!(tm && tm.retired && isRentLabel(tm.label));
+  }
+  if(owner(b) || _NOT_MONTHLY_RENT.test(b.label || '')) return false;
+  if(isRentLabel(b.label)) return true;
+  return billCategory(b) !== 'utilities' && !!rates && rates.includes(r2(b.amount));
 }
 
 // Bills that belong to a template (see billOfTemplate). With `fallback`, a
@@ -281,21 +301,30 @@ function templateBills(t, tmpl, fallback) {
     // under any monthly label ("Room - March", "Room - April", …): a label
     // repeated over 3+ months counts as that month's rent, at any amount.
     const firstOwn = Array.from(byPeriod.keys()).filter(isYM).sort()[0] || '9999-12';
-    const series = _monthlySeries(bills, liveIds, owner);
+    const series = _monthlySeries(bills, liveIds, owner, rates);
+    // Rent-worded / rent-amount bills first; a series bill only fills a
+    // month still empty, so it never displaces a real rent bill.
     bills.forEach((b, i) => {
       const p = billPeriod(b);
-      if(!p || byPeriod.has(p)) return;
-      if(_isLooseRent(b, t, liveIds, owner, rates) || (p < firstOwn && series(b))) add(b, i);
+      if(p && !byPeriod.has(p) && _isLooseRent(b, t, liveIds, owner, rates)) add(b, i);
+    });
+    bills.forEach((b, i) => {
+      const p = billPeriod(b);
+      if(p && !byPeriod.has(p) && p < firstOwn && series(b)) add(b, i);
     });
   }
   return { byPeriod, all };
 }
-// fn(bill) → is it one of a monthly series of untagged, unowned bills
-// (same label apart from the month, in 3+ different months)?
-function _monthlySeries(bills, liveIds, owner) {
-  const stem = b => String(b.label || '').toLowerCase().split(/[^a-z]+/).filter(w => w && !_PERIOD_WORDS.has(w)).join(' ');
+// fn(bill) → is it one of a monthly series of untagged, unowned bills that
+// looks like rent: same label apart from the month, in 2+ months, and an
+// amount of at least half the rent ("Room - March" ₱5,500 vs ₱6,000 —
+// never "Parking - March" ₱500).
+function _monthlySeries(bills, liveIds, owner, rates) {
+  const MONTHS = /^(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec|january|february|march|april|june|july|august|september|october|november|december|enero|pebrero|marso|abril|mayo|hunyo|hulyo|agosto|setyembre|oktubre|nobyembre|disyembre)$/;
+  const stem = b => String(b.label || '').toLowerCase().split(/[^a-z]+/).filter(w => w && !MONTHS.test(w)).join(' ') || '#month';
+  const floor = rates && rates.length ? Math.max.apply(null, rates) * 0.5 : Infinity;
   const ok = b => b && !(b.tmplId && liveIds.has(b.tmplId)) && !owner(b) && !_NOT_MONTHLY_RENT.test(b.label || '')
-    && billCategory(b) !== 'utilities' && billPeriod(b);
+    && billCategory(b) !== 'utilities' && billPeriod(b) && _num(b.amount) >= floor;
   const months = new Map();
   bills.forEach(b => {
     if(!ok(b)) return;
@@ -304,7 +333,7 @@ function _monthlySeries(bills, liveIds, owner) {
     if(!months.has(k)) months.set(k, new Set());
     months.get(k).add(billPeriod(b));
   });
-  return b => ok(b) && (months.get(stem(b)) || new Set()).size >= 3;
+  return b => ok(b) && (months.get(stem(b)) || new Set()).size >= 2;
 }
 
 // Is cycle `ym` of `tmpl` already billed? Used before creating a bill
@@ -320,15 +349,25 @@ function templateBillExists(t, tmpl, ym) {
   const prim = primaryTemplate(t);
   if(!_sameTmpl(prim, tmpl)) return false;
   const rates = _tmplRates(tmpl);
-  return bills.some(b => billPeriod(b) === ym && _isLooseRent(b, t, liveIds, owner, rates));
+  if(bills.some(b => billPeriod(b) === ym && _isLooseRent(b, t, liveIds, owner, rates))) return true;
+  // Hand-typed history the checker counts as rent counts here too.
+  const own = bills.filter(b => b && billOfTemplate(b, tmpl, liveIds, owner)).map(billPeriod).filter(isYM).sort();
+  if(own.length && ym >= own[0]) return false;
+  const series = _monthlySeries(bills, liveIds, owner, rates);
+  return bills.some(b => billPeriod(b) === ym && series(b));
 }
-// First activation on an all-inclusive tenant billed by hand: any bill
-// already typed for that month is this month's charge, so turning
-// automatic posting on never bills the month twice.
+// First activation on a tenant billed by hand: a bill already typed for
+// that month that plausibly is the rent counts as this month's charge, so
+// turning automatic posting on never bills the month twice.
 function _handTypedMonth(t, tmpl, ym) {
-  if(!t || t.billing_model !== 'inclusive' || !_sameTmpl(primaryTemplate(t), tmpl)) return false;
+  if(!t || !_sameTmpl(primaryTemplate(t), tmpl)) return false;
   const liveIds = _liveIds(t), owner = _labelOwner(t);
-  return (t.bills || []).some(b => b && billPeriod(b) === ym && !(b.tmplId && liveIds.has(b.tmplId)) && !owner(b) && !_NOT_MONTHLY_RENT.test(b.label || ''));
+  // Only a bill that plausibly IS the rent: rent-worded, or a non-utility
+  // of at least half the rent (an "Aircon cleaning" ₱800 never is).
+  const floor = Math.max(tmplRate(tmpl), _num(t.flat_rate)) * 0.5;
+  return (t.bills || []).some(b => b && billPeriod(b) === ym && !(b.tmplId && liveIds.has(b.tmplId)) && !owner(b)
+    && !_NOT_MONTHLY_RENT.test(b.label || '') && billCategory(b) !== 'utilities'
+    && (isRentLabel(b.label) || (floor > 0 && _num(b.amount) >= floor)));
 }
 
 // Raise postedThrough only across cycles that really are billed (or
@@ -380,6 +419,35 @@ function _defaultUid() {
 // postedThrough only ever advances one cycle at a time.
 // Returns { bills: [new bills], templates: updated copy, changed }.
 const CATCH_UP_LIMIT = 12;
+// Money logged beyond an earlier bill of the same fixed charge ("paid 2
+// months" recorded on one bill) pays a newly posted cycle, keeping its
+// payment dates. Moves it within `existing` (a copy) and flags out.moved.
+function _settleFromCredit(existing, tmpl, nb, t, out) {
+  if(!(tmplRate(tmpl) > 0) || !(_num(nb.amount) > 0)) return;
+  const holder = { bills: existing, templates: out.templates, billing_model: t.billing_model, flat_rate: t.flat_rate };
+  const liveIds = _liveIds(holder), owner = _labelOwner(holder);
+  let need = _num(nb.amount);
+  existing.forEach((b, i) => {
+    if(need <= EPS || !b || !(_num(b.amount) > 0) || !billOfTemplate(b, tmpl, liveIds, owner)) return;
+    let over = r2(billTotalPaid(b) - _num(b.amount));
+    if(over <= EPS) return;
+    const src = existing[i] = _clone(b);
+    for(let k = src.payments.length - 1; k >= 0 && over > EPS && need > EPS; k--) {
+      const v = _num(src.payments[k].amount);
+      const cut = r2(Math.min(v, over, need));
+      if(cut <= EPS) continue;
+      const e = { amount: cut, date: isoOrEmpty(src.payments[k].date), note: (src.payments[k].note ? src.payments[k].note + ' · ' : '') + 'credit from ' + b.label + (billPeriod(b) ? ' (' + billPeriod(b) + ')' : '') };
+      if(src.payments[k].rid) e.rid = src.payments[k].rid;
+      nb.payments.push(e);
+      src.payments[k].amount = r2(v - cut);
+      if(src.payments[k].amount <= EPS) src.payments.splice(k, 1);
+      over = r2(over - cut); need = r2(need - cut);
+      out.moved = true;
+    }
+  });
+  if(billOpen(nb) <= EPS) { nb.status = 'paid'; nb.paidDate = nb.payments.map(p => p.date).filter(Boolean).sort().pop() || ''; nb.remark = 'Paid in advance'; }
+  else if(billTotalPaid(nb) > EPS) nb.remark = 'Partly paid in advance';
+}
 function planAutoPost(t, opts) {
   opts = opts || {};
   const out = { bills: [], templates: _clone((t && t.templates) || []), changed: false };
@@ -390,6 +458,7 @@ function planAutoPost(t, opts) {
   const cur = ymOf(today);
   const mi = moveInOf(t);
   const existing = (t.bills || []).slice();
+  out.existing = existing;
   out.templates.forEach(tmpl => {
     if(!tmpl || !isAutoTemplate(tmpl) || !normLabel(tmpl.label)) return;
     if(!tmpl.id) { tmpl.id = uid(); out.changed = true; }
@@ -402,17 +471,23 @@ function planAutoPost(t, opts) {
     const mark = p => { if(!isYM(tmpl.postedThrough) || p > tmpl.postedThrough) { tmpl.postedThrough = p; out.changed = true; } };
     for(let i = 0; i < CATCH_UP_LIMIT && ym <= last; i++, ym = addYM(ym, 1)) {
       if(mi && ym < ymOf(mi)) { if(!stale) mark(ym); continue; }   // before the tenancy
+      if(isYM(tmpl.since) && ym < tmpl.since) { mark(ym); continue; } // before the charge existed
       if(skip.has(ym)) { mark(ym); continue; }                       // waived
       const due = templateDueDate(t, tmpl, ym);
       if(diffDays(today, due) > lead) break;                         // posting window not open yet
       const holder = { bills: existing.concat(out.bills), templates: out.templates, billing_model: t.billing_model, flat_rate: t.flat_rate };
       if(templateBillExists(holder, tmpl, ym) || (firstRun && _handTypedMonth(holder, tmpl, ym))) { mark(ym); continue; }
       if(stale && due < today) { mark(ym); continue; }               // (re)activation: leave overdue to the checker
-      out.bills.push(makeTemplateBill(tmpl, ym, due));
+      const nb = makeTemplateBill(tmpl, ym, due);
+      _settleFromCredit(existing, tmpl, nb, t, out);
+      out.bills.push(nb);
       mark(ym);
     }
   });
   if(out.bills.length) out.changed = true;
+  // When credit moved, the caller must write the whole updated list.
+  out.allBills = out.moved ? existing.concat(out.bills) : null;
+  delete out.existing;
   return out;
 }
 
@@ -435,16 +510,17 @@ function cycleWindow(moveIn, ym) {
 //   missing        started cycles with no bill that aren't waived
 //   excess         logged overpayment sitting on individual bills
 // Returns null when the tenant has no move-in date (reconciliation off).
-// A charge set up after move-in (tmpl.since) is reckoned from then — the
-// main rent included — so adding or switching a charge never creates
-// back-dated arrears. The main rent that existed from the start is
-// reckoned from move-in; any other charge from its first bill (or, with
-// no bill yet, the current cycle).
+// Where a charge is reckoned from. The main rent: move-in — or, when it
+// was set up later (tmpl.since), from then, unless it already has bills
+// before that (its history still counts). Any other charge: from when it
+// was set up, else its first bill, else the current cycle. Never before
+// move-in. So adding or switching a charge never creates back-dated arrears.
 function _reckonFrom(tmpl, byPeriod, isPrimary, miYM, today) {
-  if(isYM(tmpl.since)) return tmpl.since > miYM ? tmpl.since : miYM;
-  if(isPrimary) return miYM;
   const first = Array.from(byPeriod.keys()).filter(isYM).sort()[0];
-  const from = first || ymOf(today);
+  let from;
+  if(isPrimary) from = isYM(tmpl.since) ? (first && first < tmpl.since ? first : tmpl.since) : miYM;
+  else if(isYM(tmpl.since)) from = tmpl.since;
+  else from = first || ymOf(today);
   return from < miYM ? miYM : from;
 }
 function reconcileCharge(t, tmpl, opts) {
@@ -642,6 +718,7 @@ function allocatePayment(t, chunks, opts) {
     const mi = moveInOf(t);
     let ym = ymOf(opts.today);
     if(mi && ymOf(mi) > ym) ym = ymOf(mi);
+    if(isYM(tmpl.since) && tmpl.since > ym) ym = tmpl.since;
     const holder = { bills, templates, billing_model: t && t.billing_model, flat_rate: t && t.flat_rate };
     for(let n = 0; queue.length && n < 240; n++, ym = addYM(ym, 1)) {
       if(skip.has(ym) || templateBillExists(holder, tmpl, ym)) continue;
@@ -826,12 +903,20 @@ function planMoveOut(t, lastDay, opts) {
   if(!isISODate(lastDay)) return out;
   const refundDate = isISODate(opts.refundDate) ? String(opts.refundDate).slice(0, 10) : lastDay;
   const snap = b => ({ amount: b.amount, status: b.status, paidDate: b.paidDate || '', remark: b.remark || '', payments: _clone(b.payments || []) });
+  const extra = [];
   _clone((t && t.bills) || []).forEach(b => {
     if(!b) return;
     const start = _billStart(t, b);
     if(start && start > lastDay) {
       const got = r2(billSettled(b));
-      if(got <= EPS) { out.removed.push(b); return; }
+      if(got <= EPS) {
+        // Never owed. Kept (not deleted) so a restore brings it back exactly.
+        out.removed.push(b);
+        b.preMoveOut = snap(b);
+        b.amount = 0; b.status = 'paid'; b.paidDate = ''; b.remark = 'Cancelled on move-out';
+        out.bills.push(b);
+        return;
+      }
       out.prepaid.push({ label: b.label, period: billPeriod(b), amount: got });
       out.prepaidTotal = r2(out.prepaidTotal + got);
       if(opts.prepaid === 'refund') {
@@ -854,23 +939,49 @@ function planMoveOut(t, lastDay, opts) {
     } else {
       if(billAwaitingAmount(b)) out.awaiting.push(b);
       out.owed = r2(out.owed + billOpen(b));
+      // Money paid beyond a bill (an advance logged on the current bill) is
+      // paid-ahead money too: refunded or kept like prepaid cycles.
+      const over = billAwaitingAmount(b) ? 0 : r2(billTotalPaid(b) - _num(b.amount));
+      if(over > EPS) {
+        out.prepaid.push({ label: b.label + ' (credit)', period: billPeriod(b), amount: over });
+        out.prepaidTotal = r2(out.prepaidTotal + over);
+        if(opts.prepaid === 'refund') {
+          b.preMoveOut = snap(b);
+          b.payments = (b.payments || []).concat([{ amount: -over, date: refundDate, note: 'Credit refunded on move-out' }]);
+        } else if(opts.prepaid === 'keep') {
+          // Move the excess (with its original dates) onto a forfeited-credit
+          // bill earned on the last day; cash reports don't change.
+          b.preMoveOut = snap(b);
+          const moved = [];
+          let left = over;
+          for(let k = (b.payments || []).length - 1; k >= 0 && left > EPS; k--) {
+            const v = _num(b.payments[k].amount);
+            const cut = r2(Math.min(v, left));
+            if(cut <= EPS) continue;
+            moved.unshift({ amount: cut, date: isoOrEmpty(b.payments[k].date), note: b.payments[k].note || '' });
+            b.payments[k].amount = r2(v - cut);
+            left = r2(left - cut);
+            if(b.payments[k].amount <= EPS) b.payments.splice(k, 1);
+          }
+          extra.push({ label: 'Forfeited credit on move-out', amount: over, due: lastDay, status: 'paid', paidDate: lastDay,
+            remark: 'From ' + b.label + (billPeriod(b) ? ' (' + billPeriod(b) + ')' : ''), scanLink: '', payments: moved, preMoveOut: { remove: true } });
+        }
+      }
     }
     out.bills.push(b);
   });
-  // Removed cycles post again normally if the tenant is ever restored.
-  out.removed.forEach(b => {
-    const tm = out.templates.find(x => x && x.id === b.tmplId);
-    if(tm && isYM(b.period) && isYM(tm.postedThrough) && b.period <= tm.postedThrough) tm.postedThrough = addYM(b.period, -1);
-  });
+  out.bills = out.bills.concat(extra);
   return out;
 }
 
-// Reverse a move-out when an archive is undone: bills it refunded or
-// marked forfeited go back to how they were (removed unpaid cycles post
-// again on their own — planMoveOut rolled postedThrough back). Pure.
+// Reverse a move-out when an archive is undone: every bill it cancelled,
+// refunded or marked forfeited goes back exactly as it was. Pure.
 function undoMoveOut(t) {
-  const bills = _clone((t && t.bills) || []);
   let n = 0;
+  const bills = _clone((t && t.bills) || []).filter(b => {
+    if(b && b.preMoveOut && b.preMoveOut.remove) { n++; return false; }
+    return true;
+  });
   bills.forEach(b => {
     if(!b || !b.preMoveOut) return;
     const pm = b.preMoveOut;
@@ -907,8 +1018,9 @@ function billCoverageWindow(t, b) {
   if(!period) return null;
   const mi = moveInOf(t);
   if(mi && period >= ymOf(mi)) return cycleWindow(mi, period); // move-in is the reckoning date
-  const due = isoOrEmpty(b.due);
+  let due = isoOrEmpty(b.due);
   if(!due) return null;
+  if(ymOf(due) < period) due = dateInMonth(period, 1);   // due before its own month: the cycle is still that month
   const nextYM = addYM(ymOf(due), 1);
   return { start: due, end: dateInMonth(nextYM, Number(due.slice(8, 10))) };
 }
@@ -1216,7 +1328,7 @@ function paymentReliability(tenants, fromYM, toYM, today) {
   (tenants || []).forEach(t => {
     let n = 0, late = 0, lateDays = 0, unpaidLate = 0;
     (t.bills || []).forEach(b => {
-      if(!b) return;
+      if(!b || _postMoveOut(t, b)) return;
       const due = isoOrEmpty(b.due);
       if(!due || due >= today) return;
       const p = ymOf(due);
@@ -1241,7 +1353,7 @@ function paymentReliability(tenants, fromYM, toYM, today) {
 const BillingCore = {
   isYM, isISODate, isoOrEmpty, ymOf, addYM, daysInMonth, dateInMonth, lastDayOf, diffDays, addDaysISO, ymRange, r2,
   BILL_CATEGORIES, billCategory, billTotalPaid, billRemaining, billSettled, billOpen, billAwaitingAmount, billPeriod, normLabel, billCashEvents,
-  tmplDay, tmplRate, tmplRateAt, isAutoTemplate, moveInOf, templateDueDate, primaryTemplate, templateBills, templateBillExists, makeTemplateBill,
+  tmplDay, tmplRate, tmplRateAt, isAutoTemplate, isRentLabel, moveInOf, templateDueDate, primaryTemplate, templateBills, templateBillExists, makeTemplateBill,
   billOfTemplate, templateOfBill, bumpPostedThrough, planAutoPost, cycleWindow, reconcileCharge, reconcileTenant, allocatePayment, applyCredit, undoReceipt, backfillCycles, waiveCycles,
   planMoveOut, undoMoveOut, moveOutOf, activeTemplates, billCoverageWindow, billRecognition, occupiedInMonth, floorKey, floorNorm, floorCanon, computeIncomeStatement, agingBuckets, paymentReliability,
   EXPENSE_CATEGORY_KEYS
