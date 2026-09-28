@@ -2054,6 +2054,8 @@ function renderHome() {
     if(getDueStatus(b) === 'overdue') { overdue += o; overdueN++; }
   }));
   const cat = outstandingByCategory(tenants.flatMap(t => t.bills));
+  // Balances left by former tenants are still receivables; shown apart so the drill-down (current tenants) still ties.
+  const formerOpen = r2(archivedTenants.reduce((s, t) => s + tenantSummary(t).open, 0));
   const all = allTenants();
   const collected = cashInMonth(all, ym), billed = billedInMonth(all, ym);
   const utilSettled = cashInMonth(all, ym, true);
@@ -2064,11 +2066,12 @@ function renderHome() {
 
   const kpis = '<div class="kpis">'
     + '<button type="button" class="kpi" onclick="goBills(\'open\')"><div class="kpi-label">Outstanding</div><div class="kpi-value">' + peso(open) + '</div>'
-    +   (open ? '<div class="kpi-lines">' + balanceLinesHtml(cat, 'stat-line') + '</div>' : '<div class="kpi-sub">Nothing owed</div>') + '</button>'
+    +   (open ? '<div class="kpi-lines">' + balanceLinesHtml(cat, 'stat-line') + '</div>' : '<div class="kpi-sub">Nothing owed</div>')
+    +   (formerOpen > 0.005 ? '<div class="kpi-sub">+ ' + peso(formerOpen) + ' owed by former tenants</div>' : '') + '</button>'
     + '<button type="button" class="kpi" onclick="goBills(\'overdue\')"><div class="kpi-label">Overdue</div><div class="kpi-value ' + (overdue ? 'bad' : 'good') + '">' + (overdue ? peso(overdue) : 'None') + '</div>'
     +   '<div class="kpi-sub">' + (overdueN ? overdueN + ' bill' + (overdueN !== 1 ? 's' : '') + ' past due' : 'nothing past due') + '</div></button>'
     + '<button type="button" class="kpi" onclick="go(\'reports\')"><div class="kpi-label">Collected · ' + monthShort + '</div><div class="kpi-value good">' + peso(collected) + '</div>'
-    +   '<div class="kpi-sub">of ' + peso(billed) + ' billed' + (rate !== null ? ' · ' + rate + '%' : '') + (utilSettled ? ' · utilities ' + peso(utilSettled) + ' passed through' : '') + '</div></button>'
+    +   '<div class="kpi-sub">' + peso(billed) + ' billed this month' + (collected > billed + 0.005 ? ' · includes older bills or advances' : rate !== null ? ' · ' + rate + '%' : '') + (utilSettled ? ' · utilities ' + peso(utilSettled) + ' passed through' : '') + '</div></button>'
     + (expOk
         ? '<button type="button" class="kpi" onclick="go(\'expenses\')"><div class="kpi-label">Net · ' + monthShort + '</div><div class="kpi-value ' + (net < 0 ? 'bad' : '') + '">' + (net < 0 ? '&minus;' : '') + peso(Math.abs(net)) + '</div>'
           + '<div class="kpi-sub">collected &minus; ' + peso(spent) + ' expenses</div></button>'
@@ -3162,7 +3165,7 @@ function renderReportsModule() {
     + card('doc', 'Income statement', 'Revenue, expenses and net income for any period. <strong>Accrual basis</strong> by default (revenue in the cycle it\'s earned; advances held as unearned), or cash basis.',
         btn('Open', 'openIncStmtModal()', { primary: true, icon: 'print' }))
     + card('building', 'Income statement per floor', floors.length
-        ? 'Each floor\'s revenue with its own expenses plus a fair share of building-wide costs &mdash; side by side, or one page per floor.'
+        ? 'Each floor\'s revenue with its own floor-tagged expenses (building-wide costs can optionally be split) &mdash; side by side, or one page per floor.'
         : 'Give tenants a floor/group label to compare floors. Floor-tagged expenses go to their floor; shared costs stay in the building total unless you choose to split them.',
         btn('Side by side', 'openIncStmtModal(\'floors-compare\')', { icon: 'building' }) + btn('One page per floor', 'openIncStmtModal(\'floors-pages\')', { icon: 'print' }))
     + card('users', 'Statement of account', 'A tenant\'s bills, payments and balance for a period — ready to print or save as PDF.',
@@ -3569,7 +3572,7 @@ function renderInsightsModule() {
     + tile('Cash collected', peso(cash.total.revenue.total), _delta(cash.total.revenue.total, cashPrev.total.revenue.total, true))
     + (hasExp ? tile('Net income', (netV < 0 ? '&minus;' : '') + peso(Math.abs(netV)), _delta(netV, accPrev.total.net, true), netV < 0 ? 'bad' : '')
               : tile('Expenses', '&mdash;', 'ledger not set up'))
-    + tile('Billed & paid', eff === null ? '&mdash;' : eff + '%', billedWin ? peso(paidWin) + ' of ' + peso(billedWin) + ' billed' : 'nothing billed yet', eff !== null && eff < 80 ? 'bad' : '')
+    + tile('Billed & paid', eff === null ? '&mdash;' : eff + '%', billedWin ? peso(paidWin) + ' of ' + peso(billedWin) + ' billed (incl. utilities)' : 'nothing billed yet', eff !== null && eff < 80 ? 'bad' : '')
     + '</div>';
 
   const archNote = _archivedLoadError ? '<div class="hint-note">' + icon('alert') + ' Archived tenants could not be loaded — former tenants\' history is missing from these figures. Refresh to retry.</div>' : '';
@@ -3682,11 +3685,11 @@ function _hbars(items, fmt, cls) {
 }
 
 function _agingCard(today) {
-  const buckets = agingBuckets(tenants, today);
+  const buckets = agingBuckets(allTenants(), today);
   const total = r2(buckets.reduce((s, b) => s + b.amount, 0));
   const late = r2(buckets.filter(b => !['current', 'nodate'].includes(b.key)).reduce((s, b) => s + b.amount, 0));
-  // Same tenants as the buckets above (current tenants), same recognition as the statement.
-  const memo = computeIncomeStatement({ tenants, expenses: [], from: _currentYM(), to: _currentYM(), basis: 'accrual', prorate: _incStmtProrate(), hasExpenses: false }).memo.__total;
+  // Same tenants as the buckets above (current and former), same recognition as the statement.
+  const memo = computeIncomeStatement({ tenants: allTenants(), expenses: [], from: _currentYM(), to: _currentYM(), basis: 'accrual', prorate: _incStmtProrate(), hasExpenses: false }).memo.__total;
   const oldest = buckets.slice().reverse().find(b => b.amount > 0 && b.key !== 'current' && b.key !== 'nodate');
   const note = !total ? 'Nobody owes anything right now.'
     : late ? peso(late) + ' of ' + peso(total) + ' is past due' + (oldest && (oldest.key === 'd90p' || oldest.key === 'd90') ? ' — some of it for over ' + (oldest.key === 'd90p' ? '90' : '60') + ' days.' : '.')
@@ -3736,7 +3739,7 @@ function _floorTableCard(acc, cash) {
     const c = acc.columns[f];
     const m = cash.memo[f];
     const onFloor = tenants.filter(t => floorNorm(t.floor) === floorNorm(f));
-    const owed = r2(onFloor.reduce((s, t) => s + tenantSummary(t).open, 0));
+    const owed = r2(allTenants().filter(t => floorNorm(t.floor) === floorNorm(f)).reduce((s, t) => s + tenantSummary(t).open, 0));
     const n = onFloor.length;
     // Only floor-tagged costs: building-wide costs are not charged to a floor here.
     const net = r2(c.revenue.total - c.direct.total);
@@ -4692,7 +4695,7 @@ function editBillInline(i){
       <div class="field"><label>Amount (&#8369;)</label><input type="text" id="bi-amount-${i}" value="${b.amount}" inputmode="decimal" pattern="[0-9.]*" autocomplete="off"></div>
       <div class="field"><label>Due Date</label><input type="date" id="bi-due-${i}" value="${b.due||''}"></div>
       <div class="field"><label>Status</label>
-        <select id="bi-status-${i}" onchange="document.getElementById('bi-pd-wrap-${i}').style.display=this.value==='paid'?'block':'none'">
+        <select id="bi-status-${i}" onchange="_paidToggle(this,'bi-pd-wrap-${i}','bi-paidDate-${i}')">
           <option value="unpaid" ${b.status!=='paid'?'selected':''}>Unpaid</option>
           <option value="paid" ${b.status==='paid'?'selected':''}>Paid</option>
         </select>
@@ -4718,7 +4721,8 @@ async function saveBillEdit(i){
   if(_amt===0 && !confirm('Amount is ₱0. Save anyway?')) return;
   const newStatus=document.getElementById('bi-status-'+i).value==='paid'?'paid':'unpaid';
   const pdInput=document.getElementById('bi-paidDate-'+i);
-  const paidDate=newStatus==='paid'?(pdInput?pdInput.value||todayISO():todayISO()):'';
+  if(newStatus==='paid' && pdInput && !pdInput.value){ showToast('Enter the date it was paid.',false); return; }
+  const paidDate=newStatus==='paid'?(pdInput?pdInput.value:todayISO()):'';
   if(newStatus==='paid' && paidDate!==t.bills[i].paidDate && !_futureDateOk(paidDate)) return;
   let remark=document.getElementById('bi-remark-'+i).value.trim();
   // Auto-clear "pending amount" remark when a real amount is entered
@@ -4776,7 +4780,7 @@ function startNewBill(){
       <div class="field"><label>Amount (&#8369;)</label><input type="text" id="nb-amount" placeholder="0" inputmode="decimal" pattern="[0-9.]*" autocomplete="off"></div>
       <div class="field"><label>Due Date</label><input type="date" id="nb-due"></div>
       <div class="field"><label>Status</label>
-        <select id="nb-status" onchange="document.getElementById('nb-pd-wrap').style.display=this.value==='paid'?'block':'none'">
+        <select id="nb-status" onchange="_paidToggle(this,'nb-pd-wrap','nb-paidDate')">
           <option value="unpaid" selected>Unpaid</option>
           <option value="paid">Paid</option>
         </select>
@@ -4806,7 +4810,8 @@ async function saveNewBill(){
   const _nbAmt = normalizeAmount(document.getElementById('nb-amount').value);
   if(_nbAmt===0 && !confirm('Amount is ₱0. Add this bill anyway?')) return;
   const status=document.getElementById('nb-status').value==='paid'?'paid':'unpaid';
-  const paidDate=status==='paid'?(document.getElementById('nb-paidDate').value||todayISO()):'';
+  if(status==='paid' && !document.getElementById('nb-paidDate').value){ showToast('Enter the date it was paid.',false); return; }
+  const paidDate=status==='paid'?document.getElementById('nb-paidDate').value:'';
   const bill={label,amount:normalizeAmount(document.getElementById('nb-amount').value),due:document.getElementById('nb-due').value,status,remark:document.getElementById('nb-remark').value.trim(),scanLink:(function(v){return /^https:\/\//i.test(v)?v:'';})(document.getElementById('nb-scanLink').value.trim()),paidDate,payments:[]};
   const _t = tenants.find(x=>x.id===editingId);
   const ph = _t && bill.amount > 0 ? _placeholderFor(_t, label, bill.due) : -1;
@@ -4876,6 +4881,7 @@ async function saveTenant(){
   const dueDay = Number(_ddRaw);
   if(String(_ddRaw).trim() && !(Number.isInteger(dueDay) && dueDay>=1 && dueDay<=31)){ showToast('Rent due day must be a whole number from 1 to 31.',false); return; }
   if(!name||!unit||!code){showToast('Please fill in name, unit, and access code.',false);return;}
+  if(!editingId && billForms.some(b=>b.label && b.status==='paid' && !b.paidDate)){showToast('Enter the date each paid bill was paid.',false);return;}
   if(tenants.find(t=>t.code===code&&t.id!==editingId)){showToast('That access code is already in use.',false);return;}
   const _archSame = archivedTenants.find(t=>t.code===code&&t.id!==editingId);
   if(_archSame){ showToast('Access code '+code+' belongs to archived tenant '+_archSame.name+' — pick another (Generate makes a new one).',false); return; }
@@ -4895,7 +4901,7 @@ async function saveTenant(){
       status:   b.status==='paid'?'paid':'unpaid',
       remark:   (b.remark||'').trim(),
       scanLink: /^https:\/\//i.test((b.scanLink||'').trim()) ? (b.scanLink||'').trim() : '',
-      paidDate: b.status==='paid' ? (b.paidDate || todayISO()) : '',
+      paidDate: b.status==='paid' ? b.paidDate : '',
       payments: []
     }));
     const negative = billForms.find(b=>b.label && Number(String(b.amount||'').replace(/,/g,'')) < 0);
@@ -5017,6 +5023,13 @@ function openQuickBill(tid){
   openModal('addbill-modal');
 }
 function closeQuickBill(){ closeModalEl('addbill-modal'); }
+// Show the Date Paid field when a bill is marked paid, pre-filled (visibly) with today.
+function _paidToggle(sel, wrapId, inputId){
+  const on = sel.value==='paid';
+  document.getElementById(wrapId).style.display = on ? 'block' : 'none';
+  const inp = document.getElementById(inputId);
+  if(on && inp && !inp.value) inp.value = todayISO();
+}
 function qbTogglePaid(cb){
   document.getElementById('qb-paiddate-wrap').style.display = cb.checked ? 'block' : 'none';
   if(cb.checked && !document.getElementById('qb-paiddate').value){
@@ -5071,7 +5084,8 @@ async function saveQuickBill(addAnother){
   if(ph >= 0){
     const pb = t.bills[ph];
     if(confirm('"'+pb.label+'"'+(billPeriod(pb)?' for '+fmtYM(billPeriod(pb)):'')+' is already posted and waiting for its amount.\n\nOK: fill it with ₱'+fmtMoney(amount)+'.\nCancel: add a separate bill instead.')){
-      const paidDateQ = isPaidQ ? (document.getElementById('qb-paiddate').value || todayISO()) : '';
+      if(isPaidQ && !document.getElementById('qb-paiddate').value){ showToast('Enter the date it was paid.',false); return; }
+      const paidDateQ = isPaidQ ? document.getElementById('qb-paiddate').value : '';
       const scanQ = document.getElementById('qb-scan').value.trim();
       const remarkQ = document.getElementById('qb-remark').value.trim();
       const ok = await saveBills(tid, bills=>{
@@ -5102,7 +5116,8 @@ async function saveQuickBill(addAnother){
     if(dup && !confirm(t.name+' already has a "'+label+'" bill due '+new Date(due.slice(0,7)+'-02').toLocaleString('default',{month:'long',year:'numeric'})+'. Add another?')) return;
   }
   const isPaid = document.getElementById('qb-paid').checked;
-  const paidDate = isPaid ? (document.getElementById('qb-paiddate').value || todayISO()) : '';
+  if(isPaid && !document.getElementById('qb-paiddate').value){ showToast('Enter the date it was paid.',false); return; }
+  const paidDate = isPaid ? document.getElementById('qb-paiddate').value : '';
   const scan = document.getElementById('qb-scan').value.trim();
   const bill = { label, amount, due, status: isPaid?'paid':'unpaid',
     remark: document.getElementById('qb-remark').value.trim(),
@@ -5181,8 +5196,9 @@ function renderTenant(){
   // ── All-inclusive tenants: one predictable number, so the header answers
   // "am I paid up this month?" instead of repeating the same figure 3 times.
   const isInclusive = t.billing_model==='inclusive';
-  const _tmplRate = (t.templates||[]).find(x=>/rent/i.test(x.label||'')) || (t.templates||[])[0];
-  const flatRate = Number(t.flat_rate) || (_tmplRate && !_tmplRate.pendingAmount ? Number(_tmplRate.amount) : 0) || 0;
+  // The live rent charge at this month's rate (a retired or stale rate would mislead the tenant).
+  const _tmplRate = primaryTemplate(t);
+  const flatRate = (_tmplRate ? tmplRateAt(_tmplRate, curYM) : 0) || (!(t.templates||[]).length ? Number(t.flat_rate) || 0 : 0);
   const monthName = now.toLocaleString('default',{month:'long'});
   const curMonthBills  = t.bills.filter(b=>b.due&&b.due.startsWith(curYM));
   const curMonthUnpaid = curMonthBills.filter(b=>b.status!=='paid' && !billAwaitingAmount(b));
