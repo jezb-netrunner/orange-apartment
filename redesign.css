@@ -1186,3 +1186,49 @@ i.c-other { background: #6CB3B9; }
   .st-select { width: 100%; }
   .st-grace { width: 100%; }
 }
+
+/* ── Add / edit tenant drawer ── */
+#tenant-modal .modal.oa-drawer { max-width: 560px !important; }
+#tenant-modal .modal-panel.active { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+#tenant-modal .modal-tabs { margin: 0; padding: 0 32px; gap: 24px; border-bottom: 1px solid var(--oa-divider); flex: none; }
+#tenant-modal .modal-tab { padding: 14px 2px 12px; font-size: 14px; font-weight: 600; color: var(--muted); background: none; border: none; letter-spacing: 0; text-transform: none; }
+#tenant-modal .modal-tab.active { color: var(--ink); }
+#tenant-modal .modal-tab.active::after { background: var(--oa-brand); height: 2.5px; bottom: -1px; }
+.dr-body .field { margin: 0; }
+.dr-eyebrow { font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--oa-faint); }
+.dr-row2.even { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.dr-divider { border: none; border-top: 1px solid var(--oa-divider); margin: 6px 0 2px; }
+.dr-body .field-hint { font-size: 12.5px; color: var(--muted); margin-top: 6px; }
+.code-row .dr-code { letter-spacing: 0.2em; font-weight: 700; font-size: 16px !important; text-transform: uppercase; }
+.dr-gen { min-height: 46px; flex: none; }
+.bm-seg { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; padding: 4px; border-radius: 12px; background: #F5F0EA; }
+.bm-opt { text-align: left; padding: 12px 14px; border: none; border-radius: 9px; background: transparent; cursor: pointer; display: flex; flex-direction: column; gap: 2px; }
+.bm-opt strong { font-size: 14.5px; font-weight: 700; color: var(--oa-ink-2); }
+.bm-opt span { font-size: 12.5px; color: var(--muted); }
+.bm-opt.active { background: #fff; box-shadow: 0 1px 3px rgba(60,40,20,0.12); }
+.bm-opt.active strong { color: var(--ink); }
+.dr-money { position: relative; display: flex; align-items: center; }
+.dr-money span { position: absolute; left: 14px; color: var(--oa-faint); font-weight: 600; pointer-events: none; }
+.dr-money em { position: absolute; right: 14px; font-style: normal; color: var(--oa-faint); font-size: 14px; pointer-events: none; }
+.dr-money input { width: 100%; padding-left: 32px !important; padding-right: 72px !important; }
+.dr-explain { background: var(--oa-head); border: 1px solid #F0EAE2; border-radius: 12px; padding: 14px 16px; font-size: 13.5px; color: var(--oa-ink-2); line-height: 1.5; }
+.dr-explain:empty { display: none; }
+.dr-addlink { display: inline-flex; align-items: center; gap: 6px; border: none; background: none; padding: 4px 0; color: var(--oa-accent-text); font-weight: 700; font-size: 14px; cursor: pointer; }
+.dr-addlink .ico { width: 16px; height: 16px; }
+#new-tenant-bills { display: flex; flex-direction: column; gap: 10px; }
+#bill-forms:empty { display: none; }
+.dr-note { font-size: 13px; color: var(--muted); line-height: 1.6; margin: 0; }
+#tenant-modal .modal-tab-hint { margin: 0; }
+#tenant-modal .dr-foot .btn-save:only-child { min-width: 120px; }
+@media (max-width: 768px) {
+  #tenant-modal.open { padding: 0 !important; align-items: stretch !important; }
+  #tenant-modal .modal.oa-drawer { max-width: none !important; width: 100% !important; height: 100% !important; max-height: none !important; border-radius: 0 !important; }
+  #tenant-modal .modal-tabs { padding: 0 16px; }
+  .dr-row2.even { gap: 10px; }
+  #tenant-modal .dr-foot .btn-cancel, #tenant-modal .dr-foot .btn-save { flex: 1 !important; }
+}
+.dr-body .bill-item { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding: 14px; margin: 0; background: var(--oa-head); border: 1px solid #F0EAE2; border-radius: 12px; position: relative; }
+.dr-body .bill-item > .field:first-child { grid-column: 1 / -1; padding-right: 40px; }
+.dr-body .bill-item .bill-remark-field { grid-column: 1 / -1; }
+.dr-body .bill-item > .btn-rm { position: absolute; top: 10px; right: 10px; width: 30px; height: 30px; border-radius: 8px; }
+.dr-body .bill-item label { font-size: 12.5px !important; }

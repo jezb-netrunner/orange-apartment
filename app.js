@@ -4838,13 +4838,23 @@ function switchModalTab(tab,btn){
   if(tab==='templates') renderTemplateList();
 }
 
-// Show the flat-rate field only for the all-inclusive billing model.
+// Show the flat-rate field only for the all-inclusive billing model; the
+// segmented choice and the explanation follow the (hidden) select.
 function onBillingModelChange(){
   const model = document.getElementById('m-billing').value;
   document.getElementById('m-flatrate-wrap').style.display = model==='inclusive' ? 'block' : 'none';
   const rentWrap = document.getElementById('m-rent-wrap');
-  if(rentWrap) rentWrap.style.display = (model!=='inclusive' && rentWrap.dataset.allowed==='1') ? 'block' : 'none';
+  const canRent = rentWrap && rentWrap.dataset.allowed==='1';
+  if(rentWrap) rentWrap.style.display = (model!=='inclusive' && canRent) ? 'block' : 'none';
+  document.querySelectorAll('#tenant-modal .bm-opt').forEach(b => { const on = b.dataset.model === model; b.classList.toggle('active', on); b.setAttribute('aria-checked', String(on)); });
+  const lead = autoBilling.leadDays, when = lead ? lead + ' day' + (lead !== 1 ? 's' : '') + ' before each due date' : 'on each due date';
+  const ex = document.getElementById('m-explain');
+  if(ex) ex.textContent = !canRent ? 'Recurring charges for this tenant are set on the Recurring tab.'
+    : !autoBilling.enabled ? 'Automatic billing is off in Settings — post recurring bills from Billing.'
+    : model === 'inclusive' ? 'One flat rate covers rent and utilities. It posts automatically ' + when + ', and the tenant sees it as their monthly rate.'
+    : 'Rent posts automatically ' + when + '. Add water and electricity as metered bills when readings come in.';
 }
+function setBillingModel(model){ document.getElementById('m-billing').value = model; onBillingModelChange(); }
 // The "monthly rent" + "due day" fields create the tenant's recurring rent
 // template, so they only show when there is no template yet (new tenants,
 // or old tenants set up before templates). Existing templates are edited
@@ -4861,6 +4871,7 @@ function openAddModal(){
   editingId=null; _editingT=null;
   document.getElementById('modal-eyebrow').textContent='New Tenant';
   document.getElementById('modal-title').textContent='Add a tenant';
+  document.getElementById('modal-sub').textContent='Rent starts posting from the move-in date';
   const saveBtn=document.getElementById('btn-save-tenant'); if(saveBtn) saveBtn.textContent='Add tenant';
   document.getElementById('m-name').value='';
   document.getElementById('m-unit').value='';
@@ -4889,6 +4900,7 @@ function openEditModal(tid, tab){
   _showAllPaidBills = false; // each tenant starts with the compact paid list
   document.getElementById('modal-eyebrow').textContent='Edit Tenant';
   document.getElementById('modal-title').textContent=t.name; // textContent — no HTML-escaping needed
+  document.getElementById('modal-sub').textContent=['Unit '+t.unit, floorKey(t)].filter(Boolean).join(' · ');
   const saveBtn=document.getElementById('btn-save-tenant'); if(saveBtn) saveBtn.textContent='Save changes';
   document.getElementById('m-name').value=t.name;
   document.getElementById('m-unit').value=t.unit;

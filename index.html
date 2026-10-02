@@ -89,84 +89,99 @@
   <nav class="bottom-nav" id="bottom-nav" aria-label="Admin sections"></nav>
 </div>
 
-<!-- MODAL -->
+<!-- TENANT DRAWER (add / edit). Edit mode shows the Bills and Recurring tabs. -->
 <div class="modal-overlay" id="tenant-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
-  <div class="modal">
-    <div class="modal-eyebrow" id="modal-eyebrow">New Tenant</div>
-    <div class="modal-title" id="modal-title">Add a tenant</div>
+  <div class="modal oa-drawer">
+    <div class="dr-head">
+      <div><div class="sr-only" id="modal-eyebrow">New Tenant</div><div class="modal-title" id="modal-title">Add a tenant</div><div class="dr-sub" id="modal-sub">Rent starts posting from the move-in date</div></div>
+      <button type="button" class="dr-close" onclick="closeModal()" aria-label="Close"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+    </div>
     <div class="modal-tabs" id="modal-tabs" style="display:none">
-      <button class="modal-tab active" data-tab="info" onclick="switchModalTab('info',this)">Tenant Info</button>
+      <button class="modal-tab active" data-tab="info" onclick="switchModalTab('info',this)">Tenant info</button>
       <button class="modal-tab" data-tab="bills" onclick="switchModalTab('bills',this)">Bills</button>
       <button class="modal-tab" data-tab="templates" onclick="switchModalTab('templates',this)">Recurring</button>
     </div>
     <div class="modal-panel active" id="panel-info">
-      <div class="form-grid">
-        <div class="field"><label for="m-name">Full Name</label><input type="text" id="m-name" maxlength="80" placeholder="e.g. Maria Santos"></div>
-        <div class="field"><label for="m-unit">Unit Number</label><input type="text" id="m-unit" maxlength="40" placeholder="e.g. 301"></div>
-        <div class="field full">
-          <label for="m-code">Access Code</label>
+      <div class="dr-body">
+        <div class="dr-eyebrow">Tenant</div>
+        <div class="field"><label for="m-name">Full name</label><input type="text" id="m-name" maxlength="80" placeholder="e.g. Andrea Ramos"></div>
+        <div class="dr-row2 even">
+          <div class="field"><label for="m-unit">Unit</label><input type="text" id="m-unit" maxlength="40" placeholder="e.g. 305"></div>
+          <div class="field"><label for="m-floor">Floor</label><select id="m-floor" onchange="tenantFloorPicked(this)"></select></div>
+        </div>
+        <div class="dr-row2 even">
+          <div class="field"><label for="m-phone">Phone <span class="opt">(optional)</span></label><input type="text" id="m-phone" maxlength="30" placeholder="0917 000 0000"></div>
+          <div class="field"><label for="m-email">Email <span class="opt">(optional)</span></label><input type="email" id="m-email" maxlength="120" placeholder="name@email.com"></div>
+        </div>
+        <div class="field">
+          <label for="m-code">Portal access code</label>
           <div class="code-row">
-            <input type="text" id="m-code" maxlength="20" placeholder="Auto-generated" style="letter-spacing:0.1em;text-transform:uppercase" oninput="this.value=this.value.toUpperCase()">
-            <button class="btn-gen" onclick="generateCode()">Generate</button>
+            <input type="text" id="m-code" class="dr-code" maxlength="20" placeholder="Auto-generated" oninput="this.value=this.value.toUpperCase()">
+            <button type="button" class="btn-sec dr-gen" onclick="generateCode()"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M17 2l4 4-4 4M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4M21 13v2a3 3 0 0 1-3 3H3"/></svg><span>Generate</span></button>
+          </div>
+          <div class="field-hint">The tenant signs in with this. You can copy a one-tap portal link after saving.</div>
+        </div>
+        <hr class="dr-divider">
+        <div class="dr-eyebrow">Billing</div>
+        <select id="m-billing" class="sr-only" tabindex="-1" aria-hidden="true" onchange="onBillingModelChange()">
+          <option value="itemized">Itemized</option>
+          <option value="inclusive">All-inclusive</option>
+        </select>
+        <div class="bm-seg" role="radiogroup" aria-label="Billing model">
+          <button type="button" class="bm-opt" role="radio" data-model="itemized" onclick="setBillingModel('itemized')"><strong>Itemized</strong><span>Rent plus metered utilities</span></button>
+          <button type="button" class="bm-opt" role="radio" data-model="inclusive" onclick="setBillingModel('inclusive')"><strong>All-inclusive</strong><span>One flat monthly rate</span></button>
+        </div>
+        <div class="dr-row2 even">
+          <div class="field" id="m-rent-wrap" style="display:none" data-allowed="1">
+            <label for="m-rent">Monthly rent</label>
+            <div class="dr-money"><span aria-hidden="true">&#8369;</span><input type="text" id="m-rent" inputmode="decimal" autocomplete="off" placeholder="6,500"><em aria-hidden="true">/ month</em></div>
+          </div>
+          <div class="field" id="m-flatrate-wrap" style="display:none">
+            <label for="m-flatrate">All-inclusive rate</label>
+            <div class="dr-money"><span aria-hidden="true">&#8369;</span><input type="text" id="m-flatrate" inputmode="decimal" autocomplete="off" placeholder="7,500"><em aria-hidden="true">/ month</em></div>
+          </div>
+          <div class="field"><label for="m-movein">Move-in date</label><input type="date" id="m-movein"></div>
+          <div class="field" id="m-dueday-wrap" style="display:none">
+            <label for="m-dueday">Rent due day <span class="opt">(1&ndash;31)</span></label>
+            <input type="number" id="m-dueday" min="1" max="31" inputmode="numeric" placeholder="Move-in day">
           </div>
         </div>
-        <div class="field"><label for="m-phone">Phone <span style="font-weight:400;color:var(--muted)">(optional)</span></label><input type="text" id="m-phone" maxlength="30" placeholder="e.g. 0917 123 4567"></div>
-        <div class="field"><label for="m-email">Email <span style="font-weight:400;color:var(--muted)">(optional)</span></label><input type="email" id="m-email" maxlength="120" placeholder="e.g. tenant@email.com"></div>
-        <div class="field"><label for="m-movein">Move-in Date <span style="font-weight:400;color:var(--muted)">(optional)</span></label><input type="date" id="m-movein"><div class="field-hint">Reckoning date for billing cycles and paid-through dates.</div></div>
-        <div class="field"><label for="m-floor">Floor / Group</label><select id="m-floor" onchange="tenantFloorPicked(this)"></select></div>
-        <div class="field full">
-          <label for="m-billing">Billing Model</label>
-          <select id="m-billing" onchange="onBillingModelChange()">
-            <option value="itemized">Itemized — rent + utilities billed separately</option>
-            <option value="inclusive">All-inclusive — one flat monthly rate</option>
-          </select>
-        </div>
-        <div class="field full" id="m-flatrate-wrap" style="display:none">
-          <label for="m-flatrate">Monthly Flat Rate (&#8369;)</label>
-          <input type="text" id="m-flatrate" inputmode="decimal" autocomplete="off" placeholder="e.g. 6500">
-          <div class="field-hint">Shown to the tenant as their fixed monthly rate, utilities included. If the tenant has no recurring charge yet, one is created and bills post automatically each cycle.</div>
-        </div>
-        <div class="field full" id="m-rent-wrap" style="display:none" data-allowed="1">
-          <label for="m-rent">Monthly Rent (&#8369;) <span style="font-weight:400;color:var(--muted)">(optional)</span></label>
-          <input type="text" id="m-rent" inputmode="decimal" autocomplete="off" placeholder="e.g. 6500">
-          <div class="field-hint">Creates a recurring monthly rent bill that posts automatically each cycle. Utilities and other charges can be added under Recurring later.</div>
-        </div>
-        <div class="field" id="m-dueday-wrap" style="display:none">
-          <label for="m-dueday">Rent Due Day <span style="font-weight:400;color:var(--muted)">(1&ndash;31)</span></label>
-          <input type="number" id="m-dueday" min="1" max="31" inputmode="numeric" placeholder="Move-in day">
+        <div class="dr-explain" id="m-explain"></div>
+        <div id="new-tenant-bills">
+          <div id="bill-forms"></div>
+          <button type="button" class="dr-addlink" onclick="addBillForm()"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14"/></svg>Add a balance carried over from before</button>
         </div>
       </div>
-      <div id="new-tenant-bills">
-        <hr class="divider">
-        <div class="bills-section-label">Opening bills <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted)">(optional &mdash; balances carried over from before)</span></div>
-        <div id="bill-forms"></div>
-        <button class="btn-add-bill" onclick="addBillForm()">+ Add a bill</button>
-      </div>
-      <div class="modal-actions">
+      <div class="dr-foot">
         <button class="btn-cancel" onclick="closeModal()">Cancel</button>
-        <button class="btn-save" id="btn-save-tenant" onclick="saveTenant()">Save tenant</button>
+        <button class="btn-save" id="btn-save-tenant" onclick="saveTenant()">Add tenant</button>
       </div>
     </div>
     <div class="modal-panel" id="panel-bills">
+      <div class="dr-body">
       <div class="modal-tab-hint">Changes on this tab save instantly &mdash; no Save button needed.</div>
       <div id="bill-list-items"></div>
       <button class="btn-add-bill" id="btn-start-new-bill" onclick="startNewBill()">+ Add new bill</button>
       <div id="new-bill-inline" style="display:none"></div>
-      <div class="modal-actions">
-        <button class="btn-cancel" onclick="closeModal()">Done</button>
+      </div>
+      <div class="dr-foot">
+        <button class="btn-save" onclick="closeModal()">Done</button>
       </div>
     </div>
 
+    
     <div class="modal-panel" id="panel-templates">
+      <div class="dr-body">
       <div class="modal-tab-hint">Changes on this tab save instantly &mdash; no Save button needed.</div>
-      <p style="font-size:12px;color:var(--muted);margin-bottom:16px;line-height:1.6;">
+      <p class="dr-note">
         Recurring charges post a bill every cycle, ahead of the due date (rent is paid in advance). Set a label, amount, and the day of month it's due.
       </p>
       <div id="tmpl-list"></div>
       <button class="btn-add-bill" id="btn-start-new-tmpl" onclick="startNewTemplate()">+ Add template</button>
       <div id="new-tmpl-inline" style="display:none"></div>
-      <div class="modal-actions">
-        <button class="btn-cancel" onclick="closeModal()">Done</button>
+      </div>
+      <div class="dr-foot">
+        <button class="btn-save" onclick="closeModal()">Done</button>
       </div>
     </div>
   </div>
