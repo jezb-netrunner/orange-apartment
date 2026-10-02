@@ -3292,39 +3292,48 @@ function openPayModal(tid) {
   requestAnimationFrame(() => document.getElementById('pay-amount').focus());
 }
 function closePayModal() { closeModalEl('pay-modal'); _payPlan = null; }
-function payFill(v) { document.getElementById('pay-amount').value = v; renderPayPreview(); }
+function payFill(v) { document.getElementById('pay-amount').value = fmtMoney(v); renderPayPreview(); }
 function renderPayPreview() {
   const t = tenants.find(x => x.id === document.getElementById('pay-tenant').value);
   const box = document.getElementById('pay-preview');
   const btnEl = document.getElementById('pay-confirm');
+  const card = document.getElementById('pay-tenant-card');
+  const fillBox = document.getElementById('pay-fills');
   _payPlan = null;
-  if(!t) { box.innerHTML = ''; btnEl.disabled = true; return; }
-  const open = r2(t.bills.reduce((s, b) => s + billOpen(b), 0));
+  if(!t) { box.innerHTML = ''; fillBox.innerHTML = ''; card.innerHTML = ''; btnEl.disabled = true; return; }
+  const s = tenantSummary(t);
+  const open = r2(t.bills.reduce((x, b) => x + billOpen(b), 0));
   const prim = primaryTemplate(t);
+  card.innerHTML = avatar(t.name, 38) + '<span class="pay-pick-text"><strong>' + esc(t.name) + ' · Unit ' + esc(t.unit) + '</strong>'
+    + '<span>' + (open ? 'Owes ' + peso(open) : 'Nothing owed') + (s.primary && s.primary.paidThrough ? ' · rent paid through ' + shortDateY(s.primary.paidThrough) : '') + '</span></span>' + icon('chevDown');
   const advWrap = document.getElementById('pay-advance-wrap');
   advWrap.style.display = prim ? '' : 'none';
-  const fills = '<div class="pay-fills">' + (open ? '<button type="button" class="fchip" onclick="payFill(' + open + ')">Full balance ' + peso(open) + '</button>' : '')
-    + (prim ? '<button type="button" class="fchip" onclick="payFill(' + r2(open + tmplRate(prim)) + ')">' + (open ? 'Balance + 1 month' : '1 month advance') + ' ' + peso(r2(open + tmplRate(prim))) + '</button>' : '') + '</div>';
   const raw = document.getElementById('pay-amount').value;
   const amt = normalizeAmount(raw);
+  const fill = (v, label) => '<button type="button" class="pay-fill' + (amt > 0 && Math.abs(amt - v) < 0.005 ? ' on' : '') + '" onclick="payFill(' + v + ')">' + label + ' <strong>' + peso(v) + '</strong></button>';
+  fillBox.innerHTML = (open ? fill(open, 'Full balance') : '') + (prim ? fill(r2(open + tmplRate(prim)), open ? 'Balance + 1 month' : '1 month advance') : '');
   const date = document.getElementById('pay-date').value;
   let body = '';
   if(amt > 0 && date) {
     const note = document.getElementById('pay-note').value.trim();
     const plan = allocatePayment(t, [{ amount: amt, date, note }], { today: todayISO(), advance: document.getElementById('pay-advance').checked, uid, rid: _payRid });
     _payPlan = { tid: t.id, rev: t.rev, plan, amt };
-    body = '<div class="pay-lines">' + plan.lines.map(l => '<div class="pay-line' + (l.kind === 'advance' ? ' adv' : '') + '">'
-      + '<div><div class="pl-label">' + esc(l.label) + (l.period ? ' <span class="muted">· ' + fmtYM(l.period, 'short') + '</span>' : '') + '</div>'
-      + '<div class="pl-sub">' + (l.kind === 'advance' ? 'Advance' + (l.window ? ' · covers ' + shortDate(l.window.start) + ' – ' + shortDate(addDaysISO(l.window.end, -1)) : ' · due ' + shortDate(l.due))
-          : (l.due ? 'Due ' + shortDate(l.due) : 'No due date')) + (l.settles ? ' · settled' : ' · ' + peso(l.remaining) + ' left') + '</div></div>'
-      + '<div class="pl-amt">' + peso(l.apply) + '</div></div>').join('') + '</div>';
-    if(plan.leftover > 0.005) body += '<div class="pay-warn">' + icon('alert') + peso(plan.leftover) + ' is more than this tenant owes'
-      + (prim ? (document.getElementById('pay-advance').checked ? '.' : ' — tick "apply the excess as advance" to carry it into future cycles.')
-              : ' and there is no recurring rent to apply an advance to. Lower the amount or add a monthly rent template first.') + '</div>';
+    const n = plan.lines.length;
+    body = '<div class="pay-box"><div class="pay-box-head"><span>How it will be applied</span><span>' + n + ' item' + (n !== 1 ? 's' : '') + '</span></div>'
+      + plan.lines.map(l => '<div class="pay-line' + (l.kind === 'advance' ? ' adv' : l.settles ? '' : ' part') + '">'
+        + '<span class="pl-ic">' + icon('check') + '</span>'
+        + '<div class="pl-main"><div class="pl-label">' + esc(l.label) + (l.period ? ' <span class="muted">· ' + fmtYM(l.period, 'short') + '</span>' : '') + '</div>'
+        + '<div class="pl-sub">' + (l.kind === 'advance' ? 'Advance' + (l.window ? ' · covers ' + shortDate(l.window.start) + ' – ' + shortDate(addDaysISO(l.window.end, -1)) : ' · due ' + shortDate(l.due))
+            : (l.due ? 'Due ' + shortDate(l.due) : 'No due date')) + (l.settles ? ' · settled' : ' · ' + peso(l.remaining) + ' left') + '</div></div>'
+        + '<div class="pl-amt">' + peso(l.apply) + '</div></div>').join('') + '</div>';
+    if(plan.leftover > 0.005) body += '<div class="pay-warn">' + icon('alert') + '<span>' + peso(plan.leftover) + ' is more than this tenant owes'
+      + (prim ? (document.getElementById('pay-advance').checked ? '.' : ' — tick "Apply any excess as advance rent" to carry it into future cycles.')
+              : ' and there is no recurring rent to apply an advance to. Lower the amount or add a monthly rent template first.') + '</span></div>';
   }
-  box.innerHTML = '<div class="pay-owe">Open balance: <strong>' + peso(open) + '</strong>' + (tenantSummary(t).primary && tenantSummary(t).primary.paidThrough ? ' · rent paid through ' + shortDateY(tenantSummary(t).primary.paidThrough) : '') + '</div>' + fills + body;
-  btnEl.disabled = !(_payPlan && _payPlan.plan.lines.length && _payPlan.plan.leftover <= 0.005);
-  btnEl.textContent = _payPlan && _payPlan.plan.lines.length ? 'Record ' + '₱' + amt.toLocaleString() : 'Record payment';
+  box.innerHTML = body;
+  const over = !!(_payPlan && _payPlan.plan.leftover > 0.005);
+  btnEl.disabled = !(_payPlan && _payPlan.plan.lines.length && !over);
+  btnEl.textContent = over ? 'Fix the amount first' : _payPlan && _payPlan.plan.lines.length ? 'Record ₱' + fmtMoney(amt) : 'Record payment';
 }
 async function confirmPayment() {
   const p = _payPlan;

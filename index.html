@@ -466,26 +466,37 @@
   </div>
 </div>
 
-<!-- RECEIVE PAYMENT MODAL -->
+<!-- RECEIVE PAYMENT MODAL (a right-side drawer on desktop, a full-screen sheet on phones) -->
 <div id="pay-modal" role="dialog" aria-modal="true" aria-labelledby="pay-title">
-  <div class="qb-box">
-    <div class="qb-eyebrow">Payment</div>
-    <div class="qb-title" id="pay-title">Receive payment</div>
-    <div class="form-grid">
-      <div class="field full">
-        <label for="pay-tenant">Tenant</label>
-        <select id="pay-tenant" onchange="renderPayPreview()"></select>
-      </div>
-      <div class="field"><label for="pay-amount">Amount received (&#8369;)</label><input type="text" id="pay-amount" inputmode="decimal" autocomplete="off" placeholder="0" oninput="renderPayPreview()"></div>
-      <div class="field"><label for="pay-date">Date received</label><input type="date" id="pay-date" onchange="renderPayPreview()"></div>
-      <div class="field full"><label for="pay-note">Reference <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted)">(optional)</span></label><input type="text" id="pay-note" maxlength="120" placeholder="e.g. GCash ref #1234567" oninput="renderPayPreview()"></div>
-      <div class="field full check-field" id="pay-advance-wrap">
-        <input type="checkbox" id="pay-advance" checked onchange="renderPayPreview()">
-        <label for="pay-advance">Apply any excess as advance rent <span class="opt">(pays the next cycles ahead of time)</span></label>
-      </div>
+  <div class="qb-box oa-drawer">
+    <div class="dr-head">
+      <div><div class="qb-title" id="pay-title">Receive payment</div><div class="dr-sub">Applied to the oldest open bills first</div></div>
+      <button type="button" class="dr-close" onclick="closePayModal()" aria-label="Close"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
     </div>
-    <div id="pay-preview" class="pay-preview" aria-live="polite"></div>
-    <div class="qb-actions">
+    <div class="dr-body">
+      <div class="field">
+        <label for="pay-tenant">Tenant</label>
+        <div class="pay-pick">
+          <div class="pay-pick-card" id="pay-tenant-card" aria-hidden="true"></div>
+          <select id="pay-tenant" onchange="renderPayPreview()"></select>
+        </div>
+      </div>
+      <div class="field">
+        <label for="pay-amount">Amount received</label>
+        <div class="pay-amount"><span aria-hidden="true">&#8369;</span><input type="text" id="pay-amount" inputmode="decimal" autocomplete="off" placeholder="0" oninput="renderPayPreview()"></div>
+        <div class="pay-fills" id="pay-fills"></div>
+      </div>
+      <div class="dr-row2">
+        <div class="field"><label for="pay-date">Date</label><input type="date" id="pay-date" onchange="renderPayPreview()"></div>
+        <div class="field"><label for="pay-note">Note <span class="opt">(optional)</span></label><input type="text" id="pay-note" maxlength="120" placeholder="GCash ref, cash, bank…" oninput="renderPayPreview()"></div>
+      </div>
+      <div class="dr-check" id="pay-advance-wrap">
+        <label class="oa-check"><input type="checkbox" id="pay-advance" checked onchange="renderPayPreview()"><span class="oa-check-box" aria-hidden="true"><svg class="ico" viewBox="0 0 24 24" focusable="false"><path d="M5 12l5 5 9-10"/></svg></span></label>
+        <label for="pay-advance" class="dr-check-text"><strong>Apply any excess as advance rent</strong><span>Extra money pays the next rent cycles</span></label>
+      </div>
+      <div id="pay-preview" class="pay-preview" aria-live="polite"></div>
+    </div>
+    <div class="dr-foot">
       <button class="btn-cancel" onclick="closePayModal()">Cancel</button>
       <button class="btn-save" id="pay-confirm" onclick="confirmPayment()">Record payment</button>
     </div>
