@@ -2607,29 +2607,9 @@ function renderTenantDetail(t) {
     +   '<button type="button" class="link-btn oa-more"' + tidA + ' onclick="openEditModal(this.dataset.tid,\'bills\')">Manage bills' + icon('next') + '</button></div>'
     + '</section>';
 
-  // Payments received: every receipt (partial payments and advances
-  // included), newest first. One Receive-payment receipt spread over
-  // several bills is one row, with Undo (for a payment recorded by mistake).
-  const receipts = [], byRid = new Map();
-  t.bills.forEach(b => {
-    let logged = 0;
-    (b.payments || []).forEach(pay => {
-      const v = Number(pay.amount) || 0; logged += v;
-      if(!v) return;
-      if(pay.rid && v > 0) {
-        let g = byRid.get(pay.rid);
-        if(!g) { g = { date: isoOrEmpty(pay.date), dates: new Set(), amount: 0, note: pay.note || '', bills: [], rid: pay.rid }; byRid.set(pay.rid, g); receipts.push(g); }
-        g.dates.add(isoOrEmpty(pay.date));
-        g.amount = r2(g.amount + v);
-        if(!g.bills.includes(b)) g.bills.push(b);
-      } else receipts.push({ date: isoOrEmpty(pay.date), amount: v, note: pay.note || '', bills: [b] });
-    });
-    if(b.status === 'paid') { const resid = r2((Number(b.amount) || 0) - logged); if(resid > 0) receipts.push({ date: isoOrEmpty(b.paidDate), amount: resid, note: '', bills: [b] }); }
-  });
-  receipts.sort((x, y) => (y.date || '').localeCompare(x.date || ''));
-  // "Rent – Sep, Water – Aug" (no month suffix when the label already names one).
-  const appliedTo = x => x.bills.map(b => { const per = billPeriod(b), m = per ? _monthName(per, 'short') : '';
-    return esc(b.label) + (m && !new RegExp('\\b(' + m + '|' + _monthName(per) + '|' + per.slice(0, 4) + ')\\b', 'i').test(b.label || '') ? ' – ' + m : ''); }).join(', ');
+  // Payments received: every receipt, newest first (Undo for a Receive-payment receipt).
+  const receipts = tenantReceipts(t);
+  const appliedTo = receiptAppliedTo;
   const payRow = x => '<div class="oa-tr td-pay">'
     + '<span class="oa-cell-due">' + (x.dates && x.dates.size > 1 ? Array.from(x.dates).filter(Boolean).sort().map(d => shortDate(d)).join(', ') : x.date ? shortDateY(x.date) : 'No date') + '</span>'
     + '<span class="td-pay-note">' + (x.note ? esc(x.note) : '<span class="oa-muted-sm">&mdash;</span>')
@@ -2873,18 +2853,47 @@ async function reconApplyCredit(tid, tmplId) {
 const BILL_VIEWS = { open:'Open', overdue:'Overdue', soon:'Due soon', awaiting:'Needs amount', paid:'Paid', all:'All' };
 let billView = 'open';
 let _billingTab = 'bills'; // 'bills' | 'recurring'
+let billSelection = new Set(); // selected bills: 'tid|bi'
+let _billFiltersOpen = false;
 
 function renderBillingModule() {
-  const actions = btn('Receive payment', 'openPayModal()', { primary: true, icon: 'cash' })
-    + btn('Add bill', 'openQuickBill()', { icon: 'plus' })
-    + '<button type="button" class="btn-icon lg" aria-label="More billing actions" aria-haspopup="menu" onclick="openBillingMenu(this)">' + icon('kebab') + '</button>';
-  const tabs = '<div class="seg" role="tablist">'
-    + ['bills', 'recurring'].map(k => '<button type="button" role="tab" aria-selected="' + (_billingTab === k) + '" class="seg-btn' + (_billingTab === k ? ' active' : '') + '" onclick="_billingTab=\'' + k + '\';rerenderAdmin()">'
-      + (k === 'bills' ? 'Bills' : 'Recurring &amp; checker') + '</button>').join('') + '</div>';
-  return pageHead('Billing', '', actions) + tabs + (_billingTab === 'recurring' ? renderRecurringTab() : renderBillsTab());
+  if(_billingTab === 'recurring') {
+    return pageHead('Recurring billing', 'Automatic posting and the reconciliation checker', btn('Run now', 'runAutoBilling({manual:true})', { icon: 'repeat' }), { label: 'Billing', onclick: '_billingTab=\'bills\';rerenderAdmin()' })
+      + renderRecurringTab();
+  }
+  const today = todayISO(), ym = _currentYM();
+  let open = 0, openN = 0, overdue = 0, overdueN = 0, formerOver = 0, soon = 0, soonN = 0, firstSoon = '';
+  const tally = (t, former) => (t.bills || []).forEach(b => {
+    const o = billOpen(b);
+    if(o <= 0.005 || billAwaitingAmount(b)) return;
+    open += o; openN++;
+    if(getDueStatus(b) === 'overdue') { overdue += o; overdueN++; if(former) formerOver += o; }
+    else if(!former && b.due && diffDays(today, b.due) >= 0 && diffDays(today, b.due) <= 6) { soon += o; soonN++; if(!firstSoon || b.due < firstSoon) firstSoon = b.due; }
+  });
+  tenants.forEach(t => tally(t, false));
+  archivedTenants.forEach(t => tally(t, true));
+  const cat = outstandingByCategory(allTenants().flatMap(t => t.bills || []));
+  const all = allTenants();
+  const collected = r2(cashInMonth(all, ym) + cashInMonth(all, ym, true));
+  const billed = r2(billedInMonth(all, ym) + billedInMonth(all, ym, true));
+  const pct = billed > 0 ? Math.round(collected / billed * 100) : null;
+  const split = [cat.rent ? 'rent ' + peso(cat.rent) : '', cat.utilities ? 'utilities ' + peso(cat.utilities) : '', cat.other ? 'other ' + peso(cat.other) : ''].filter(Boolean).join(', ');
+  const tile = (label, value, sub, cls, onclick) => '<button type="button" class="oa-stat" onclick="' + onclick + '"><span class="oa-stat-label">' + label + '</span><strong class="oa-stat-fig' + (cls ? ' ' + cls : '') + '">' + value + '</strong><span class="oa-stat-sub">' + sub + '</span></button>';
+  const tiles = '<div class="oa-stats">'
+    + tile('Outstanding', peso(r2(open)), openN + ' bill' + (openN !== 1 ? 's' : '') + (split ? ' · ' + split : ''), '', 'billView=\'open\';rerenderAdmin()')
+    + tile('Overdue', overdue ? peso(r2(overdue)) : 'None', overdueN ? overdueN + ' bill' + (overdueN !== 1 ? 's' : '') + (formerOver ? ' · ' + peso(r2(formerOver)) + ' from former tenants' : '') : 'nothing past due', overdue ? 'bad' : 'good', 'billView=\'overdue\';rerenderAdmin()')
+    + tile('Due in 7 days', peso(r2(soon)), soonN ? soonN + ' bill' + (soonN !== 1 ? 's' : '') + ' · first one ' + (firstSoon === today ? 'today' : shortDate(firstSoon)) : 'nothing due this week', '', 'billView=\'soon\';rerenderAdmin()')
+    + '<div class="oa-stat"><span class="oa-stat-label">Collected · ' + _monthName(ym) + '</span><strong class="oa-stat-fig">' + peso(collected) + '</strong>'
+    +   '<span class="oa-stat-progress"><span class="oa-meter" role="img" aria-label="' + (pct === null ? 'Nothing billed yet' : pct + '% of billed') + '"><i style="width:' + Math.min(100, pct || 0) + '%"></i></span><span class="oa-stat-sub">' + (pct === null ? 'nothing billed yet' : pct + '% of ' + peso(billed)) + '</span></span></div>'
+    + '</div>';
+  const actions = btn('Add bill', 'openQuickBill()', { icon: 'plus' }) + btn('Receive payment', 'openPayModal()', { primary: true, icon: 'cash' })
+    + '<button type="button" class="oa-icon-btn lg" aria-label="More billing actions" aria-haspopup="menu" onclick="openBillingMenu(this)">' + icon('kebab') + '</button>';
+  const sub = openN + ' open bill' + (openN !== 1 ? 's' : '') + ' · ' + peso(r2(open)) + ' outstanding';
+  return pageHead('Billing', sub) + tiles + renderBillsTab(actions) + _recentPaymentsCard();
 }
 function openBillingMenu(anchor) {
   openMenu(anchor, [
+    { label:'Recurring billing & checker', icon:'repeat', fn:()=>{ _billingTab = 'recurring'; rerenderAdmin(); window.scrollTo(0, 0); } },
     { label:'Generate bills for a month', icon:'calendar', fn:()=>openGenModal() },
     { label:'Run automatic billing now', icon:'repeat', fn:()=>runAutoBilling({ manual: true }) },
     { label:'Export bills (CSV)', icon:'download', fn:()=>exportCSV() }
@@ -2893,65 +2902,84 @@ function openBillingMenu(anchor) {
 
 function _billFiltersActive() { return !!(filterTenantId || filterFloor || filterMonth || filterSearch.trim()); }
 function clearBillFilters() { filterTenantId = ''; filterFloor = ''; filterMonth = ''; filterSearch = ''; tableRowLimit = 50; rerenderAdmin(); }
-function renderBillsTab() {
+function _billViewCount(v) { const keep = billView; billView = v; const n = billRowsForView(true).length; billView = keep; return n; }
+function renderBillsTab(actions) {
   const floors = floorList();
   // A filter pointing at a tenant/floor that no longer exists (archived)
   // would silently empty the list while the dropdown reads "All".
   if(filterTenantId && !tenants.some(t => t.id === filterTenantId)) filterTenantId = '';
   if(filterFloor && filterFloor !== '__none__' && !floors.includes(filterFloor)) filterFloor = '';
-  const sel = (id, label, opts, val, onch) => '<select id="' + id + '" class="tb-select" aria-label="' + label + '" onchange="' + onch + '">' + opts + '</select>';
+  const sel = (id, label, opts, onch) => '<select id="' + id + '" class="tb-select" aria-label="' + label + '" onchange="' + onch + '">' + opts + '</select>';
   const tenantOpts = '<option value="">All tenants</option>' + tenants.slice().sort((a, b) => unitRank(a.unit) - unitRank(b.unit) || a.name.localeCompare(b.name))
     .map(t => '<option value="' + esc(t.id) + '"' + (filterTenantId === t.id ? ' selected' : '') + '>' + esc(t.name) + ' · ' + esc(t.unit) + '</option>').join('');
   const floorOpts = '<option value="">All floors</option>' + floors.map(f => '<option value="' + esc(f) + '"' + (filterFloor === f ? ' selected' : '') + '>' + esc(f) + '</option>').join('')
     + (tenants.some(t => !floorKey(t)) ? '<option value="__none__"' + (filterFloor === '__none__' ? ' selected' : '') + '>No floor set</option>' : '');
+  const views = ['open', 'overdue', 'soon'].concat(_billViewCount('awaiting') || billView === 'awaiting' ? ['awaiting'] : [], ['paid'], billView === 'all' ? ['all'] : []);
+  const tabs = segTabs(views.map(k => ({ label: BILL_VIEWS[k], count: k === 'paid' || k === 'all' ? null : _billViewCount(k), active: billView === k,
+    onclick: 'billView=\'' + k + '\';tableRowLimit=50;billSelection.clear();rerenderAdmin()' })), 'on-bg bl-tabs', 'Bill status');
+  const nF = [filterTenantId, filterFloor, filterMonth].filter(Boolean).length;
+  const showF = _billFiltersOpen || nF > 0;
   _postRender.push(renderBillRows);
-  return '<div class="chips-row" role="group" aria-label="Bill status">'
-    + Object.entries(BILL_VIEWS).map(([k, l]) => '<button type="button" class="fchip' + (billView === k ? ' active' : '') + '" aria-pressed="' + (billView === k) + '" onclick="billView=\'' + k + '\';tableRowLimit=50;rerenderAdmin()">' + l + '</button>').join('')
-    + '</div>'
-    + '<div class="toolbar">'
-    +   '<input type="search" id="bill-search" class="tb-search" placeholder="Search bill or tenant…" value="' + esc(filterSearch) + '" oninput="filterSearch=this.value;tableRowLimit=50;renderBillRows()" aria-label="Search bills">'
-    +   sel('fb-month', 'Month', renderMonthOptions(), filterMonth, "if(this.value==='__more__'){_showAllMonths=true;rerenderAdmin();return;}filterMonth=this.value;tableRowLimit=50;renderBillRows()")
-    +   (floors.length ? sel('fb-floor', 'Floor', floorOpts, filterFloor, 'filterFloor=this.value;tableRowLimit=50;renderBillRows()') : '')
-    +   sel('fb-tenant', 'Tenant', tenantOpts, filterTenantId, 'filterTenantId=this.value;tableRowLimit=50;renderBillRows()')
-    +   (_billFiltersActive() ? '<button type="button" class="tb-btn" onclick="clearBillFilters()">Clear filters</button>' : '')
-    + '</div>'
-    + '<div id="bill-rows"></div>';
+  return '<div class="oa-toolbar bl-toolbar">' + tabs
+    + '<label class="oa-search">' + icon('search') + '<input type="search" id="bill-search" placeholder="Tenant, unit or bill" value="' + esc(filterSearch) + '" oninput="filterSearch=this.value;tableRowLimit=50;renderBillRows()" aria-label="Search bills"></label>'
+    + '<button type="button" class="oa-icon-btn lg bl-filter-btn' + (showF ? ' on' : '') + '" aria-expanded="' + showF + '" aria-label="Filters' + (nF ? ' (' + nF + ' on)' : '') + '" title="Month, floor and tenant filters" onclick="_billFiltersOpen=!_billFiltersOpen;rerenderAdmin()">' + icon('sliders') + (nF ? '<span class="oa-dot-n">' + nF + '</span>' : '') + '</button>'
+    + '<span class="bl-actions">' + actions + '</span></div>'
+    + (showF ? '<div class="oa-toolbar bl-filters">'
+      +   sel('fb-month', 'Month', renderMonthOptions(), "if(this.value==='__more__'){_showAllMonths=true;rerenderAdmin();return;}filterMonth=this.value;tableRowLimit=50;renderBillRows()")
+      +   (floors.length ? sel('fb-floor', 'Floor', floorOpts, 'filterFloor=this.value;tableRowLimit=50;renderBillRows()') : '')
+      +   sel('fb-tenant', 'Tenant', tenantOpts, 'filterTenantId=this.value;tableRowLimit=50;renderBillRows()')
+      +   (billView !== 'all' ? '<button type="button" class="link-btn" onclick="billView=\'all\';tableRowLimit=50;billSelection.clear();rerenderAdmin()">Show all bills</button>' : '')
+      +   (_billFiltersActive() ? '<button type="button" class="link-btn" onclick="clearBillFilters()">Clear filters</button>' : '')
+      + '</div>' : '')
+    + '<section class="card oa-table-card bl-card" id="bill-rows"></section>';
 }
 
-function billRowsForView() {
-  let list = tenants;
-  if(filterTenantId) list = list.filter(t => t.id === filterTenantId);
-  if(filterFloor) { const want = floorNorm(filterFloor === '__none__' ? '' : filterFloor); list = list.filter(t => floorNorm(t.floor) === want); }
-  const q = filterSearch.trim().toLowerCase();
+// Rows for the current view. Former tenants' unpaid bills show (read-only)
+// in the open views, since they are still owed.
+function billRowsForView(noFilters) {
+  const today = todayISO();
+  const q = noFilters ? '' : filterSearch.trim().toLowerCase();
   const rows = [];
-  list.forEach(t => {
+  const scan = (t, former) => {
     const tHit = q && [t.name, t.unit, t.floor, t.code].some(v => String(v || '').toLowerCase().includes(q));
-    t.bills.forEach((b, bi) => {
+    (t.bills || []).forEach((b, bi) => {
       const ds = getDueStatus(b), open = billOpen(b);
       const isOpen = b.status !== 'paid' && open > 0.005;
       const awaiting = ds === 'awaiting';
+      // Marked paid from this list a moment ago: stays, with Undo.
+      if(!former && billView !== 'paid' && _justPaidEntry(t.id, bi)) { rows.push({ tenant: t, bill: b, bi, ds, open, former }); return; }
       if(billView === 'open' && !isOpen && !awaiting) return;
       if(billView === 'awaiting' && !awaiting) return;
       if(billView === 'overdue' && !(isOpen && ds === 'overdue')) return;
-      if(billView === 'soon' && !(isOpen && (ds === 'grace' || ds === 'due-today' || ds === 'due-soon'))) return;
+      if(billView === 'soon' && !(isOpen && (ds === 'grace' || (b.due && diffDays(today, b.due) >= 0 && diffDays(today, b.due) <= 6)))) return;
       if(billView === 'paid' && ds !== 'paid') return;
+      if(former && !isOpen) return;
       // Undated open bills stay visible in every month — they belong to none.
-      if(filterMonth && billPeriod(b) !== filterMonth && !(!billPeriod(b) && (isOpen || awaiting))) return;
+      if(!noFilters && filterMonth && billPeriod(b) !== filterMonth && !(!billPeriod(b) && (isOpen || awaiting))) return;
       if(q && !tHit && ![b.label, b.remark].some(v => String(v || '').toLowerCase().includes(q))) return;
-      rows.push({ tenant: t, bill: b, bi, ds, open });
+      rows.push({ tenant: t, bill: b, bi, ds, open, former });
     });
-  });
+  };
+  let list = tenants;
+  if(!noFilters && filterTenantId) list = list.filter(t => t.id === filterTenantId);
+  if(!noFilters && filterFloor) { const want = floorNorm(filterFloor === '__none__' ? '' : filterFloor); list = list.filter(t => floorNorm(t.floor) === want); }
+  list.forEach(t => scan(t, false));
+  if(noFilters || !filterTenantId) {
+    let arch = archivedTenants;
+    if(!noFilters && filterFloor) { const want = floorNorm(filterFloor === '__none__' ? '' : filterFloor); arch = arch.filter(t => floorNorm(t.floor) === want); }
+    arch.forEach(t => scan(t, true));
+  }
   return rows;
 }
 
 function renderBillRows() {
   const c = document.getElementById('bill-rows');
   if(!c) return;
-  if(!tenants.length) { c.innerHTML = '<div class="empty-state"><p>Add a tenant first — bills belong to tenants.</p>' + btn('Add tenant', 'openAddModal()', { primary: true, icon: 'plus' }) + '</div>'; return; }
+  if(!tenants.length && !archivedTenants.length) { c.innerHTML = '<div class="empty-state"><p>Add a tenant first — bills belong to tenants.</p>' + btn('Add tenant', 'openAddModal()', { primary: true, icon: 'plus' }) + '</div>'; return; }
   const rows = billRowsForView();
   if(!rows.length) {
-    c.innerHTML = '<div class="empty-state"><div class="icon">&#10003;</div><p>' + (billView === 'open' && !_billFiltersActive() ? 'No open bills — everyone is settled.' : 'No bills match these filters.') + '</p>'
-      + (_billFiltersActive() ? btn('Clear filters', 'clearBillFilters()', {}) : '') + '</div>';
+    c.innerHTML = '<div class="oa-empty">' + icon('check') + ' ' + (billView === 'open' && !_billFiltersActive() ? 'No open bills — everyone is settled.' : 'No bills match these filters.')
+      + (_billFiltersActive() ? ' <button type="button" class="link-btn" onclick="clearBillFilters()">Clear filters</button>' : '') + '</div>';
     return;
   }
   renderTableView(c, rows);
@@ -4181,11 +4209,6 @@ function floorList() {
   return Array.from(set).sort((a,b)=>floorRank(a)-floorRank(b) || a.localeCompare(b));
 }
 
-// Badge colour class from a derived due-status.
-function dsBadgeClass(ds){
-  return { overdue:'ds-overdue', 'due-today':'ds-overdue', 'due-soon':'ds-due', grace:'ds-due',
-           upcoming:'ds-upcoming', 'no-date':'ds-upcoming', awaiting:'ds-due', paid:'ds-paid' }[ds] || 'ds-upcoming';
-}
 // ── BILLS TABLE (Billing module) ──
 function loadMoreTableRows() { tableRowLimit += 50; renderBillRows(); }
 
@@ -4199,9 +4222,8 @@ function sortTable(col) {
 let tableRowLimit = 50; // initial cap for table rows
 const _isPhone = () => window.innerWidth <= 768;
 
-// rows: [{tenant, bill, bi}] from billRowsForView(). Wide screens get a
-// sortable table; phones get a compact list (an 800px table that scrolls
-// sideways is unusable one-handed).
+// rows: [{tenant, bill, bi, former}] from billRowsForView(). One grid of
+// rows (cards on phones) with a checkbox column for bulk actions.
 function renderTableView(c, rows) {
   // Sort by selected column. Rows with no date always sort last, in either
   // direction, so "sort by paid date" doesn't bury real data under blanks.
@@ -4232,101 +4254,158 @@ function renderTableView(c, rows) {
     return r;
   });
 
-  const dueStatusLabel = { overdue:'Overdue', 'due-today':'Due Today', 'due-soon':'Due Soon', grace:'In grace period', upcoming:'Upcoming', 'no-date':'Unscheduled', awaiting:'Needs amount', paid:'Paid' };
   const totalRows = rows.length;
   const capped = rows.slice(0, tableRowLimit);
-  const openSum = r2(rows.reduce((s, r) => s + billOpen(r.bill), 0));
-  const showMoreBtn = totalRows > tableRowLimit
-    ? '<div class="more-row"><button type="button" class="btn-sec" onclick="loadMoreTableRows()">Show more (' + (totalRows - tableRowLimit) + ' remaining)</button></div>'
-    : '';
-  const countNote = '<div class="list-note">' + (capped.length < totalRows ? 'Showing ' + capped.length + ' of ' : '') + totalRows + ' bill' + (totalRows !== 1 ? 's' : '')
-    + (openSum ? ' · ' + peso(openSum) + ' open' : '') + '</div>';
-
-  if (_isPhone()) {
-    const sortOpts = [['due','Due date'],['status','Urgency'],['tenant','Tenant'],['unit','Unit'],['remaining','Balance'],['paidDate','Paid date']];
-    const sortSel = '<select class="tb-select sm" aria-label="Sort bills" onchange="tableSortCol=this.value;tableSortDir=(this.value===\'remaining\'||this.value===\'paidDate\')?\'desc\':\'asc\';renderBillRows()">'
-      + sortOpts.map(([k,l]) => '<option value="'+k+'"'+(tableSortCol===k?' selected':'')+'>Sort: '+l+'</option>').join('') + '</select>';
-    c.innerHTML = '<div class="list-head">' + countNote + sortSel + '</div><div class="b-list">' + capped.map(r => {
-      const b = r.bill, t = r.tenant;
-      const ds = b.status === 'paid' ? 'paid' : getDueStatus(b);
-      const isPaid = b.status === 'paid';
-      const cls = { overdue:'overdue', grace:'soon', 'due-today':'today', 'due-soon':'soon', paid:'paid' }[ds] || 'normal';
-      const chipTxt = isPaid ? 'Paid' + (b.paidDate ? ' · ' + shortDate(b.paidDate) : '')
-        : ds === 'awaiting' ? 'Needs amount'
-        : b.due ? (dueStatusLabel[ds] || 'Due') + ' · ' + shortDate(b.due) : 'No due date';
-      return '<div class="b-row" data-tid="' + esc(t.id) + '" data-bi="' + r.bi + '">'
-        + '<div class="b-main"><div class="b-label">' + esc(b.label) + '</div>'
-        + '<div class="b-sub"><a href="#/tenants/' + encodeURIComponent(t.id) + '">' + esc(t.name) + '</a> · ' + esc(t.unit) + '</div>'
-        + '<div class="b-sub"><span class="due-chip ' + cls + '">' + chipTxt + '</span></div></div>'
-        + '<div class="b-right"><div class="b-amt">' + peso(isPaid ? b.amount : billOpen(b)) + '</div>'
-        + '<div class="b-actions">'
-        + (isPaid ? '' : ds === 'awaiting'
-            ? '<button type="button" class="btn-mini" onclick="const x=this.closest(\'[data-tid]\');openEditBillFromTable(x.dataset.tid,+x.dataset.bi)">' + icon('edit') + '<span>Enter amount</span></button>'
-            : '<button type="button" class="btn-mini pay" onclick="const x=this.closest(\'[data-tid]\');quickMarkPaid(x.dataset.tid,+x.dataset.bi)">' + icon('check') + '<span>Paid</span></button>')
-        + '<button type="button" class="btn-icon" aria-label="Bill actions" aria-haspopup="menu" onclick="const x=this.closest(\'[data-tid]\');openBillMenu(this,x.dataset.tid,+x.dataset.bi)">' + icon('kebab') + '</button>'
-        + '</div></div></div>';
-    }).join('') + '</div>' + showMoreBtn;
-    return;
-  }
-
-  function thHtml(col, label, cls) {
+  const key = r => r.tenant.id + '|' + r.bi;
+  // Selection only holds rows that are still on screen.
+  const visible = new Set(capped.filter(r => !r.former).map(key));
+  billSelection.forEach(k => { if(!visible.has(k)) billSelection.delete(k); });
+  const sum = r2(rows.reduce((s, r) => s + (r.bill.status === 'paid' ? Number(r.bill.amount) || 0 : billOpen(r.bill)), 0));
+  const selRows = capped.filter(r => billSelection.has(key(r)));
+  const selSum = r2(selRows.reduce((s, r) => s + billOpen(r.bill), 0));
+  const allSel = visible.size > 0 && selRows.length === visible.size;
+  const kind = b => { const c = billCategory(b); return c === 'rent' ? 'Rent' : c === 'utilities' ? 'Utility' : 'Other charge'; };
+  const th = (col, label, cls) => {
     const active = tableSortCol === col;
-    const arrow = active ? (tableSortDir === 'asc' ? ' ↑' : ' ↓') : '';
-    return '<th class="'+(cls||'')+'" aria-sort="'+(active?(tableSortDir==='asc'?'ascending':'descending'):'none')+'"><button type="button" class="th-sort" onclick="sortTable(\''+col+'\')">'+label+'<span class="sort-arrow">'+arrow+'</span></button></th>';
-  }
-  // Floor column only when the field is in use — no dead column otherwise.
-  const showFloor = tenants.some(t=>floorKey(t));
+    return '<button type="button" class="oa-th' + (cls ? ' ' + cls : '') + (active ? ' on' : '') + '" aria-sort="' + (active ? (tableSortDir === 'asc' ? 'ascending' : 'descending') : 'none') + '" onclick="sortTable(\'' + col + '\')">' + label
+      + (active ? '<span class="sort-arrow">' + (tableSortDir === 'asc' ? '↑' : '↓') + '</span>' : '') + '</button>';
+  };
+  const check = (on, attrs, label) => '<label class="oa-check"><input type="checkbox"' + (on ? ' checked' : '') + attrs + '><span class="oa-check-box" aria-hidden="true">' + icon('check') + '</span><span class="sr-only">' + label + '</span></label>';
+  const head = selRows.length
+    ? '<div class="oa-thead bl-row bl-bulk" role="row">' + check(allSel, ' onchange="billSelectAll(this.checked)"', 'Select all')
+      + '<div class="bl-bulk-bar"><strong>' + selRows.length + ' selected · ' + peso(selSum) + '</strong>'
+      + '<button type="button" class="btn-pri" onclick="bulkMarkPaid()">' + icon('check') + '<span>Mark paid</span></button>'
+      + '<button type="button" class="btn-sec" onclick="bulkCopyReminders()">' + icon('chat') + '<span>Copy reminders</span></button>'
+      + '<button type="button" class="btn-sec" onclick="billSelection.clear();renderBillRows()">Clear</button></div></div>'
+    : '<div class="oa-thead bl-row" role="row">' + check(false, visible.size ? ' onchange="billSelectAll(this.checked)"' : ' disabled', 'Select all')
+      + th('tenant', 'Tenant') + th('label', 'Bill') + th('due', 'Due') + th('status', 'Status') + th('remaining', 'Amount', 'r') + '<span></span></div>';
+  const phoneSort = _isPhone() ? '<div class="bl-phone-sort"><select class="tb-select sm" aria-label="Sort bills" onchange="tableSortCol=this.value;tableSortDir=(this.value===\'remaining\'||this.value===\'paidDate\')?\'desc\':\'asc\';renderBillRows()">'
+    + [['due','Due date'],['status','Urgency'],['tenant','Tenant'],['unit','Unit'],['remaining','Balance'],['paidDate','Paid date']].map(([k,l]) => '<option value="'+k+'"'+(tableSortCol===k?' selected':'')+'>Sort: '+l+'</option>').join('') + '</select></div>' : '';
 
-  const tbody = capped.map(r => {
-    const b = r.bill, t = r.tenant;
-    const ds = b.status === 'paid' ? 'paid' : getDueStatus(b);
+  const body = capped.map(r => {
+    const b = r.bill, t = r.tenant, k = key(r);
     const isPaid = b.status === 'paid';
-    const remaining = billOpen(b);
-    const rowAttr = ' data-tid="'+esc(t.id)+'" data-bi="'+r.bi+'"';
-    // Status badge toggles paid/unpaid on click.
-    const statusBtn = ds === 'awaiting'
-      ? '<button type="button" class="mini-status '+dsBadgeClass(ds)+'" onclick="const x=this.closest(\'tr\');openEditBillFromTable(x.dataset.tid,+x.dataset.bi)" title="Enter the amount">Needs amount</button>'
-      : '<button type="button" class="mini-status '+dsBadgeClass(ds)+'" onclick="const x=this.closest(\'tr\');toggleStatus(x.dataset.tid,+x.dataset.bi)" '
-      + 'title="'+(isPaid?'Click to revert to unpaid':'Click to mark paid')+'">' + (dueStatusLabel[ds]||ds) + '</button>';
-    // Amount cell becomes an editable input on click.
-    const amountCell = '<td class="td-amount td-amt-edit"'+rowAttr+' onclick="enterAmountEdit(this)" title="Click to edit amount">'+peso(b.amount)+'</td>';
-    const actionsCell = '<td class="td-actions"><div class="td-actions-inner">'
-      + (isPaid ? '' : ds === 'awaiting'
-          ? '<button type="button" class="row-quick-btn" onclick="const x=this.closest(\'tr\');openEditBillFromTable(x.dataset.tid,+x.dataset.bi)" title="Enter the amount">Enter amount</button>'
-          : '<button type="button" class="row-quick-btn pay" onclick="const x=this.closest(\'tr\');quickMarkPaid(x.dataset.tid,+x.dataset.bi)" title="Mark paid">✓ Paid</button>')
-      + '<button type="button" class="btn-icon sm" aria-label="Bill actions" aria-haspopup="menu" onclick="const x=this.closest(\'tr\');openBillMenu(this,x.dataset.tid,+x.dataset.bi)">'+icon('kebab')+'</button>'
-      + '</div></td>';
-    return '<tr'+rowAttr+'>' +
-      '<td>'+statusBtn+'</td>' +
-      '<td><a href="#/tenants/'+encodeURIComponent(t.id)+'">'+esc(t.name)+'</a></td>' +
-      '<td>'+esc(t.unit)+'</td>' +
-      (showFloor ? '<td>'+esc(t.floor||'')+'</td>' : '') +
-      '<td>'+esc(b.label)+(billPeriod(b)&&b.tmplId?' <span class="muted">'+icon('repeat','ico-xs')+'</span>':'')+'</td>' +
-      amountCell +
-      '<td class="td-amount">'+(remaining ? peso(remaining) : '<span class="muted">—</span>')+'</td>' +
-      '<td class="td-date">'+(b.due ? shortDate(b.due)+' '+String(b.due).slice(0,4) : '—')+'</td>' +
-      '<td class="td-date col-paid">'+(b.paidDate ? shortDate(b.paidDate)+' '+String(b.paidDate).slice(0,4) : '—')+'</td>' +
-      '<td class="td-remark col-remark" title="'+(b.remark ? esc(b.remark) : '')+'">'+(b.remark ? esc(b.remark) : '')+'</td>' +
-      actionsCell +
-    '</tr>';
+    const jp = !r.former && !!_justPaidEntry(t.id, r.bi);
+    const aw = getDueStatus(b) === 'awaiting';
+    const where = 'Unit ' + esc(t.unit) + (r.former ? ' · moved out' : t.floor ? ' · ' + esc(t.floor) : '');
+    const sub = [kind(b), billPeriod(b) ? fmtYM(billPeriod(b), 'short') : '', billTotalPaid(b) > 0.005 && !isPaid ? peso(billTotalPaid(b)) + ' received' : ''].filter(Boolean).join(' · ');
+    const amt = aw ? '<button type="button" class="link-btn" onclick="const x=this.closest(\'[data-tid]\');openEditBillFromTable(x.dataset.tid,+x.dataset.bi)">Enter amount</button>'
+      : r.former ? peso(billOpen(b))
+      : '<span class="td-amt-edit" data-tid="' + esc(t.id) + '" data-bi="' + r.bi + '" onclick="enterAmountEdit(this)" title="Click to edit the amount">' + peso(isPaid ? b.amount : billOpen(b)) + '</span>';
+    return '<div class="oa-tr bl-row' + (billSelection.has(k) ? ' is-sel' : '') + (jp ? ' is-paid' : '') + '" data-tid="' + esc(t.id) + '" data-bi="' + r.bi + '">'
+      + (r.former || isPaid ? '<span></span>' : check(billSelection.has(k), ' data-k="' + esc(k) + '" onchange="billSelectToggle(this.dataset.k,this.checked)"', 'Select ' + esc(b.label) + ' for ' + esc(t.name)))
+      + '<div class="oa-who">' + avatar(t.name, 38) + '<div class="oa-who-text">' + (r.former ? '<span class="oa-name">' + esc(t.name) + '</span>' : '<a class="oa-name" href="#/tenants/' + encodeURIComponent(t.id) + '">' + esc(t.name) + '</a>') + '<span class="oa-sub">' + where + '</span></div></div>'
+      + '<div class="bl-bill"><span class="bl-bill-label">' + esc(b.label || 'Bill') + '</span><span class="oa-sub">' + sub + '</span></div>'
+      + '<span class="oa-cell-due">' + (b.due ? shortDateY(b.due) : '&mdash;') + (isPaid && b.paidDate ? '<span class="oa-sub">paid ' + shortDate(b.paidDate) + '</span>' : '') + '</span>'
+      + '<span class="oa-cell-status">' + billPill(b, jp) + '</span>'
+      + '<span class="oa-cell-amt">' + amt + '</span>'
+      + (r.former ? '<span class="oa-muted-sm bl-moved" title="Restore the tenant (Tenants › Archived) to change this bill">&mdash;</span>'
+        : jp ? '<button type="button" class="oa-btn-undo sm" onclick="const x=this.closest(\'[data-tid]\');undoJustPaid(x.dataset.tid,+x.dataset.bi)">Undo</button>'
+        : '<button type="button" class="oa-icon-btn ghost sm" aria-label="Actions for ' + esc(b.label || 'bill') + '" aria-haspopup="menu" onclick="const x=this.closest(\'[data-tid]\');openBillMenu(this,x.dataset.tid,+x.dataset.bi)">' + icon('kebab') + '</button>')
+      + '</div>';
   }).join('');
+  const more = totalRows > tableRowLimit ? '<button type="button" class="btn-sec" onclick="loadMoreTableRows()">Show more (' + (totalRows - tableRowLimit) + ' remaining)</button>' : '';
+  c.innerHTML = phoneSort + '<div class="oa-table">' + head + body + '</div>'
+    + '<div class="oa-card-foot"><span>' + (capped.length < totalRows ? 'Showing ' + capped.length + ' of ' : '') + totalRows + ' bill' + (totalRows !== 1 ? 's' : '') + ' · ' + peso(sum) + '</span>' + more
+    + '<button type="button" class="link-btn oa-more" onclick="exportCSV()">' + icon('download') + 'Bills CSV</button></div>';
+}
+function billSelectToggle(k, on) { if(on) billSelection.add(k); else billSelection.delete(k); renderBillRows(); }
+function billSelectAll(on) {
+  if(!on) billSelection.clear();
+  else document.querySelectorAll('#bill-rows .oa-tr [data-k]').forEach(el => billSelection.add(el.dataset.k));
+  renderBillRows();
+}
+function _selectedBills() {
+  return Array.from(billSelection).map(k => {
+    const i = k.lastIndexOf('|'), tid = k.slice(0, i), bi = Number(k.slice(i + 1));
+    const t = tenants.find(x => x.id === tid);
+    return t && t.bills[bi] && t.bills[bi].status !== 'paid' ? { tid, bi, t, bill: t.bills[bi] } : null;
+  }).filter(Boolean);
+}
+// Bulk "Mark paid": one paid date for every selected bill (the same
+// confirm-paid dialog as a single bill), saved tenant by tenant.
+function bulkMarkPaid() {
+  const items = _selectedBills();
+  if(!items.length) return;
+  _pendingPaid = { bulk: items };
+  document.getElementById('paiddate-bill-name').textContent = items.length + ' bill' + (items.length !== 1 ? 's' : '') + ' — ₱' + fmtMoney(r2(items.reduce((s, x) => s + billOpen(x.bill), 0)));
+  document.getElementById('paiddate-input').value = todayISO();
+  openModal('paiddate-modal');
+}
+async function _confirmBulkPaid(dateVal) {
+  const items = _pendingPaid.bulk;
+  const byT = new Map();
+  items.forEach(it => { if(!byT.has(it.tid)) byT.set(it.tid, []); byT.get(it.tid).push(it); });
+  let done = 0, skipped = 0, failed = 0;
+  for(const [tid, list] of byT) {
+    const live = tenants.find(x => x.id === tid);
+    const ok = list.filter(it => live && live === it.t && live.bills[it.bi] === it.bill && it.bill.status !== 'paid');
+    skipped += list.length - ok.length;
+    if(!ok.length) continue;
+    const res = await saveBills(tid, bills => ok.forEach(it => { const x = bills[it.bi]; if(x && x.status !== 'paid') { x.status = 'paid'; x.paidDate = dateVal; } }), null, live);
+    if(res === true) { done += ok.length; ok.forEach(it => _noteJustPaid(tid, it.bi)); } else failed += ok.length;
+  }
+  billSelection.clear();
+  showToast(done ? 'Marked ' + done + ' bill' + (done !== 1 ? 's' : '') + ' paid ✓' + (skipped + failed ? ' · ' + (skipped + failed) + ' not changed — check them and try again.' : '') : 'Nothing was changed — the bills changed in the meantime.', !!done && !(skipped + failed));
+  return true;
+}
+// One message per tenant with selected bills, copied together.
+async function bulkCopyReminders() {
+  const ids = Array.from(new Set(_selectedBills().map(x => x.tid)));
+  const texts = ids.map(id => buildReminderText(tenants.find(t => t.id === id))).filter(Boolean);
+  if(!texts.length) { showToast('No outstanding balance to remind about.'); return; }
+  const text = texts.join('\n\n———\n\n');
+  try { await navigator.clipboard.writeText(text); }
+  catch {
+    const ta = document.createElement('textarea'); ta.value = text; ta.style.cssText = 'position:fixed;left:-9999px;';
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); } catch { ta.remove(); showToast('Could not copy automatically.', false); return; }
+    ta.remove();
+  }
+  showToast(texts.length + ' reminder' + (texts.length !== 1 ? 's' : '') + ' copied — paste into SMS / Messenger / Viber.');
+}
 
-  c.innerHTML = countNote + '<div class="db-table-wrap"><table class="db-table">' +
-    '<thead><tr>' +
-      thHtml('status','Status') +
-      thHtml('tenant','Tenant') +
-      thHtml('unit','Unit') +
-      (showFloor ? thHtml('floor','Floor') : '') +
-      thHtml('label','Bill') +
-      thHtml('amount','Amount','num') +
-      thHtml('remaining','Balance','num') +
-      thHtml('due','Due') +
-      thHtml('paidDate','Paid','col-paid') +
-      thHtml('remark','Remarks','col-remark') +
-      '<th class="th-actions"><span class="sr-only">Actions</span></th>' +
-    '</tr></thead>' +
-    '<tbody>'+tbody+'</tbody>' +
-  '</table></div>' + showMoreBtn;
+// Receipts on a tenant's bills: one Receive-payment receipt spread over
+// several bills is one entry (rid); other payments one entry each; a bill
+// marked paid beyond its logged payments adds its implied payment.
+function tenantReceipts(t) {
+  const receipts = [], byRid = new Map();
+  (t.bills || []).forEach(b => {
+    let logged = 0;
+    (b.payments || []).forEach(pay => {
+      const v = Number(pay.amount) || 0; logged += v;
+      if(!v) return;
+      if(pay.rid && v > 0) {
+        let g = byRid.get(pay.rid);
+        if(!g) { g = { t, date: isoOrEmpty(pay.date), dates: new Set(), amount: 0, note: pay.note || '', bills: [], rid: pay.rid }; byRid.set(pay.rid, g); receipts.push(g); }
+        g.dates.add(isoOrEmpty(pay.date));
+        g.amount = r2(g.amount + v);
+        if(!g.bills.includes(b)) g.bills.push(b);
+      } else receipts.push({ t, date: isoOrEmpty(pay.date), amount: v, note: pay.note || '', bills: [b] });
+    });
+    if(b.status === 'paid') { const resid = r2((Number(b.amount) || 0) - logged); if(resid > 0) receipts.push({ t, date: isoOrEmpty(b.paidDate), amount: resid, note: '', bills: [b] }); }
+  });
+  return receipts.sort((x, y) => (y.date || '').localeCompare(x.date || ''));
+}
+// "Rent – Sep, Water – Aug" (no month suffix when the label already names one).
+function receiptAppliedTo(x) {
+  return x.bills.map(b => { const per = billPeriod(b), m = per ? _monthName(per, 'short') : '';
+    return esc(b.label) + (m && !new RegExp('\\b(' + m + '|' + _monthName(per) + '|' + per.slice(0, 4) + ')\\b', 'i').test(b.label || '') ? ' – ' + m : ''); }).join(', ');
+}
+function _recentPaymentsCard() {
+  const today = todayISO(), since = addDaysISO(today, -6);
+  const recent = tenants.flatMap(tenantReceipts).filter(x => x.date && x.date >= since && x.date <= today && x.amount > 0).sort((a, b) => b.date.localeCompare(a.date));
+  const total = r2(recent.reduce((s, x) => s + x.amount, 0));
+  const shown = recent.slice(0, 10);
+  return '<section class="card oa-table-card bl-recent">'
+    + '<div class="oa-card-head"><h2 class="card-title">Recent payments</h2><span class="oa-muted-sm">Last 7 days · ' + peso(total) + '</span></div>'
+    + (shown.length ? '<div class="oa-table"><div class="oa-thead bl-pay" role="row"><span>Date</span><span>Tenant</span><span>Applied to</span><span>Note</span><span class="r">Amount</span></div>'
+      + shown.map(x => '<div class="oa-tr bl-pay"><span class="oa-cell-due">' + shortDate(x.date) + '</span>'
+        + '<div class="oa-who">' + avatar(x.t.name, 30) + '<a class="oa-name" href="#/tenants/' + encodeURIComponent(x.t.id) + '">' + esc(x.t.name) + '</a></div>'
+        + '<span class="oa-cell-bill">' + receiptAppliedTo(x) + '</span><span class="oa-cell-bill bl-note">' + (x.note ? esc(x.note) : '&mdash;') + '</span>'
+        + '<span class="oa-cell-amt good">' + peso(x.amount) + '</span></div>').join('') + '</div>'
+      : '<div class="oa-empty">No payments recorded in the last 7 days.</div>')
+    + '</section>';
 }
 
 // ── INLINE TABLE EDITING ──
@@ -4409,7 +4488,7 @@ function _sinceFor(t, tmpl) {
 }
 
 async function commitAmountEdit(input){
-  const td  = input.closest('td');
+  const td  = input.closest('td, .td-amt-edit');
   const tid = td.dataset.tid;
   const bi  = Number(td.dataset.bi);
   const t = tenants.find(t=>t.id===tid);
@@ -4456,20 +4535,7 @@ async function commitAmountEdit(input){
 }
 
 // Pending paid-date action
-let _pendingPaid = null;
-
-// Click on a bill badge: unpaid → confirm-paid modal; paid → back to unpaid.
-// (The old three-way unpaid → overdue → paid cycle was removed — overdue is
-// now derived from the due date, so there is nothing to cycle through.)
-async function toggleStatus(tid,bi){
-  const t=tenants.find(t=>t.id===tid);
-  if(!t||!t.bills[bi]) return;
-  if(t.bills[bi].status==='paid'){ revertToPending(tid,bi); return; }
-  _pendingPaid={tid,bi,t,bill:t.bills[bi]};
-  document.getElementById('paiddate-bill-name').textContent = t.bills[bi].label + ' — ' + t.name;
-  document.getElementById('paiddate-input').value=todayISO();
-  openModal('paiddate-modal');
-}
+let _pendingPaid = null; // { tid, bi, t, bill } — or { bulk: [...] } from Billing's bulk select
 
 function closePaidModal(){
   closeModalEl('paiddate-modal');
@@ -4487,6 +4553,7 @@ async function confirmPaid(){
   if(btn){ btn.disabled=true; btn.textContent='Saving…'; }
   const dateVal=document.getElementById('paiddate-input').value;
   if(!_futureDateOk(dateVal)){ if(btn){ btn.disabled=false; btn.textContent='Confirm Paid'; } return; }
+  if(_pendingPaid.bulk){ await _confirmBulkPaid(dateVal||todayISO()); if(btn){ btn.disabled=false; btn.textContent='Confirm Paid'; } closePaidModal(); rerenderAdmin(); return; }
   // The remembered index must still point at the same, still-unpaid bill.
   const live = tenants.find(x=>x.id===tid);
   if(live && live === expectT && (live.bills[bi] !== _pendingPaid.bill || live.bills[bi].status === 'paid')){
