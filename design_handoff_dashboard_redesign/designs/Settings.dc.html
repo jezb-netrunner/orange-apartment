@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>body{margin:0;background:#F8F4EE;-webkit-font-smoothing:antialiased}*{box-sizing:border-box}button,input,select,textarea{font-family:inherit}input::placeholder,textarea::placeholder{color:#9A9187}a{color:#A84A15;text-decoration:none}a:hover{color:#B9531A}</style>
+</helmet>
+<div data-screen-label="Settings" style="width:1440px;min-height:1000px;display:grid;grid-template-columns:256px minmax(0,1fr);background:linear-gradient(90deg,#FFFFFF 0 255px,#ECE5DC 255px 256px,#F8F4EE 256px);font-family:'Plus Jakarta Sans',system-ui,sans-serif;color:#1F1B16">
+  <dc-import name="OA Sidebar" active="settings" hint-size="256px,1000px"></dc-import>
+  <main style="padding:30px 40px 44px;display:flex;flex-direction:column;gap:24px;min-width:0">
+    <dc-import name="OA Topbar" title="Settings" subtitle="Billing rules, the tenant portal and the database" hint-size="100%,62px"></dc-import>
+
+    <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:24px;align-items:start">
+      <div style="display:flex;flex-direction:column;gap:24px;min-width:0">
+        <section style="background:#FFFFFF;border:1px solid #ECE5DC;border-radius:18px;overflow:hidden">
+          <div style="display:flex;align-items:center;gap:12px;padding:20px 24px 16px"><span style="width:36px;height:36px;border-radius:11px;background:#FDEEE3;color:#B9531A;display:flex;align-items:center;justify-content:center;flex:none"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 2l4 4-4 4M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4M21 13v2a3 3 0 0 1-3 3H3"></path></svg></span><h2 style="margin:0;font-size:17px;font-weight:700;letter-spacing:-0.01em">Automatic billing</h2></div>
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:24px;padding:16px 24px;border-top:1px solid #F3EEE7">
+            <div style="display:flex;flex-direction:column;gap:4px"><span style="font-size:14.5px;font-weight:600">Post recurring bills automatically</span><span style="font-size:13px;line-height:1.5;color:#6E665D">Each recurring charge creates its bill ahead of the due date, every cycle. It also catches up a cycle missed while nobody opened the app, up to two months back.</span></div>
+            <button onClick="{{ toggleAuto }}" title="Automatic billing" style="{{ switchStyle }}"><span style="{{ knobStyle }}"></span></button>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:24px;padding:16px 24px;border-top:1px solid #F3EEE7">
+            <div style="display:flex;flex-direction:column;gap:4px"><span style="font-size:14.5px;font-weight:600">Posting lead time</span><span style="font-size:13px;line-height:1.5;color:#6E665D">Rent is paid in advance, so tenants see the bill before it's due.</span></div>
+            <div style="height:42px;min-width:190px;padding:0 14px;border:1px solid #E4DCD1;border-radius:11px;display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:14px;font-weight:600;white-space:nowrap">7 days before due<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="#6E665D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"></path></svg></div>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:16px;padding:16px 24px;border-top:1px solid #F3EEE7;background:#FBF8F4">
+            <span style="font-size:13px;color:#6E665D">{{ autoNote }}</span>
+            <button onClick="{{ runNow }}" style="height:38px;padding:0 14px;border:1px solid #E4DCD1;border-radius:10px;background:#FFFFFF;display:inline-flex;align-items:center;gap:7px;font-size:13.5px;font-weight:600;color:#1F1B16;cursor:pointer;white-space:nowrap;flex:none"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 2l4 4-4 4M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4M21 13v2a3 3 0 0 1-3 3H3"></path></svg>Run now</button>
+          </div>
+        </section>
+
+        <section style="background:#FFFFFF;border:1px solid #ECE5DC;border-radius:18px;overflow:hidden">
+          <div style="display:flex;align-items:center;gap:12px;padding:20px 24px 16px"><span style="width:36px;height:36px;border-radius:11px;background:#FFF3DA;color:#94590A;display:flex;align-items:center;justify-content:center;flex:none"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM16 2v4M8 2v4M3 10h18"></path></svg></span><h2 style="margin:0;font-size:17px;font-weight:700;letter-spacing:-0.01em">Late payments</h2></div>
+          <div style="display:flex;flex-direction:column;gap:12px;padding:16px 24px 22px;border-top:1px solid #F3EEE7">
+            <div style="display:flex;flex-direction:column;gap:4px"><span style="font-size:14.5px;font-weight:600">Grace period</span><span style="font-size:13px;line-height:1.5;color:#6E665D">Days after the due date before a bill shows as overdue and counts as late.</span></div>
+            <div style="display:flex;gap:2px;padding:4px;border-radius:12px;background:#F5F0EA;align-self:flex-start">
+              <sc-for list="{{ graces }}" as="g" hint-placeholder-count="6"><button onClick="{{ g.pick }}" style="{{ g.style }}">{{ g.label }}</button></sc-for>
+            </div>
+          </div>
+        </section>
+
+        <section style="background:#FFFFFF;border:1px solid #ECE5DC;border-radius:18px;overflow:hidden">
+          <div style="display:flex;align-items:center;gap:12px;padding:20px 24px 16px"><span style="width:36px;height:36px;border-radius:11px;background:#F3EFEA;color:#5F574E;display:flex;align-items:center;justify-content:center;flex:none"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3zM4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"></path></svg></span><h2 style="margin:0;font-size:17px;font-weight:700;letter-spacing:-0.01em">Database</h2></div>
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:16px;padding:14px 24px;border-top:1px solid #F3EEE7;font-size:14px"><span>Expenses ledger <span style="color:#6E665D">· migration 2</span></span><span style="display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 10px;border-radius:999px;background:#E6F4EC;color:#1E7A52;font-size:12.5px;font-weight:600">Installed</span></div>
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:16px;padding:14px 24px;border-top:1px solid #F3EEE7;font-size:14px"><span>Change protection <span style="color:#6E665D">· migration 2</span></span><span style="display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 10px;border-radius:999px;background:#E6F4EC;color:#1E7A52;font-size:12.5px;font-weight:600">Installed</span></div>
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:16px;padding:14px 24px;border-top:1px solid #F3EEE7;font-size:14px"><span>Expense floor tags <span style="color:#6E665D">· migration 3</span></span><span style="display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 10px;border-radius:999px;background:#E6F4EC;color:#1E7A52;font-size:12.5px;font-weight:600">Installed</span></div>
+        </section>
+      </div>
+
+      <section style="background:#FFFFFF;border:1px solid #ECE5DC;border-radius:18px;overflow:hidden">
+        <div style="display:flex;align-items:center;gap:12px;padding:20px 24px 6px"><span style="width:36px;height:36px;border-radius:11px;background:#E8F0FB;color:#2C62B0;display:flex;align-items:center;justify-content:center;flex:none"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"></path></svg></span><div style="display:flex;flex-direction:column;gap:2px"><h2 style="margin:0;font-size:17px;font-weight:700;letter-spacing:-0.01em">Tenant portal</h2><span style="font-size:13px;color:#6E665D">What tenants see when they sign in</span></div></div>
+        <sc-for list="{{ portal }}" as="p" hint-placeholder-count="3">
+          <div style="display:flex;flex-direction:column;gap:10px;padding:18px 24px;border-top:1px solid #F3EEE7;margin-top:12px">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:12px"><span style="font-size:14.5px;font-weight:600">{{ p.label }}</span><button onClick="{{ p.toggle }}" style="height:34px;padding:0 12px;border:1px solid #E4DCD1;border-radius:9px;background:#FFFFFF;font-size:13px;font-weight:700;color:#A84A15;cursor:pointer;white-space:nowrap">{{ p.btn }}</button></div>
+            <sc-if value="{{ p.view }}" hint-placeholder-val="{{ true }}"><div style="padding:14px 16px;border-radius:12px;background:#FBF8F4;border:1px solid #F0EAE2;font-size:14px;line-height:1.6;color:#4A433B;white-space:pre-line">{{ p.text }}</div></sc-if>
+            <sc-if value="{{ p.edit }}" hint-placeholder-val="{{ false }}"><textarea style="min-height:110px;padding:12px 14px;border:2px solid #E8772E;box-shadow:0 0 0 4px #FDEEE3;border-radius:12px;font-size:14px;line-height:1.6;color:#1F1B16;resize:vertical;outline:none">{{ p.text }}</textarea></sc-if>
+            <span style="font-size:12.5px;color:#6E665D">{{ p.hint }}</span>
+          </div>
+        </sc-for>
+      </section>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  state = { auto: true, grace: 3, editing: null, ran: false };
+  renderVals() {
+    const { auto, grace, editing, ran } = this.state;
+    const graces = [0, 1, 2, 3, 5, 7].map(d => {
+      const on = d === grace;
+      return { label: d ? d + (d === 1 ? ' day' : ' days') : 'None', pick: () => this.setState({ grace: d }), style: { height: '36px', padding: '0 13px', border: 'none', borderRadius: '9px', background: on ? '#FFFFFF' : 'transparent', boxShadow: on ? '0 1px 3px rgba(60,40,20,0.12)' : 'none', color: on ? '#1F1B16' : '#6E665D', fontSize: '13.5px', fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' } };
+    });
+    const P = [
+      ['pay', 'Payment instructions', 'GCash: 0917 555 0100\nBank transfer: Acct 0123 4567 89\nCash: hand it to the admin and ask for a receipt.\nSend your reference number after paying.', 'Shown on every tenant’s “How to pay” screen.'],
+      ['ann', 'Announcements', 'Water interruption on Oct 15, 8 AM – 5 PM. Please store water the night before.', 'Leave empty to hide the notice board.'],
+      ['name', 'Property name', 'Orange Apartment', 'Appears in the portal header and on statements.']
+    ];
+    return {
+      switchStyle: { width: '50px', height: '30px', borderRadius: '15px', border: 'none', background: auto ? '#B9531A' : '#E4DCD1', position: 'relative', cursor: 'pointer', flex: 'none' },
+      knobStyle: { position: 'absolute', top: '4px', left: auto ? '24px' : '4px', width: '22px', height: '22px', borderRadius: '50%', background: '#FFFFFF', boxShadow: '0 1px 3px rgba(0,0,0,0.2)', transition: 'left 0.15s ease' },
+      toggleAuto: () => this.setState({ auto: !auto }),
+      autoNote: !auto ? 'Off. Recurring bills must be added by hand.' : ran ? 'Checked just now · nothing new to post' : 'Last run today, 8:12 AM · posted 4 bills',
+      runNow: () => this.setState({ ran: true }),
+      graces,
+      portal: P.map(([k, label, text, hint]) => ({ label, text, hint, view: editing !== k, edit: editing === k, btn: editing === k ? 'Save' : 'Edit', toggle: () => this.setState({ editing: editing === k ? null : k }) }))
+    };
+  }
+}
+</script>
+</body>
+</html>

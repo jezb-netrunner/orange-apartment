@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>body{margin:0;background:#F8F4EE;-webkit-font-smoothing:antialiased}*{box-sizing:border-box}button,input,select{font-family:inherit}input::placeholder{color:#9A9187}a{color:#A84A15;text-decoration:none}a:hover{color:#B9531A}</style>
+</helmet>
+<div data-screen-label="Billing" style="width:1440px;min-height:1000px;display:grid;grid-template-columns:256px minmax(0,1fr);background:linear-gradient(90deg,#FFFFFF 0 255px,#ECE5DC 255px 256px,#F8F4EE 256px);font-family:'Plus Jakarta Sans',system-ui,sans-serif;color:#1F1B16">
+  <dc-import name="OA Sidebar" active="billing" hint-size="256px,1000px"></dc-import>
+  <main style="padding:30px 40px 44px;display:flex;flex-direction:column;gap:24px;min-width:0">
+    <dc-import name="OA Topbar" title="Billing" subtitle="9 open bills · ₱38,450 outstanding" hint-size="100%,62px"></dc-import>
+
+    <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:20px">
+      <div style="background:#FFFFFF;border:1px solid #ECE5DC;border-radius:16px;padding:20px 22px;display:flex;flex-direction:column;gap:8px"><span style="font-size:13.5px;font-weight:600;color:#4A433B">Outstanding</span><span style="font-size:26px;font-weight:800;letter-spacing:-0.03em;font-variant-numeric:tabular-nums">₱38,450</span><span style="font-size:12.5px;color:#6E665D">9 bills · rent ₱32,500, utilities ₱5,150</span></div>
+      <div style="background:#FFFFFF;border:1px solid #ECE5DC;border-radius:16px;padding:20px 22px;display:flex;flex-direction:column;gap:8px"><span style="font-size:13.5px;font-weight:600;color:#4A433B">Overdue</span><span style="font-size:26px;font-weight:800;letter-spacing:-0.03em;font-variant-numeric:tabular-nums;color:#C2362B">₱24,950</span><span style="font-size:12.5px;color:#6E665D">6 bills · ₱10,650 from a former tenant</span></div>
+      <div style="background:#FFFFFF;border:1px solid #ECE5DC;border-radius:16px;padding:20px 22px;display:flex;flex-direction:column;gap:8px"><span style="font-size:13.5px;font-weight:600;color:#4A433B">Due in 7 days</span><span style="font-size:26px;font-weight:800;letter-spacing:-0.03em;font-variant-numeric:tabular-nums">₱13,500</span><span style="font-size:12.5px;color:#6E665D">3 bills · first one today</span></div>
+      <div style="background:#FFFFFF;border:1px solid #ECE5DC;border-radius:16px;padding:20px 22px;display:flex;flex-direction:column;gap:8px"><span style="font-size:13.5px;font-weight:600;color:#4A433B">Collected · October</span><span style="font-size:26px;font-weight:800;letter-spacing:-0.03em;font-variant-numeric:tabular-nums">₱31,500</span><div style="display:flex;align-items:center;gap:10px"><div style="flex:1;height:6px;border-radius:3px;background:#F1EBE3;overflow:hidden"><div style="width:58%;height:100%;border-radius:3px;background:#E8772E"></div></div><span style="font-size:12.5px;color:#6E665D">58% of ₱54,000</span></div></div>
+    </div>
+
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <div style="display:flex;gap:2px;padding:4px;border-radius:12px;background:#EFE8DF">
+        <sc-for list="{{ tabs }}" as="t" hint-placeholder-count="4"><button onClick="{{ t.pick }}" style="{{ t.style }}">{{ t.label }}<span style="{{ t.countStyle }}">{{ t.count }}</span></button></sc-for>
+      </div>
+      <div style="position:relative;width:260px">
+        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="position:absolute;left:14px;top:13px;color:#9A9187"><path d="M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM21 21l-4.3-4.3"></path></svg>
+        <input placeholder="Tenant, unit or bill" style="width:100%;height:44px;border:1px solid #E4DCD1;border-radius:11px;background:#FFFFFF;padding:0 14px 0 40px;font-size:14px;color:#1F1B16;outline:none" style-focus="border-color:#E8772E;box-shadow:0 0 0 4px #FDEEE3">
+      </div>
+      <div style="margin-left:auto;display:flex;gap:10px">
+        <button style="height:44px;padding:0 16px;border:1px solid #E4DCD1;border-radius:11px;background:#FFFFFF;display:inline-flex;align-items:center;gap:8px;font-size:14px;font-weight:600;color:#1F1B16;cursor:pointer;white-space:nowrap;flex:none" style-hover="background:#FBF8F4"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"></path></svg>Add bill</button>
+        <a href="Receive Payment.dc.html" style="height:44px;padding:0 18px;border-radius:11px;background:#B9531A;color:#FFFFFF;display:inline-flex;align-items:center;gap:8px;font-size:14px;font-weight:700;text-decoration:none;white-space:nowrap;flex:none" style-hover="background:#9F4614;color:#FFFFFF"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 7h20v10H2zM12 14.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM6 12h.01M18 12h.01"></path></svg>Receive payment</a>
+      </div>
+    </div>
+
+    <section style="background:#FFFFFF;border:1px solid #ECE5DC;border-radius:18px;overflow:hidden">
+      <sc-if value="{{ noSel }}" hint-placeholder-val="{{ true }}">
+        <div style="display:grid;grid-template-columns:20px minmax(0,1.3fr) minmax(0,1.3fr) 100px 170px 110px 28px;gap:16px;align-items:center;padding:13px 24px;background:#FBF8F4;border-bottom:1px solid #F3EEE7;font-size:12.5px;font-weight:600;color:#6E665D">
+          <span onClick="{{ toggleAll }}" style="width:18px;height:18px;border-radius:5px;border:1.5px solid #CFC5B8;background:#FFFFFF;cursor:pointer"></span><span>Tenant</span><span>Bill</span><span>Due</span><span>Status</span><span style="text-align:right">Amount</span><span></span>
+        </div>
+      </sc-if>
+      <sc-if value="{{ hasSel }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;align-items:center;gap:14px;padding:8px 24px;min-height:47px;background:#FDEEE3;border-bottom:1px solid #F6D9C4">
+          <span onClick="{{ toggleAll }}" style="width:18px;height:18px;border-radius:5px;background:#B9531A;color:#FFFFFF;display:flex;align-items:center;justify-content:center;cursor:pointer"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"></path></svg></span>
+          <span style="font-size:14px;font-weight:700;color:#7A3511">{{ selText }}</span>
+          <div style="margin-left:auto;display:flex;gap:8px">
+            <button onClick="{{ markSel }}" style="height:34px;padding:0 14px;border:none;border-radius:9px;background:#B9531A;color:#FFFFFF;font-size:13px;font-weight:700;cursor:pointer">Mark paid</button>
+            <button style="height:34px;padding:0 14px;border:1px solid #F0C9AC;border-radius:9px;background:#FFFFFF;color:#7A3511;font-size:13px;font-weight:600;cursor:pointer">Copy reminders</button>
+            <button onClick="{{ clearSel }}" style="height:34px;padding:0 12px;border:none;border-radius:9px;background:transparent;color:#7A3511;font-size:13px;font-weight:600;cursor:pointer">Clear</button>
+          </div>
+        </div>
+      </sc-if>
+      <sc-for list="{{ rows }}" as="r" hint-placeholder-count="8">
+        <div style="{{ r.rowStyle }}">
+          <span onClick="{{ r.toggle }}" style="{{ r.boxStyle }}"><sc-if value="{{ r.sel }}" hint-placeholder-val="{{ false }}"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-10"></path></svg></sc-if></span>
+          <div style="display:flex;align-items:center;gap:12px;min-width:0"><span style="{{ r.avStyle }}">{{ r.ini }}</span><div style="display:flex;flex-direction:column;gap:2px;min-width:0"><span style="font-size:14.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.name }}</span><span style="font-size:12.5px;color:#6E665D">{{ r.where }}</span></div></div>
+          <div style="display:flex;flex-direction:column;gap:2px;min-width:0"><span style="font-size:14px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.bill }}</span><span style="font-size:12.5px;color:#6E665D">{{ r.kind }}</span></div>
+          <span style="font-size:14px;color:#4A433B;font-variant-numeric:tabular-nums">{{ r.due }}</span>
+          <span><span style="{{ r.pillStyle }}"><span style="width:6px;height:6px;border-radius:50%;background:currentColor"></span>{{ r.pill }}</span></span>
+          <span style="text-align:right;font-size:14.5px;font-weight:700;font-variant-numeric:tabular-nums">{{ r.amt }}</span>
+          <button title="Bill actions" style="width:28px;height:28px;border:none;border-radius:8px;background:transparent;color:#6E665D;display:flex;align-items:center;justify-content:center;cursor:pointer" style-hover="background:#F5F0EA"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5h.01M12 12h.01M12 19h.01"></path></svg></button>
+        </div>
+      </sc-for>
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 24px;font-size:13.5px;color:#6E665D"><span>{{ foot }}</span><a style="display:inline-flex;align-items:center;gap:6px;font-weight:700;color:#A84A15;cursor:pointer"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"></path></svg>Bills CSV</a></div>
+    </section>
+
+    <section style="background:#FFFFFF;border:1px solid #ECE5DC;border-radius:18px;overflow:hidden">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:20px 24px 16px"><h2 style="margin:0;font-size:17px;font-weight:700;letter-spacing:-0.01em">Recent payments</h2><span style="font-size:13px;color:#6E665D">Last 7 days · ₱42,000</span></div>
+      <div style="display:grid;grid-template-columns:100px minmax(0,1.2fr) minmax(0,1.3fr) minmax(0,1fr) 110px;gap:16px;padding:12px 24px;background:#FBF8F4;border-top:1px solid #F3EEE7;border-bottom:1px solid #F3EEE7;font-size:12.5px;font-weight:600;color:#6E665D"><span>Date</span><span>Tenant</span><span>Applied to</span><span>Note</span><span style="text-align:right">Amount</span></div>
+      <sc-for list="{{ payments }}" as="p" hint-placeholder-count="4">
+        <div style="display:grid;grid-template-columns:100px minmax(0,1.2fr) minmax(0,1.3fr) minmax(0,1fr) 110px;gap:16px;align-items:center;padding:15px 24px;border-bottom:1px solid #F3EEE7;font-size:14px">
+          <span style="font-variant-numeric:tabular-nums;color:#4A433B">{{ p.date }}</span>
+          <div style="display:flex;align-items:center;gap:10px;min-width:0"><span style="{{ p.avStyle }}">{{ p.ini }}</span><span style="font-weight:600">{{ p.name }}</span></div>
+          <span style="color:#4A433B">{{ p.applied }}</span>
+          <span style="color:#6E665D">{{ p.note }}</span>
+          <span style="text-align:right;font-weight:700;font-variant-numeric:tabular-nums;color:#1E7A52">{{ p.amt }}</span>
+        </div>
+      </sc-for>
+    </section>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  state = { tab: 'open', sel: {}, paid: {} };
+  renderVals() {
+    const peso = n => '₱' + Math.round(n).toLocaleString('en-PH');
+    const tone = { late: ['#FDECEA', '#C2362B'], due: ['#FFF3DA', '#94590A'], paid: ['#E6F4EC', '#1E7A52'] };
+    const pill = k => ({ display: 'inline-flex', alignItems: 'center', gap: '6px', height: '26px', padding: '0 10px', borderRadius: '999px', fontSize: '12.5px', fontWeight: 600, whiteSpace: 'nowrap', background: tone[k][0], color: tone[k][1] });
+    const avPal = [['#FDEEE3', '#A84A15'], ['#E8F0FB', '#2C62B0'], ['#E6F4EC', '#1E7A52'], ['#F1EAFB', '#6A46B0'], ['#FFF3DA', '#8A5508'], ['#E3F1F2', '#1D6B73']];
+    const av = (name, s) => { let h = 0; for (const c of name) h = (h * 31 + c.charCodeAt(0)) % 1009; const p = avPal[h % avPal.length]; return { width: s + 'px', height: s + 'px', borderRadius: '50%', background: p[0], color: p[1], display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: Math.round(s * 0.34) + 'px', fontWeight: 700, flex: 'none' }; };
+    const ini = n => { const w = n.split(' '); return (w[0][0] + w[w.length - 1][0]).toUpperCase(); };
+    const { sel, paid, tab } = this.state;
+    const B = [
+      ['b7', 'Elena Cruz', 'Unit 202 · moved out', 'Rent – June', 'Rent', 'Jun 10', 'Overdue · 114 days', 'late', 6500],
+      ['b8', 'Elena Cruz', 'Unit 202 · moved out', 'Electricity – June', 'Utility · 410 kWh', 'Jun 25', 'Overdue · 99 days', 'late', 3350],
+      ['b9', 'Elena Cruz', 'Unit 202 · moved out', 'Key replacement', 'One-time charge', 'Jul 1', 'Overdue · 93 days', 'late', 800],
+      ['b1', 'Ramon dela Cruz', 'Unit 204 · 2nd floor', 'Rent – September', 'Rent', 'Sep 5', 'Overdue · 27 days', 'late', 6500],
+      ['b2', 'Ramon dela Cruz', 'Unit 204 · 2nd floor', 'Electricity – September', 'Utility · 98 kWh', 'Sep 20', 'Overdue · 12 days', 'late', 1300],
+      ['b3', 'Liza Bautista', 'Unit 102 · 1st floor', 'Rent – October', 'Rent', 'Sep 28', 'Overdue · 4 days', 'late', 6500],
+      ['b4', 'Maria Santos', 'Unit 301 · 3rd floor', 'Rent – October', 'Rent', 'Oct 2', 'Due today', 'due', 6500],
+      ['b5', 'Jun Reyes', 'Unit 303 · 3rd floor', 'Rent – October', 'Rent', 'Oct 4', 'Due in 2 days', 'due', 6500],
+      ['b6', 'Maria Santos', 'Unit 301 · 3rd floor', 'Water – September', 'Utility · 12 m³', 'Oct 5', 'Due in 3 days', 'due', 500],
+      ['p1', 'Grace Lim', 'Unit 206 · 2nd floor', 'Rent – October', 'All-inclusive', 'Oct 1', 'Paid Oct 1', 'paid', 7500],
+      ['p2', 'Paolo Garcia', 'Unit 304 · 3rd floor', 'Rent – October', 'Rent', 'Oct 10', 'Paid Sep 30', 'paid', 6500],
+      ['p3', 'Ana Villanueva', 'Unit 105 · 1st floor', 'Rent – October', 'Rent', 'Oct 20', 'Paid Sep 29', 'paid', 6500],
+      ['p4', 'Carlo Mendoza', 'Unit 103 · 1st floor', 'Rent – October', 'All-inclusive', 'Oct 15', 'Paid Sep 27', 'paid', 7500]
+    ].map(([id, name, where, bill, kind, due, status, k, amt]) => ({ id, name, where, bill, kind, due, k: paid[id] ? 'paid' : k, status: paid[id] ? 'Paid · just now' : status, amt }));
+    const tests = { open: b => b.k !== 'paid', overdue: b => b.k === 'late', soon: b => b.k === 'due', paid: b => b.k === 'paid' };
+    const vis = B.filter(tests[tab]);
+    const tabs = [['open', 'Open'], ['overdue', 'Overdue'], ['soon', 'Due soon'], ['paid', 'Paid']].map(([k, label]) => {
+      const on = k === tab;
+      return {
+        label, count: String(B.filter(tests[k]).length), pick: () => this.setState({ tab: k, sel: {} }),
+        style: { height: '36px', padding: '0 14px', border: 'none', borderRadius: '9px', background: on ? '#FFFFFF' : 'transparent', boxShadow: on ? '0 1px 3px rgba(60,40,20,0.12)' : 'none', color: on ? '#1F1B16' : '#6E665D', fontSize: '13.5px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '7px', cursor: 'pointer', whiteSpace: 'nowrap', flex: 'none' },
+        countStyle: { fontSize: '12px', fontWeight: 700, color: on ? '#B9531A' : '#9A9187' }
+      };
+    });
+    const selIds = vis.filter(b => sel[b.id]);
+    const rows = vis.map(b => {
+      const on = !!sel[b.id];
+      return {
+        sel: on, name: b.name, ini: ini(b.name), avStyle: av(b.name, 38), where: b.where, bill: b.bill, kind: b.kind, due: b.due,
+        pill: b.status, pillStyle: pill(b.k), amt: peso(b.amt),
+        rowStyle: { display: 'grid', gridTemplateColumns: '20px minmax(0,1.3fr) minmax(0,1.3fr) 100px 170px 110px 28px', gap: '16px', alignItems: 'center', padding: '15px 24px', borderBottom: '1px solid #F3EEE7', background: on ? '#FEF7F1' : '#FFFFFF' },
+        boxStyle: { width: '18px', height: '18px', borderRadius: '5px', border: on ? 'none' : '1.5px solid #CFC5B8', background: on ? '#B9531A' : '#FFFFFF', color: '#FFFFFF', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' },
+        toggle: () => this.setState(s => ({ sel: { ...s.sel, [b.id]: !s.sel[b.id] } }))
+      };
+    });
+    const P = [
+      ['Oct 1', 'Grace Lim', 'Rent – October', 'GCash · ref 4471 2208', 7500],
+      ['Sep 30', 'Paolo Garcia', 'Rent – Oct, Nov (advance)', 'Bank transfer', 13000],
+      ['Sep 29', 'Ana Villanueva', 'Rent – October', 'Cash to admin', 6500],
+      ['Sep 27', 'Carlo Mendoza', 'Rent – Oct (all-inclusive)', 'GCash · ref 0932 5517', 7500],
+      ['Sep 26', 'Jun Reyes', 'Rent – September', 'GCash · ref 6618 0412', 7500]
+    ].map(([date, name, applied, note, amt]) => ({ date, name, ini: ini(name), avStyle: av(name, 30), applied, note, amt: peso(amt) }));
+    const visTotal = vis.reduce((s, b) => s + b.amt, 0);
+    return {
+      tabs, rows, payments: P,
+      noSel: selIds.length === 0, hasSel: selIds.length > 0,
+      selText: selIds.length + ' selected · ' + peso(selIds.reduce((s, b) => s + b.amt, 0)),
+      toggleAll: () => this.setState(s => { const any = vis.some(b => s.sel[b.id]); const n = {}; if (!any) vis.forEach(b => { n[b.id] = true; }); return { sel: n }; }),
+      clearSel: () => this.setState({ sel: {} }),
+      markSel: () => this.setState(s => { const p = { ...s.paid }; selIds.forEach(b => { p[b.id] = true; }); return { paid: p, sel: {} }; }),
+      foot: vis.length + ' bills · ' + peso(visTotal)
+    };
+  }
+}
+</script>
+</body>
+</html>

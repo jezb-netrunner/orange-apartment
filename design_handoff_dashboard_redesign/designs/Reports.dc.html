@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>body{margin:0;background:#F8F4EE;-webkit-font-smoothing:antialiased}*{box-sizing:border-box}button,input,select{font-family:inherit}input::placeholder{color:#9A9187}a{color:#A84A15;text-decoration:none}a:hover{color:#B9531A}</style>
+</helmet>
+<div data-screen-label="Reports & insights" style="width:1440px;min-height:1000px;display:grid;grid-template-columns:256px minmax(0,1fr);background:linear-gradient(90deg,#FFFFFF 0 255px,#ECE5DC 255px 256px,#F8F4EE 256px);font-family:'Plus Jakarta Sans',system-ui,sans-serif;color:#1F1B16">
+  <dc-import name="OA Sidebar" active="reports" hint-size="256px,1000px"></dc-import>
+  <main style="padding:30px 40px 44px;display:flex;flex-direction:column;gap:24px;min-width:0">
+    <dc-import name="OA Topbar" title="Reports &amp; insights" subtitle="How the building is doing · revenue on accrual basis" hint-size="100%,62px"></dc-import>
+
+    <div style="display:flex;align-items:center;gap:12px;border-bottom:1px solid #E9E1D6">
+      <sc-for list="{{ tabs }}" as="t" hint-placeholder-count="2"><button onClick="{{ t.pick }}" style="{{ t.style }}">{{ t.label }}</button></sc-for>
+      <div style="margin-left:auto;display:flex;align-items:center;gap:10px;padding-bottom:10px">
+        <span style="font-size:13px;color:#6E665D">Period</span>
+        <button style="height:38px;padding:0 14px;border:1px solid #E4DCD1;border-radius:10px;background:#FFFFFF;display:inline-flex;align-items:center;gap:8px;font-size:13.5px;font-weight:600;color:#1F1B16;cursor:pointer">Nov 2025 – Oct 2026<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"></path></svg></button>
+      </div>
+    </div>
+
+    <sc-if value="{{ isInsights }}" hint-placeholder-val="{{ true }}">
+      <div style="display:flex;flex-direction:column;gap:24px">
+        <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:20px">
+          <div style="background:#FFFFFF;border:1px solid #ECE5DC;border-radius:16px;padding:20px 22px;display:flex;flex-direction:column;gap:8px"><span style="font-size:13.5px;font-weight:600;color:#4A433B">Revenue</span><span style="font-size:26px;font-weight:800;letter-spacing:-0.03em;font-variant-numeric:tabular-nums">₱599,100</span><span style="font-size:12.5px;color:#6E665D"><b style="color:#1E7A52">+4.2%</b> vs previous 12 months</span></div>
+          <div style="background:#FFFFFF;border:1px solid #ECE5DC;border-radius:16px;padding:20px 22px;display:flex;flex-direction:column;gap:8px"><span style="font-size:13.5px;font-weight:600;color:#4A433B">Expenses</span><span style="font-size:26px;font-weight:800;letter-spacing:-0.03em;font-variant-numeric:tabular-nums">₱115,100</span><span style="font-size:12.5px;color:#6E665D"><b style="color:#C2362B">+1.8%</b> vs previous 12 months</span></div>
+          <div style="background:#FFFFFF;border:1px solid #ECE5DC;border-radius:16px;padding:20px 22px;display:flex;flex-direction:column;gap:8px"><span style="font-size:13.5px;font-weight:600;color:#4A433B">Net income</span><span style="font-size:26px;font-weight:800;letter-spacing:-0.03em;font-variant-numeric:tabular-nums">₱484,000</span><span style="font-size:12.5px;color:#6E665D"><b style="color:#1E7A52">+4.7%</b> · ₱41,600 a month</span></div>
+          <div style="background:#FFFFFF;border:1px solid #ECE5DC;border-radius:16px;padding:20px 22px;display:flex;flex-direction:column;gap:8px"><span style="font-size:13.5px;font-weight:600;color:#4A433B">Collection rate</span><span style="font-size:26px;font-weight:800;letter-spacing:-0.03em;font-variant-numeric:tabular-nums">96%</span><span style="font-size:12.5px;color:#6E665D">of everything billed was paid</span></div>
+        </div>
+
+        <section style="background:#FFFFFF;border:1px solid #ECE5DC;border-radius:18px;padding:24px 28px;display:flex;flex-direction:column;gap:20px">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:20px">
+            <div style="display:flex;flex-direction:column;gap:5px"><h2 style="margin:0;font-size:17px;font-weight:700;letter-spacing:-0.01em">Net income by month</h2><span style="font-size:13.5px;color:#6E665D">Best month: September at ₱45,600 · October is still in progress</span></div>
+            <span style="display:inline-flex;align-items:center;gap:8px;font-size:12.5px;color:#6E665D"><span style="width:18px;border-top:2px dashed #A89D90"></span>12-month average ₱41,600</span>
+          </div>
+          <div style="position:relative;height:200px;display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:14px;align-items:end;border-bottom:1px solid #E4DCD1">
+            <div style="position:absolute;left:0;right:0;bottom:150px;border-top:2px dashed #CDBFAE;z-index:1"></div>
+            <sc-for list="{{ net }}" as="n" hint-placeholder-count="12">
+              <div title="{{ n.title }}" style="display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:6px;height:100%">
+                <span style="font-size:11.5px;font-weight:700;color:#4A433B;font-variant-numeric:tabular-nums">{{ n.val }}</span>
+                <span style="{{ n.bar }}"></span>
+              </div>
+            </sc-for>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:14px;margin-top:-8px">
+            <sc-for list="{{ net }}" as="n" hint-placeholder-count="12"><span style="text-align:center;font-size:12.5px;color:#6E665D">{{ n.m }}</span></sc-for>
+          </div>
+        </section>
+
+        <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:24px">
+          <section style="background:#FFFFFF;border:1px solid #ECE5DC;border-radius:18px;padding:24px;display:flex;flex-direction:column;gap:16px">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px"><div style="display:flex;flex-direction:column;gap:5px"><h2 style="margin:0;font-size:17px;font-weight:700;letter-spacing:-0.01em">Money owed, by age</h2><span style="font-size:13.5px;color:#6E665D">₱24,950 of ₱38,450 is past due</span></div><a href="Billing.dc.html" style="font-size:13.5px;font-weight:700;color:#A84A15;white-space:nowrap">Overdue bills</a></div>
+            <sc-for list="{{ aging }}" as="a" hint-placeholder-count="5">
+              <div style="display:grid;grid-template-columns:150px minmax(0,1fr) 84px;gap:14px;align-items:center">
+                <div style="display:flex;flex-direction:column;gap:1px"><span style="font-size:14px;font-weight:600">{{ a.label }}</span><span style="font-size:12px;color:#6E665D">{{ a.count }}</span></div>
+                <div style="height:10px;border-radius:5px;background:#F1EBE3;overflow:hidden"><div style="{{ a.bar }}"></div></div>
+                <span style="text-align:right;font-size:14px;font-weight:700;font-variant-numeric:tabular-nums">{{ a.amt }}</span>
+              </div>
+            </sc-for>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;padding-top:16px;border-top:1px solid #F3EEE7">
+              <div style="display:flex;flex-direction:column;gap:3px"><span style="font-size:12.5px;color:#6E665D">Collected in advance</span><span style="font-size:16px;font-weight:700;font-variant-numeric:tabular-nums">₱20,500</span></div>
+              <div style="display:flex;flex-direction:column;gap:3px"><span style="font-size:12.5px;color:#6E665D">Tenant credits (overpaid)</span><span style="font-size:16px;font-weight:700;font-variant-numeric:tabular-nums">₱1,200</span></div>
+            </div>
+          </section>
+          <section style="background:#FFFFFF;border:1px solid #ECE5DC;border-radius:18px;padding:24px;display:flex;flex-direction:column;gap:16px">
+            <div style="display:flex;flex-direction:column;gap:5px"><h2 style="margin:0;font-size:17px;font-weight:700;letter-spacing:-0.01em">Where the money goes</h2><span style="font-size:13.5px;color:#6E665D">₱115,100 in expenses over 12 months</span></div>
+            <div style="display:flex;height:14px;border-radius:7px;overflow:hidden;gap:2px">
+              <sc-for list="{{ mix }}" as="x" hint-placeholder-count="6"><span style="{{ x.seg }}"></span></sc-for>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;column-gap:24px">
+              <sc-for list="{{ mix }}" as="x" hint-placeholder-count="6">
+                <div style="display:flex;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid #F3EEE7;font-size:14px">
+                  <span style="{{ x.dot }}"></span><span style="flex:1">{{ x.label }}</span><span style="color:#6E665D;font-variant-numeric:tabular-nums">{{ x.pct }}</span><span style="width:76px;text-align:right;font-weight:700;font-variant-numeric:tabular-nums">{{ x.amt }}</span>
+                </div>
+              </sc-for>
+            </div>
+          </section>
+        </div>
+
+        <section style="background:#FFFFFF;border:1px solid #ECE5DC;border-radius:18px;overflow:hidden">
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:20px 24px 16px"><h2 style="margin:0;font-size:17px;font-weight:700;letter-spacing:-0.01em">By floor</h2><span style="font-size:13px;color:#6E665D">Floor expenses are floor-tagged; the rest is building-wide</span></div>
+          <div style="display:grid;grid-template-columns:minmax(0,1.3fr) 100px repeat(4,minmax(0,1fr)) 120px;gap:16px;padding:12px 24px;background:#FBF8F4;border-top:1px solid #F3EEE7;border-bottom:1px solid #F3EEE7;font-size:12.5px;font-weight:600;color:#6E665D"><span>Floor</span><span>Tenants</span><span style="text-align:right">Revenue</span><span style="text-align:right">Expenses</span><span style="text-align:right">Net</span><span style="text-align:right">Collection</span><span style="text-align:right">Owed now</span></div>
+          <sc-for list="{{ floors }}" as="f" hint-placeholder-count="4">
+            <div style="display:grid;grid-template-columns:minmax(0,1.3fr) 100px repeat(4,minmax(0,1fr)) 120px;gap:16px;align-items:center;padding:15px 24px;border-bottom:1px solid #F3EEE7;font-size:14px;font-variant-numeric:tabular-nums">
+              <span style="font-weight:600">{{ f.name }}</span><span style="color:#6E665D">{{ f.n }}</span><span style="text-align:right">{{ f.rev }}</span><span style="text-align:right;color:#6E665D">{{ f.exp }}</span><span style="text-align:right;font-weight:700">{{ f.net }}</span><span style="text-align:right">{{ f.rate }}</span><span style="text-align:right">{{ f.owed }}</span>
+            </div>
+          </sc-for>
+          <div style="display:grid;grid-template-columns:minmax(0,1.3fr) 100px repeat(4,minmax(0,1fr)) 120px;gap:16px;align-items:center;padding:15px 24px;background:#FBF8F4;font-size:14px;font-weight:700;font-variant-numeric:tabular-nums"><span>Building total</span><span>8</span><span style="text-align:right">₱599,100</span><span style="text-align:right">₱115,100</span><span style="text-align:right">₱484,000</span><span style="text-align:right">96%</span><span style="text-align:right">₱38,450</span></div>
+        </section>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isReports }}" hint-placeholder-val="{{ false }}">
+      <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:24px">
+        <section style="background:#FFFFFF;border:1px solid #ECE5DC;border-radius:18px;padding:24px;display:flex;gap:18px">
+          <span style="width:48px;height:48px;border-radius:14px;background:#FDEEE3;color:#B9531A;display:flex;align-items:center;justify-content:center;flex:none"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9zM14 3v6h6M8 13h8M8 17h5"></path></svg></span>
+          <div style="display:flex;flex-direction:column;gap:8px;flex:1"><h2 style="margin:0;font-size:17px;font-weight:700">Income statement</h2><p style="margin:0;font-size:14px;line-height:1.55;color:#4A433B">Revenue, expenses and net income for any period. Accrual basis by default (advances held as unearned), or cash basis.</p><div style="display:flex;gap:10px;padding-top:6px"><button style="height:42px;padding:0 18px;border:none;border-radius:11px;background:#B9531A;color:#FFFFFF;font-size:14px;font-weight:700;cursor:pointer">Open</button></div></div>
+        </section>
+        <section style="background:#FFFFFF;border:1px solid #ECE5DC;border-radius:18px;padding:24px;display:flex;gap:18px">
+          <span style="width:48px;height:48px;border-radius:14px;background:#FDEEE3;color:#B9531A;display:flex;align-items:center;justify-content:center;flex:none"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v16M16 9h2a2 2 0 0 1 2 2v10M2 21h20M8 7h4M8 11h4M8 15h4"></path></svg></span>
+          <div style="display:flex;flex-direction:column;gap:8px;flex:1"><h2 style="margin:0;font-size:17px;font-weight:700">Income statement per floor</h2><p style="margin:0;font-size:14px;line-height:1.55;color:#4A433B">Each floor's revenue with its own floor-tagged expenses. Building-wide costs can be split across floors.</p><div style="display:flex;gap:10px;padding-top:6px"><button style="height:42px;padding:0 16px;border:1px solid #E4DCD1;border-radius:11px;background:#FFFFFF;font-size:14px;font-weight:600;color:#1F1B16;cursor:pointer">Side by side</button><button style="height:42px;padding:0 16px;border:1px solid #E4DCD1;border-radius:11px;background:#FFFFFF;font-size:14px;font-weight:600;color:#1F1B16;cursor:pointer">One page per floor</button></div></div>
+        </section>
+        <section style="background:#FFFFFF;border:1px solid #ECE5DC;border-radius:18px;padding:24px;display:flex;gap:18px">
+          <span style="width:48px;height:48px;border-radius:14px;background:#FDEEE3;color:#B9531A;display:flex;align-items:center;justify-content:center;flex:none"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"></path></svg></span>
+          <div style="display:flex;flex-direction:column;gap:8px;flex:1"><h2 style="margin:0;font-size:17px;font-weight:700">Statement of account</h2><p style="margin:0;font-size:14px;line-height:1.55;color:#4A433B">A tenant's bills, payments and balance for a period, ready to print or save as PDF.</p><div style="display:flex;gap:10px;padding-top:6px"><div style="height:42px;padding:0 14px;border:1px solid #E4DCD1;border-radius:11px;display:flex;align-items:center;gap:10px;font-size:14px;flex:1;justify-content:space-between">Maria Santos · Unit 301<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="#6E665D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"></path></svg></div><button style="height:42px;padding:0 18px;border:none;border-radius:11px;background:#B9531A;color:#FFFFFF;font-size:14px;font-weight:700;cursor:pointer">Open</button></div></div>
+        </section>
+        <section style="background:#FFFFFF;border:1px solid #ECE5DC;border-radius:18px;padding:24px;display:flex;gap:18px">
+          <span style="width:48px;height:48px;border-radius:14px;background:#FDEEE3;color:#B9531A;display:flex;align-items:center;justify-content:center;flex:none"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"></path></svg></span>
+          <div style="display:flex;flex-direction:column;gap:8px;flex:1"><h2 style="margin:0;font-size:17px;font-weight:700">Exports</h2><p style="margin:0;font-size:14px;line-height:1.55;color:#4A433B">Spreadsheet-ready CSV files of every bill and every expense.</p><div style="display:flex;gap:10px;padding-top:6px"><button style="height:42px;padding:0 16px;border:1px solid #E4DCD1;border-radius:11px;background:#FFFFFF;font-size:14px;font-weight:600;color:#1F1B16;cursor:pointer">Bills CSV</button><button style="height:42px;padding:0 16px;border:1px solid #E4DCD1;border-radius:11px;background:#FFFFFF;font-size:14px;font-weight:600;color:#1F1B16;cursor:pointer">Expenses CSV</button></div></div>
+        </section>
+      </div>
+    </sc-if>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  state = { tab: 'insights' };
+  renderVals() {
+    const peso = n => '₱' + Math.round(n).toLocaleString('en-PH');
+    const tab = this.state.tab;
+    const tabs = [['insights', 'Insights'], ['reports', 'Statements & exports']].map(([k, label]) => {
+      const on = k === tab;
+      return { label, pick: () => this.setState({ tab: k }), style: { height: '44px', padding: '0 4px', marginRight: '18px', border: 'none', borderBottom: on ? '2.5px solid #E8772E' : '2.5px solid transparent', marginBottom: '-1px', background: 'transparent', color: on ? '#1F1B16' : '#6E665D', fontSize: '14.5px', fontWeight: on ? 700 : 600, cursor: 'pointer' } };
+    });
+    const ms = ['Nov', 'Dec', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct'];
+    const nv = [40.1, 38.6, 42.2, 40.9, 41.5, 39.8, 43.0, 40.9, 43.4, 42.1, 45.6, 25.9];
+    const net = ms.map((m, i) => ({
+      m, val: nv[i].toFixed(1) + 'K', title: m + ' · ' + peso(nv[i] * 1000),
+      bar: { width: '100%', maxWidth: '44px', height: Math.round(nv[i] / 50 * 180) + 'px', borderRadius: '8px 8px 3px 3px', background: i === 10 ? '#E8772E' : i === 11 ? '#F8DCC6' : '#F4C29C' }
+    }));
+    const total = 38450;
+    const aging = [['Not yet due', '3 bills', 13500, '#A9D9BE'], ['1–30 days late', '3 bills', 14300, '#E9A93A'], ['31–60 days late', 'None', 0, '#E07B3A'], ['61–90 days late', 'None', 0, '#D4553F'], ['Over 90 days', '3 bills · former tenant', 10650, '#B5322A']]
+      .map(([label, count, v, c]) => ({ label, count, amt: peso(v), bar: { width: (v / total * 100).toFixed(1) + '%', height: '100%', borderRadius: '5px', background: c } }));
+    const mixRaw = [['Electricity', 39100, '#E8772E'], ['Maintenance', 25300, '#F4AE7A'], ['Water', 20700, '#6E9BE0'], ['Internet', 16100, '#A68AD9'], ['Taxes & Fees', 8100, '#A89D90'], ['Other', 5800, '#6CB3B9']];
+    const mt = 115100;
+    const mix = mixRaw.map(([label, v, c]) => ({ label, amt: peso(v), pct: Math.round(v / mt * 100) + '%', seg: { flex: String(v), background: c }, dot: { width: '10px', height: '10px', borderRadius: '3px', background: c, flex: 'none' } }));
+    const floors = [
+      ['1st floor', '3', 224000, 9400, 214600, '97%', 6500],
+      ['2nd floor', '2 + 1 former', 160300, 12100, 148200, '92%', 18450],
+      ['3rd floor', '3', 214800, 11600, 203200, '98%', 13500],
+      ['Building-wide', '—', 0, 82000, -82000, '—', 0]
+    ].map(([name, n, rev, exp, nt, rate, owed]) => ({ name, n, rev: rev ? peso(rev) : '—', exp: peso(exp), net: (nt < 0 ? '−' : '') + peso(Math.abs(nt)), rate, owed: owed ? peso(owed) : '—' }));
+    return { tabs, isInsights: tab === 'insights', isReports: tab === 'reports', net, aging, mix, floors };
+  }
+}
+</script>
+</body>
+</html>

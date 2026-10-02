@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>body{margin:0;background:#F8F4EE;-webkit-font-smoothing:antialiased}*{box-sizing:border-box}button,input,select{font-family:inherit}input::placeholder{color:#9A9187}a{color:#A84A15;text-decoration:none}a:hover{color:#B9531A}</style>
+</helmet>
+<div data-screen-label="Tenants" style="width:1440px;min-height:1000px;display:grid;grid-template-columns:256px minmax(0,1fr);background:linear-gradient(90deg,#FFFFFF 0 255px,#ECE5DC 255px 256px,#F8F4EE 256px);font-family:'Plus Jakarta Sans',system-ui,sans-serif;color:#1F1B16">
+  <dc-import name="OA Sidebar" active="tenants" hint-size="256px,1000px"></dc-import>
+  <main style="padding:30px 40px 44px;display:flex;flex-direction:column;gap:24px;min-width:0">
+    <dc-import name="OA Topbar" title="Tenants" subtitle="8 active across 3 floors · ₱27,800 owed" hint-size="100%,62px"></dc-import>
+
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <div style="display:flex;gap:2px;padding:4px;border-radius:12px;background:#EFE8DF">
+        <sc-for list="{{ tabs }}" as="t" hint-placeholder-count="4"><button onClick="{{ t.pick }}" style="{{ t.style }}">{{ t.label }}<span style="{{ t.countStyle }}">{{ t.count }}</span></button></sc-for>
+      </div>
+      <div style="position:relative;width:300px">
+        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="position:absolute;left:14px;top:13px;color:#9A9187"><path d="M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM21 21l-4.3-4.3"></path></svg>
+        <input onInput="{{ onSearch }}" placeholder="Name, unit or access code" style="width:100%;height:44px;border:1px solid #E4DCD1;border-radius:11px;background:#FFFFFF;padding:0 14px 0 40px;font-size:14px;color:#1F1B16;outline:none" style-focus="border-color:#E8772E;box-shadow:0 0 0 4px #FDEEE3">
+      </div>
+      <div style="position:relative">
+        <button onClick="{{ toggleFloor }}" style="height:44px;padding:0 14px;border:1px solid #E4DCD1;border-radius:11px;background:#FFFFFF;display:inline-flex;align-items:center;gap:8px;font-size:14px;font-weight:600;color:#1F1B16;cursor:pointer;white-space:nowrap">{{ floorLabel }}<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"></path></svg></button>
+        <sc-if value="{{ floorOpen }}" hint-placeholder-val="{{ false }}">
+          <div style="position:absolute;left:0;top:50px;z-index:10;min-width:180px;padding:6px;background:#FFFFFF;border:1px solid #ECE5DC;border-radius:14px;box-shadow:0 20px 40px -16px rgba(60,40,20,0.28);display:flex;flex-direction:column;gap:2px">
+            <sc-for list="{{ floorOpts }}" as="o" hint-placeholder-count="4"><button onClick="{{ o.pick }}" style="{{ o.style }}">{{ o.label }}</button></sc-for>
+          </div>
+        </sc-if>
+      </div>
+      <a href="Add Tenant.dc.html" style="margin-left:auto;height:44px;padding:0 18px;border-radius:11px;background:#B9531A;color:#FFFFFF;display:inline-flex;align-items:center;gap:8px;font-size:14px;font-weight:700;text-decoration:none;white-space:nowrap" style-hover="background:#9F4614;color:#FFFFFF"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"></path></svg>Add tenant</a>
+    </div>
+
+    <section style="background:#FFFFFF;border:1px solid #ECE5DC;border-radius:18px;overflow:hidden">
+      <div style="display:grid;grid-template-columns:minmax(0,1.5fr) 110px minmax(0,1fr) 170px 140px 110px 24px;gap:16px;padding:13px 24px;background:#FBF8F4;border-bottom:1px solid #F3EEE7;font-size:12.5px;font-weight:600;color:#6E665D">
+        <span>Tenant</span><span>Unit</span><span>Billing</span><span>Paid through · last 6 cycles</span><span>Status</span><span style="text-align:right">Balance</span><span></span>
+      </div>
+      <sc-for list="{{ groups }}" as="g" hint-placeholder-count="3">
+        <div style="display:flex;flex-direction:column">
+          <sc-if value="{{ g.showHead }}" hint-placeholder-val="{{ true }}">
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:11px 24px;background:#FDFBF8;border-bottom:1px solid #F3EEE7"><span style="font-size:12px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:#4A433B">{{ g.name }}</span><span style="font-size:12.5px;color:#6E665D">{{ g.meta }}</span></div>
+          </sc-if>
+          <sc-for list="{{ g.rows }}" as="t" hint-placeholder-count="3">
+            <a href="Tenant Detail.dc.html" style="display:grid;grid-template-columns:minmax(0,1.5fr) 110px minmax(0,1fr) 170px 140px 110px 24px;gap:16px;align-items:center;padding:16px 24px;border-bottom:1px solid #F3EEE7;color:#1F1B16;text-decoration:none" style-hover="background:#FDFBF8;color:#1F1B16">
+              <div style="display:flex;align-items:center;gap:12px;min-width:0"><span style="{{ t.avStyle }}">{{ t.ini }}</span><div style="display:flex;flex-direction:column;gap:2px;min-width:0"><span style="font-size:14.5px;font-weight:600">{{ t.name }}</span><span style="font-size:12.5px;color:#6E665D;font-variant-numeric:tabular-nums">{{ t.phone }}</span></div></div>
+              <div style="display:flex;flex-direction:column;gap:2px"><span style="font-size:14px;font-weight:600;font-variant-numeric:tabular-nums">{{ t.unit }}</span><span style="font-size:12.5px;color:#6E665D">{{ t.floor }}</span></div>
+              <div style="display:flex;flex-direction:column;gap:2px"><span style="font-size:14px;font-variant-numeric:tabular-nums">{{ t.rate }}</span><span style="font-size:12.5px;color:#6E665D">{{ t.model }}</span></div>
+              <div style="display:flex;flex-direction:column;gap:7px"><span style="font-size:14px;font-variant-numeric:tabular-nums">{{ t.thru }}</span><div style="display:flex;gap:4px"><sc-for list="{{ t.strip }}" as="c" hint-placeholder-count="6"><span title="{{ c.title }}" style="{{ c.style }}"></span></sc-for></div></div>
+              <span><span style="{{ t.pillStyle }}"><span style="width:6px;height:6px;border-radius:50%;background:currentColor"></span>{{ t.status }}</span></span>
+              <span style="{{ t.balStyle }}">{{ t.bal }}</span>
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#9A9187" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"></path></svg>
+            </a>
+          </sc-for>
+        </div>
+      </sc-for>
+      <sc-if value="{{ empty }}" hint-placeholder-val="{{ false }}"><div style="padding:36px 24px;text-align:center;font-size:14px;color:#6E665D">No tenants match. Try another filter or search.</div></sc-if>
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 24px;font-size:13.5px;color:#6E665D">
+        <div style="display:flex;align-items:center;gap:16px">
+          <span style="white-space:nowrap;flex:none">{{ foot }}</span>
+          <span style="display:inline-flex;align-items:center;gap:6px"><span style="width:10px;height:10px;border-radius:3px;background:#A9D9BE"></span>Paid</span>
+          <span style="display:inline-flex;align-items:center;gap:6px"><span style="width:10px;height:10px;border-radius:3px;background:#DCE8F9;box-shadow:inset 0 0 0 1.5px #3B7BDB"></span>Ahead</span>
+          <span style="display:inline-flex;align-items:center;gap:6px"><span style="width:10px;height:10px;border-radius:3px;background:#FFE7B8;box-shadow:inset 0 0 0 1.5px #E09B23"></span>Due</span>
+          <span style="display:inline-flex;align-items:center;gap:6px"><span style="width:10px;height:10px;border-radius:3px;background:#EF9A90"></span>Late</span>
+        </div>
+        <a style="font-weight:700;color:#A84A15;cursor:pointer">Archived tenants (2)</a>
+      </div>
+    </section>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;groupByFloor&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;}}">
+class Component extends DCLogic {
+  state = { f: 'all', q: '', floor: 'all', floorOpen: false };
+  renderVals() {
+    const peso = n => '₱' + Math.round(n).toLocaleString('en-PH');
+    const tone = { late: ['#FDECEA', '#C2362B'], due: ['#FFF3DA', '#94590A'], ahead: ['#E8F0FB', '#2C62B0'], none: ['#F3EFEA', '#5F574E'] };
+    const pill = k => ({ display: 'inline-flex', alignItems: 'center', gap: '6px', height: '26px', padding: '0 10px', borderRadius: '999px', fontSize: '12.5px', fontWeight: 600, whiteSpace: 'nowrap', background: tone[k][0], color: tone[k][1] });
+    const avPal = [['#FDEEE3', '#A84A15'], ['#E8F0FB', '#2C62B0'], ['#E6F4EC', '#1E7A52'], ['#F1EAFB', '#6A46B0'], ['#FFF3DA', '#8A5508'], ['#E3F1F2', '#1D6B73']];
+    const av = (name, s) => { let h = 0; for (const c of name) h = (h * 31 + c.charCodeAt(0)) % 1009; const p = avPal[h % avPal.length]; return { width: s + 'px', height: s + 'px', borderRadius: '50%', background: p[0], color: p[1], display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: Math.round(s * 0.34) + 'px', fontWeight: 700, flex: 'none' }; };
+    const ini = n => { const w = n.split(' '); return (w[0][0] + w[w.length - 1][0]).toUpperCase(); };
+    const cyc = {
+      p: [{ background: '#A9D9BE' }, 'Paid'], a: [{ background: '#DCE8F9', boxShadow: 'inset 0 0 0 1.5px #3B7BDB' }, 'Paid ahead'],
+      d: [{ background: '#FFE7B8', boxShadow: 'inset 0 0 0 1.5px #E09B23' }, 'Due'], l: [{ background: '#EF9A90' }, 'Late']
+    };
+    const T = [
+      ['Liza Bautista', '102', '1st floor', 'Itemized', 6500, 'Sep 27', 'Overdue', 'late', 6500, 'LB4Q7T', '0917 555 0102', 'pppppl'],
+      ['Carlo Mendoza', '103', '1st floor', 'All-inclusive', 7500, 'Nov 14', 'Paid ahead', 'ahead', 0, 'CM8R2K', '0918 555 0103', 'pppppa'],
+      ['Ana Villanueva', '105', '1st floor', 'Itemized', 6500, 'Oct 19', 'Settled', 'none', 0, 'AV2M9P', '0927 555 0105', 'pppppp'],
+      ['Ramon dela Cruz', '204', '2nd floor', 'Itemized', 6500, 'Sep 4', 'Overdue', 'late', 7800, 'RD7X3N', '0915 555 0204', 'pppppl'],
+      ['Grace Lim', '206', '2nd floor', 'All-inclusive', 7500, 'Oct 30', 'Settled', 'none', 0, 'GL5T8W', '0906 555 0206', 'pppppp'],
+      ['Maria Santos', '301', '3rd floor', 'Itemized', 6500, 'Oct 1', 'Due today', 'due', 7000, 'MS3K9D', '0917 555 0301', 'pppppd'],
+      ['Jun Reyes', '303', '3rd floor', 'Itemized', 6500, 'Oct 3', 'Due Oct 4', 'due', 6500, 'JR6P2L', '0919 555 0303', 'pppppd'],
+      ['Paolo Garcia', '304', '3rd floor', 'Itemized', 6500, 'Dec 9', 'Paid ahead', 'ahead', 0, 'PG9W4H', '0928 555 0304', 'ppppaa']
+    ].map(([name, unit, floor, model, rate, thru, status, kind, bal, code, phone, c]) => ({ name, unit, floor, model, rate, thru, status, kind, bal, code, phone, c }));
+    const tests = { all: () => true, owing: t => t.bal > 0, overdue: t => t.kind === 'late', ahead: t => t.kind === 'ahead' };
+    const f = this.state.f, q = this.state.q.trim().toLowerCase();
+    const fl = this.state.floor;
+    const vis = T.filter(t => tests[f](t) && (fl === 'all' || t.floor === fl) && (!q || [t.name, t.unit, t.code].some(v => v.toLowerCase().includes(q))));
+    const tabs = [['all', 'All'], ['owing', 'Owing'], ['overdue', 'Overdue'], ['ahead', 'Paid ahead']].map(([k, label]) => {
+      const on = k === f;
+      return {
+        label, count: String(T.filter(tests[k]).length), pick: () => this.setState({ f: k }),
+        style: { height: '36px', padding: '0 14px', border: 'none', borderRadius: '9px', background: on ? '#FFFFFF' : 'transparent', boxShadow: on ? '0 1px 3px rgba(60,40,20,0.12)' : 'none', color: on ? '#1F1B16' : '#6E665D', fontSize: '13.5px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '7px', cursor: 'pointer', whiteSpace: 'nowrap', flex: 'none' },
+        countStyle: { fontSize: '12px', fontWeight: 700, color: on ? '#B9531A' : '#9A9187' }
+      };
+    });
+    const row = t => ({
+      name: t.name, ini: ini(t.name), avStyle: av(t.name, 40), phone: t.phone, unit: 'Unit ' + t.unit, floor: t.floor,
+      rate: peso(t.rate) + ' / month', model: t.model, thru: t.thru, status: t.status, pillStyle: pill(t.kind),
+      bal: t.bal ? peso(t.bal) : '—', balStyle: { textAlign: 'right', fontSize: '14.5px', fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: t.bal ? (t.kind === 'late' ? '#C2362B' : '#1F1B16') : '#9A9187' },
+      strip: t.c.split('').map(k => ({ title: cyc[k][1], style: { width: '14px', height: '14px', borderRadius: '4px', ...cyc[k][0] } }))
+    });
+    const floors = ['1st floor', '2nd floor', '3rd floor'];
+    const groups = (this.props.groupByFloor ?? true)
+      ? floors.map(fl => {
+          const rs = vis.filter(t => t.floor === fl), owed = rs.reduce((s, t) => s + t.bal, 0);
+          return { name: fl, showHead: true, meta: rs.length + (rs.length === 1 ? ' tenant' : ' tenants') + (owed ? ' · ' + peso(owed) + ' owed' : ' · nothing owed'), rows: rs.map(row) };
+        }).filter(g => g.rows.length)
+      : [{ name: '', meta: '', showHead: false, rows: vis.slice().sort((a, b) => a.name.localeCompare(b.name)).map(row) }];
+    return {
+      tabs, groups, empty: vis.length === 0,
+      foot: 'Showing ' + vis.length + ' of ' + T.length,
+      onSearch: e => this.setState({ q: e.target.value }),
+      floorLabel: fl === 'all' ? 'All floors' : fl,
+      floorOpen: this.state.floorOpen,
+      toggleFloor: () => this.setState(s => ({ floorOpen: !s.floorOpen })),
+      floorOpts: [['all', 'All floors'], ['1st floor', '1st floor'], ['2nd floor', '2nd floor'], ['3rd floor', '3rd floor']].map(([k, label]) => ({
+        label, pick: () => this.setState({ floor: k, floorOpen: false }),
+        style: { height: '38px', padding: '0 12px', border: 'none', borderRadius: '9px', background: k === fl ? '#FDEEE3' : 'transparent', color: k === fl ? '#A84A15' : '#1F1B16', fontSize: '14px', fontWeight: k === fl ? 700 : 500, textAlign: 'left', cursor: 'pointer' }
+      }))
+    };
+  }
+}
+</script>
+</body>
+</html>

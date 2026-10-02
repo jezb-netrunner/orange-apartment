@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src https://bxzfqjspoyvwosmpgeof.supabase.co; img-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self';">
+<!-- Clickjacking guard. GitHub Pages can't send X-Frame-Options or a CSP
+     frame-ancestors header (browsers ignore frame-ancestors in a <meta>),
+     so refuse to render inside a frame on another site. -->
+<style id="antiframe">html{display:none !important}</style>
+<script>
+  if (window.self === window.top) { var s = document.getElementById('antiframe'); if (s) s.parentNode.removeChild(s); }
+  else { try { window.top.location = window.self.location.href; } catch (e) {} }
+</script>
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex, nofollow">
+<meta name="description" content="Tenant billing portal for Orange Apartment, Baguio">
+<meta name="theme-color" content="#4169e1">
+<meta property="og:title" content="Orange Apartment">
+<meta property="og:description" content="Tenant billing portal">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://orange-apartment.com">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='40' fill='%23e67e22'/></svg>">
+<title>Orange Apartment</title>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="app.css?v=__ASSET_V__">
+<link rel="stylesheet" href="redesign.css?v=__ASSET_V__">
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="login-screen">
+  <div class="login-wrap">
+    <div class="login-wordmark">Orange Apartment</div>
+    <h1 class="login-heading">Welcome back</h1>
+    <p class="login-sub">Sign in to manage your tenants, or enter your access code to view your bills.</p>
+    <div class="login-tabs">
+      <button class="login-tab active" onclick="switchTab('admin')">Admin</button>
+      <button class="login-tab" onclick="switchTab('tenant')">Tenant Portal</button>
+    </div>
+    <div id="admin-form">
+      <div class="field">
+        <label for="admin-email">Email</label>
+        <input type="email" id="admin-email" autocomplete="email" placeholder="your@email.com" onkeydown="if(event.key==='Enter')adminLogin()">
+      </div>
+      <div class="field">
+        <label for="admin-pw">Password</label>
+        <input type="password" id="admin-pw" autocomplete="current-password" placeholder="Enter password" onkeydown="if(event.key==='Enter')adminLogin()">
+      </div>
+      <div class="remember-row">
+        <input type="checkbox" id="admin-remember">
+        <label for="admin-remember">Keep me signed in on this device</label>
+      </div>
+      <button class="btn-primary" onclick="adminLogin()">Enter Dashboard</button>
+      <div style="text-align:center;margin-top:14px;">
+        <button onclick="sendPasswordReset()" class="link-btn">Forgot password?</button>
+      </div>
+    </div>
+    <div id="tenant-form" style="display:none">
+      <div class="field">
+        <label for="tenant-code">Access Code</label>
+        <input type="text" id="tenant-code" autocomplete="one-time-code" maxlength="20" placeholder="e.g. XKQR-A7BN" style="letter-spacing:0.1em;text-transform:uppercase" oninput="this.value=this.value.toUpperCase()" onkeydown="if(event.key==='Enter')tenantLogin()">
+      </div>
+      <div class="remember-row">
+        <input type="checkbox" id="tenant-remember" checked>
+        <label for="tenant-remember">Keep me signed in on this device</label>
+      </div>
+      <button class="btn-primary" onclick="tenantLogin()">View My Bills</button>
+    </div>
+    <div class="login-error" id="login-error"></div>
+    <div class="powered-by powered-by-login">Powered by JEZ</div>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="app">
+  <header>
+    <div class="nav-wordmark"><span class="nav-dot"></span>Orange Apartment</div>
+    <div class="nav-right">
+      <span class="nav-user" id="header-info"></span>
+      <button class="btn-logout" onclick="logout()">Sign out</button>
+    </div>
+  </header>
+  <!-- Admin module navigation (rendered by app.js): tabs on wide screens,
+       a bottom bar on phones. Hidden for tenants. -->
+  <nav class="admin-tabs" id="admin-tabs" aria-label="Admin sections"></nav>
+  <main id="main-content"></main>
+  <div class="powered-by-app">Powered by JEZ</div>
+  <nav class="bottom-nav" id="bottom-nav" aria-label="Admin sections"></nav>
+</div>
+
+<!-- MODAL -->
+<div class="modal-overlay" id="tenant-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+  <div class="modal">
+    <div class="modal-eyebrow" id="modal-eyebrow">New Tenant</div>
+    <div class="modal-title" id="modal-title">Add a tenant</div>
+    <div class="modal-tabs" id="modal-tabs" style="display:none">
+      <button class="modal-tab active" data-tab="info" onclick="switchModalTab('info',this)">Tenant Info</button>
+      <button class="modal-tab" data-tab="bills" onclick="switchModalTab('bills',this)">Bills</button>
+      <button class="modal-tab" data-tab="templates" onclick="switchModalTab('templates',this)">Recurring</button>
+    </div>
+    <div class="modal-panel active" id="panel-info">
+      <div class="form-grid">
+        <div class="field"><label for="m-name">Full Name</label><input type="text" id="m-name" maxlength="80" placeholder="e.g. Maria Santos"></div>
+        <div class="field"><label for="m-unit">Unit Number</label><input type="text" id="m-unit" maxlength="40" placeholder="e.g. 301"></div>
+        <div class="field full">
+          <label for="m-code">Access Code</label>
+          <div class="code-row">
+            <input type="text" id="m-code" maxlength="20" placeholder="Auto-generated" style="letter-spacing:0.1em;text-transform:uppercase" oninput="this.value=this.value.toUpperCase()">
+            <button class="btn-gen" onclick="generateCode()">Generate</button>
+          </div>
+        </div>
+        <div class="field"><label for="m-phone">Phone <span style="font-weight:400;color:var(--muted)">(optional)</span></label><input type="text" id="m-phone" maxlength="30" placeholder="e.g. 0917 123 4567"></div>
+        <div class="field"><label for="m-email">Email <span style="font-weight:400;color:var(--muted)">(optional)</span></label><input type="email" id="m-email" maxlength="120" placeholder="e.g. tenant@email.com"></div>
+        <div class="field"><label for="m-movein">Move-in Date <span style="font-weight:400;color:var(--muted)">(optional)</span></label><input type="date" id="m-movein"><div class="field-hint">Reckoning date for billing cycles and paid-through dates.</div></div>
+        <div class="field"><label for="m-floor">Floor / Group</label><select id="m-floor" onchange="tenantFloorPicked(this)"></select></div>
+        <div class="field full">
+          <label for="m-billing">Billing Model</label>
+          <select id="m-billing" onchange="onBillingModelChange()">
+            <option value="itemized">Itemized — rent + utilities billed separately</option>
+            <option value="inclusive">All-inclusive — one flat monthly rate</option>
+          </select>
+        </div>
+        <div class="field full" id="m-flatrate-wrap" style="display:none">
+          <label for="m-flatrate">Monthly Flat Rate (&#8369;)</label>
+          <input type="text" id="m-flatrate" inputmode="decimal" autocomplete="off" placeholder="e.g. 6500">
+          <div class="field-hint">Shown to the tenant as their fixed monthly rate, utilities included. If the tenant has no recurring charge yet, one is created and bills post automatically each cycle.</div>
+        </div>
+        <div class="field full" id="m-rent-wrap" style="display:none" data-allowed="1">
+          <label for="m-rent">Monthly Rent (&#8369;) <span style="font-weight:400;color:var(--muted)">(optional)</span></label>
+          <input type="text" id="m-rent" inputmode="decimal" autocomplete="off" placeholder="e.g. 6500">
+          <div class="field-hint">Creates a recurring monthly rent bill that posts automatically each cycle. Utilities and other charges can be added under Recurring later.</div>
+        </div>
+        <div class="field" id="m-dueday-wrap" style="display:none">
+          <label for="m-dueday">Rent Due Day <span style="font-weight:400;color:var(--muted)">(1&ndash;31)</span></label>
+          <input type="number" id="m-dueday" min="1" max="31" inputmode="numeric" placeholder="Move-in day">
+        </div>
+      </div>
+      <div id="new-tenant-bills">
+        <hr class="divider">
+        <div class="bills-section-label">Opening bills <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted)">(optional &mdash; balances carried over from before)</span></div>
+        <div id="bill-forms"></div>
+        <button class="btn-add-bill" onclick="addBillForm()">+ Add a bill</button>
+      </div>
+      <div class="modal-actions">
+        <button class="btn-cancel" onclick="closeModal()">Cancel</button>
+        <button class="btn-save" id="btn-save-tenant" onclick="saveTenant()">Save tenant</button>
+      </div>
+    </div>
+    <div class="modal-panel" id="panel-bills">
+      <div class="modal-tab-hint">Changes on this tab save instantly &mdash; no Save button needed.</div>
+      <div id="bill-list-items"></div>
+      <button class="btn-add-bill" id="btn-start-new-bill" onclick="startNewBill()">+ Add new bill</button>
+      <div id="new-bill-inline" style="display:none"></div>
+      <div class="modal-actions">
+        <button class="btn-cancel" onclick="closeModal()">Done</button>
+      </div>
+    </div>
+
+    <div class="modal-panel" id="panel-templates">
+      <div class="modal-tab-hint">Changes on this tab save instantly &mdash; no Save button needed.</div>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:16px;line-height:1.6;">
+        Recurring charges post a bill every cycle, ahead of the due date (rent is paid in advance). Set a label, amount, and the day of month it's due.
+      </p>
+      <div id="tmpl-list"></div>
+      <button class="btn-add-bill" id="btn-start-new-tmpl" onclick="startNewTemplate()">+ Add template</button>
+      <div id="new-tmpl-inline" style="display:none"></div>
+      <div class="modal-actions">
+        <button class="btn-cancel" onclick="closeModal()">Done</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- GENERATE BILLS MODAL -->
+<div id="genbills-modal" role="dialog" aria-modal="true" aria-labelledby="genbills-title">
+  <div class="genbills-box">
+    <div class="genbills-head">
+      <div class="genbills-eyebrow">Recurring Bills</div>
+      <div class="genbills-title" id="genbills-title">Generate Monthly Bills</div>
+    </div>
+    <div class="genbills-body">
+      <div class="gen-month-picker">
+        <label for="gen-month-input">Month:</label>
+        <input type="month" id="gen-month-input" onchange="refreshGenPreview()">
+      </div>
+      <div id="gen-preview-body"></div>
+    </div>
+    <div class="genbills-footer">
+      <button class="btn-cancel" onclick="closeGenModal()">Cancel</button>
+      <button class="btn-save" id="gen-confirm-btn" onclick="confirmGenerateBills()">Generate Bills</button>
+    </div>
+  </div>
+</div>
+
+
+
+<!-- STATEMENT MODAL -->
+<div id="stmt-modal" role="dialog" aria-modal="true" aria-labelledby="stmt-title">
+  <div class="stmt-box">
+    <div class="stmt-eyebrow">Statement</div>
+    <div class="stmt-title" id="stmt-title">Generate Statement</div>
+    <div class="stmt-sub" id="stmt-sub">Adjust the options below &mdash; the preview updates live.</div>
+    <div class="stmt-layout">
+      <div class="stmt-opts">
+        <div class="stmt-opt-section">
+          <div class="stmt-opt-label">Period</div>
+          <div class="stmt-presets" id="stmt-presets">
+            <button type="button" class="stmt-preset" data-preset="3m" onclick="setStmtPreset('3m')">3 months</button>
+            <button type="button" class="stmt-preset" data-preset="6m" onclick="setStmtPreset('6m')">6 months</button>
+            <button type="button" class="stmt-preset" data-preset="ytd" onclick="setStmtPreset('ytd')">This year</button>
+            <button type="button" class="stmt-preset" data-preset="all" onclick="setStmtPreset('all')">All time</button>
+          </div>
+          <div class="stmt-range">
+            <div class="stmt-mini-field"><label for="stmt-from">From</label><input type="month" id="stmt-from" onchange="stmtRangeEdited()"></div>
+            <div class="stmt-mini-field"><label for="stmt-to">To</label><input type="month" id="stmt-to" onchange="stmtRangeEdited()"></div>
+          </div>
+        </div>
+        <div class="stmt-opt-section">
+          <div class="stmt-opt-label">Content</div>
+          <div class="stmt-mini-grid">
+            <div class="stmt-mini-field">
+              <label for="stmt-filter">Include</label>
+              <select id="stmt-filter" onchange="stmtOptsChanged()">
+                <option value="all">All bills</option>
+                <option value="unpaid">Unpaid bills only</option>
+                <option value="paid">Paid bills only</option>
+              </select>
+            </div>
+            <div class="stmt-mini-field">
+              <label for="stmt-group">Group bills</label>
+              <select id="stmt-group" onchange="stmtOptsChanged()">
+                <option value="none">No grouping</option>
+                <option value="month">By month</option>
+                <option value="category">Rent / Utilities / Other</option>
+              </select>
+            </div>
+          </div>
+          <div class="stmt-checks">
+            <label><input type="checkbox" id="stmt-col-due" onchange="stmtOptsChanged()"> Due date</label>
+            <label><input type="checkbox" id="stmt-col-status" onchange="stmtOptsChanged()"> Status</label>
+            <label><input type="checkbox" id="stmt-col-paid" onchange="stmtOptsChanged()"> Paid &amp; balance</label>
+            <label><input type="checkbox" id="stmt-col-paiddate" onchange="stmtOptsChanged()"> Paid date</label>
+            <label><input type="checkbox" id="stmt-col-remarks" onchange="stmtOptsChanged()"> Remarks</label>
+            <label><input type="checkbox" id="stmt-payments" onchange="stmtOptsChanged()"> Payment log</label>
+            <label><input type="checkbox" id="stmt-breakdown" onchange="stmtOptsChanged()"> Balance breakdown</label>
+            <label><input type="checkbox" id="stmt-summary" onchange="stmtOptsChanged()"> Summary totals</label>
+            <label><input type="checkbox" id="stmt-sign" onchange="stmtOptsChanged()"> Signature lines</label>
+          </div>
+          <div class="stmt-mini-field">
+            <label for="stmt-note">Note on statement <span class="stmt-opt-optional">(optional)</span></label>
+            <textarea id="stmt-note" rows="2" maxlength="400" placeholder="e.g. Please settle within 7 days of receipt." oninput="stmtOptsChanged()"></textarea>
+          </div>
+        </div>
+        <div class="stmt-opt-section">
+          <div class="stmt-opt-label">Appearance</div>
+          <div class="stmt-mini-grid">
+            <div class="stmt-mini-field">
+              <label for="stmt-sort">Order</label>
+              <select id="stmt-sort" onchange="stmtOptsChanged()">
+                <option value="oldest">Oldest first</option>
+                <option value="newest">Newest first</option>
+              </select>
+            </div>
+            <div class="stmt-mini-field">
+              <label for="stmt-size">Text size</label>
+              <select id="stmt-size" onchange="stmtOptsChanged()">
+                <option value="compact">Compact</option>
+                <option value="normal">Normal</option>
+                <option value="large">Large</option>
+              </select>
+            </div>
+            <div class="stmt-mini-field">
+              <label for="stmt-theme">Ink</label>
+              <select id="stmt-theme" onchange="stmtOptsChanged()">
+                <option value="color">Color</option>
+                <option value="bw">Black &amp; white</option>
+              </select>
+            </div>
+            <div class="stmt-mini-field">
+              <label for="stmt-paper">Paper</label>
+              <select id="stmt-paper" onchange="stmtOptsChanged()">
+                <option value="a4">A4</option>
+                <option value="letter">Letter</option>
+              </select>
+            </div>
+            <div class="stmt-mini-field">
+              <label for="stmt-orient">Layout</label>
+              <select id="stmt-orient" onchange="stmtOptsChanged()">
+                <option value="portrait">Portrait</option>
+                <option value="landscape">Landscape</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="stmt-preview-col">
+        <div class="stmt-preview-frame" id="stmt-preview-frame">
+          <div class="stmt-preview-scale" id="stmt-preview-scale">
+            <iframe id="stmt-preview" title="Statement preview"></iframe>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="stmt-actions">
+      <div class="stmt-actions-hint" id="stmt-hint"></div>
+      <button class="btn-cancel" onclick="closeStmtModal()">Close</button>
+      <button class="btn-save" onclick="printStatement()">Print / Save PDF</button>
+    </div>
+  </div>
+</div>
+
+<!-- INCOME STATEMENT MODAL -->
+<div id="incstmt-modal" role="dialog" aria-modal="true" aria-labelledby="incstmt-title">
+  <div class="stmt-box">
+    <div class="stmt-eyebrow">Report</div>
+    <div class="stmt-title" id="incstmt-title">Income Statement</div>
+    <div class="stmt-sub">Revenue minus building expenses &mdash; the preview updates live.</div>
+    <div class="stmt-layout">
+      <div class="stmt-opts">
+        <div class="stmt-opt-section">
+          <div class="stmt-opt-label">Period</div>
+          <div class="stmt-presets" id="incstmt-presets">
+            <button type="button" class="stmt-preset" data-preset="this" onclick="setIncStmtPreset('this')">This month</button>
+            <button type="button" class="stmt-preset" data-preset="last" onclick="setIncStmtPreset('last')">Last month</button>
+            <button type="button" class="stmt-preset" data-preset="3m" onclick="setIncStmtPreset('3m')">3 months</button>
+            <button type="button" class="stmt-preset" data-preset="6m" onclick="setIncStmtPreset('6m')">6 months</button>
+            <button type="button" class="stmt-preset" data-preset="ytd" onclick="setIncStmtPreset('ytd')">This year</button>
+            <button type="button" class="stmt-preset" data-preset="all" onclick="setIncStmtPreset('all')">All time</button>
+          </div>
+          <div class="stmt-range">
+            <div class="stmt-mini-field"><label for="incstmt-from">From</label><input type="month" id="incstmt-from" onchange="incStmtRangeEdited()"></div>
+            <div class="stmt-mini-field"><label for="incstmt-to">To</label><input type="month" id="incstmt-to" onchange="incStmtRangeEdited()"></div>
+          </div>
+        </div>
+        <div class="stmt-opt-section">
+          <div class="stmt-opt-label">Basis &amp; scope</div>
+          <div class="stmt-mini-field">
+            <label for="incstmt-basis">Basis</label>
+            <select id="incstmt-basis" onchange="incStmtOptsChanged()">
+              <option value="accrual">Accrual (general rule)</option>
+              <option value="cash">Cash</option>
+            </select>
+          </div>
+          <div class="stmt-checks one-col" id="incstmt-prorate-wrap">
+            <label><input type="checkbox" id="incstmt-prorate" onchange="incStmtOptsChanged()"> Spread rent over each billing cycle (straight-line)</label>
+          </div>
+          <div class="stmt-mini-field">
+            <label for="incstmt-scope">Scope</label>
+            <select id="incstmt-scope" onchange="incStmtOptsChanged()"></select>
+          </div>
+          <div class="stmt-mini-field" id="incstmt-alloc-wrap">
+            <label for="incstmt-alloc">Building-wide expenses</label>
+            <select id="incstmt-alloc" onchange="incStmtOptsChanged()">
+              <option value="none">Don't split (building total only)</option>
+              <option value="units">Split by occupied units on each floor</option>
+              <option value="revenue">Split across floors by revenue</option>
+            </select>
+          </div>
+        </div>
+        <div class="stmt-opt-section">
+          <div class="stmt-opt-label">Content</div>
+          <div class="stmt-checks">
+            <label><input type="checkbox" id="incstmt-inc-detail" onchange="incStmtOptsChanged()"> Income by category</label>
+            <label><input type="checkbox" id="incstmt-exp-detail" onchange="incStmtOptsChanged()"> Expense breakdown</label>
+            <label><input type="checkbox" id="incstmt-monthly" onchange="incStmtOptsChanged()"> Month-by-month table</label>
+            <label><input type="checkbox" id="incstmt-memo" onchange="incStmtOptsChanged()"> Memo (receivables / collections)</label>
+            <label><input type="checkbox" id="incstmt-sign" onchange="incStmtOptsChanged()"> Signature lines</label>
+          </div>
+          <div class="stmt-mini-field">
+            <label for="incstmt-note">Note on report <span class="stmt-opt-optional">(optional)</span></label>
+            <textarea id="incstmt-note" rows="2" maxlength="400" placeholder="e.g. Prepared for the building owner." oninput="incStmtOptsChanged()"></textarea>
+          </div>
+        </div>
+        <div class="stmt-opt-section">
+          <div class="stmt-opt-label">Appearance</div>
+          <div class="stmt-mini-grid">
+            <div class="stmt-mini-field">
+              <label for="incstmt-size">Text size</label>
+              <select id="incstmt-size" onchange="incStmtOptsChanged()">
+                <option value="compact">Compact</option>
+                <option value="normal">Normal</option>
+                <option value="large">Large</option>
+              </select>
+            </div>
+            <div class="stmt-mini-field">
+              <label for="incstmt-theme">Ink</label>
+              <select id="incstmt-theme" onchange="incStmtOptsChanged()">
+                <option value="color">Color</option>
+                <option value="bw">Black &amp; white</option>
+              </select>
+            </div>
+            <div class="stmt-mini-field">
+              <label for="incstmt-paper">Paper</label>
+              <select id="incstmt-paper" onchange="incStmtOptsChanged()">
+                <option value="a4">A4</option>
+                <option value="letter">Letter</option>
+              </select>
+            </div>
+            <div class="stmt-mini-field">
+              <label for="incstmt-orient">Layout</label>
+              <select id="incstmt-orient" onchange="incStmtOptsChanged()">
+                <option value="portrait">Portrait</option>
+                <option value="landscape">Landscape</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="stmt-preview-col">
+        <div class="stmt-preview-frame" id="incstmt-preview-frame">
+          <div class="stmt-preview-scale" id="incstmt-preview-scale">
+            <iframe id="incstmt-preview" title="Income statement preview"></iframe>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="stmt-actions">
+      <div class="stmt-actions-hint" id="incstmt-hint"></div>
+      <button class="btn-cancel" onclick="closeIncStmtModal()">Close</button>
+      <button class="btn-save" onclick="printIncomeStatement()">Print / Save PDF</button>
+    </div>
+  </div>
+</div>
+
+<!-- QUICK ADD BILL MODAL -->
+<div id="addbill-modal" role="dialog" aria-modal="true" aria-labelledby="addbill-title">
+  <div class="qb-box">
+    <div class="qb-eyebrow">Billing</div>
+    <div class="qb-title" id="addbill-title">Add a bill</div>
+    <div class="form-grid">
+      <div class="field full">
+        <label for="qb-tenant">Tenant</label>
+        <select id="qb-tenant"></select>
+      </div>
+      <div class="field full">
+        <label for="qb-label">Description</label>
+        <input type="text" id="qb-label" list="qb-label-suggestions" maxlength="80" placeholder="e.g. Monthly Rent" autocomplete="off" onchange="qbAutofill()" onblur="qbAutofill()">
+        <datalist id="qb-label-suggestions"></datalist>
+      </div>
+      <div class="field"><label for="qb-amount">Amount (&#8369;)</label><input type="text" id="qb-amount" placeholder="0" inputmode="decimal" autocomplete="off"></div>
+      <div class="field"><label for="qb-due">Due Date</label><input type="date" id="qb-due"></div>
+      <div class="field"><label for="qb-period">For month <span class="opt">(blank = due date's month)</span></label><input type="month" id="qb-period"></div>
+      <div class="field full" style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+        <input type="checkbox" id="qb-paid" onchange="qbTogglePaid(this)" style="width:15px;height:15px;accent-color:var(--blue);cursor:pointer;">
+        <label for="qb-paid" style="margin-bottom:0;cursor:pointer;">Already paid</label>
+      </div>
+      <div class="field full" id="qb-paiddate-wrap" style="display:none"><label for="qb-paiddate">Date Paid</label><input type="date" id="qb-paiddate"></div>
+    </div>
+    <details class="qb-more" id="qb-more">
+      <summary>More options</summary>
+      <div class="field"><label for="qb-cat">Category</label><select id="qb-cat">
+        <option value="">From the name</option>
+        <option value="rent">Rent (revenue)</option>
+        <option value="utilities">Utility billed back (not revenue)</option>
+        <option value="other">Other charge (revenue)</option>
+      </select></div>
+      <div class="field"><label for="qb-remark">Remark <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted)">(optional)</span></label><input type="text" id="qb-remark" maxlength="200" placeholder="e.g. Penalties apply"></div>
+      <div class="field"><label for="qb-scan">Google Drive Scan Link <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted)">(optional)</span></label><input type="text" id="qb-scan" placeholder="https://drive.google.com/..."></div>
+    </details>
+    <div class="qb-actions">
+      <button class="btn-cancel" onclick="closeQuickBill()">Cancel</button>
+      <button class="btn-qb-another" onclick="saveQuickBill(true)" title="Save this bill and keep the form open">Save + another</button>
+      <button class="btn-save" onclick="saveQuickBill(false)">Add Bill</button>
+    </div>
+  </div>
+</div>
+
+<!-- RECEIVE PAYMENT MODAL -->
+<div id="pay-modal" role="dialog" aria-modal="true" aria-labelledby="pay-title">
+  <div class="qb-box">
+    <div class="qb-eyebrow">Payment</div>
+    <div class="qb-title" id="pay-title">Receive payment</div>
+    <div class="form-grid">
+      <div class="field full">
+        <label for="pay-tenant">Tenant</label>
+        <select id="pay-tenant" onchange="renderPayPreview()"></select>
+      </div>
+      <div class="field"><label for="pay-amount">Amount received (&#8369;)</label><input type="text" id="pay-amount" inputmode="decimal" autocomplete="off" placeholder="0" oninput="renderPayPreview()"></div>
+      <div class="field"><label for="pay-date">Date received</label><input type="date" id="pay-date" onchange="renderPayPreview()"></div>
+      <div class="field full"><label for="pay-note">Reference <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted)">(optional)</span></label><input type="text" id="pay-note" maxlength="120" placeholder="e.g. GCash ref #1234567" oninput="renderPayPreview()"></div>
+      <div class="field full check-field" id="pay-advance-wrap">
+        <input type="checkbox" id="pay-advance" checked onchange="renderPayPreview()">
+        <label for="pay-advance">Apply any excess as advance rent <span class="opt">(pays the next cycles ahead of time)</span></label>
+      </div>
+    </div>
+    <div id="pay-preview" class="pay-preview" aria-live="polite"></div>
+    <div class="qb-actions">
+      <button class="btn-cancel" onclick="closePayModal()">Cancel</button>
+      <button class="btn-save" id="pay-confirm" onclick="confirmPayment()">Record payment</button>
+    </div>
+  </div>
+</div>
+
+<!-- PAID DATE MODAL -->
+<div id="paiddate-modal" role="dialog" aria-modal="true" aria-labelledby="paiddate-bill-name">
+  <div class="paiddate-box">
+    <div class="paiddate-eyebrow">Confirm Payment</div>
+    <div class="paiddate-title" id="paiddate-bill-name">Bill</div>
+    <div class="field" style="margin-top:4px;">
+      <label for="paiddate-input">Date Paid</label>
+      <input type="date" id="paiddate-input">
+    </div>
+    <div class="paiddate-actions">
+      <button class="btn-cancel" onclick="closePaidModal()">Cancel</button>
+      <button class="btn-save" onclick="confirmPaid()">Confirm Paid</button>
+    </div>
+  </div>
+</div>
+
+<!-- MOVE-OUT / ARCHIVE MODAL -->
+<div id="moveout-modal" role="dialog" aria-modal="true" aria-labelledby="mo-title">
+  <div class="paiddate-box">
+    <div class="paiddate-eyebrow">Move out &amp; archive</div>
+    <div class="paiddate-title" id="mo-title">Tenant</div>
+    <div class="field">
+      <label for="mo-date">Last day in the unit</label>
+      <input type="date" id="mo-date" onchange="renderMoveOut()">
+    </div>
+    <div id="mo-summary" class="mo-summary"></div>
+    <div id="mo-prepaid" style="display:none">
+      <label class="mo-choice"><input type="radio" name="mo-prepaid" value="refund" checked onchange="renderMoveOut()"><span>Refund it to the tenant</span></label>
+      <div class="field" id="mo-refund-wrap"><label for="mo-refund-date">Date refunded</label><input type="date" id="mo-refund-date"></div>
+      <label class="mo-choice"><input type="radio" name="mo-prepaid" value="keep" onchange="renderMoveOut()"><span>Keep it (forfeited) &mdash; counted as income on their last day</span></label>
+    </div>
+    <div class="paiddate-actions">
+      <button class="btn-cancel" onclick="closeMoveOut()">Cancel</button>
+      <button class="btn-save" id="mo-confirm" onclick="confirmMoveOut()">Archive tenant</button>
+    </div>
+  </div>
+</div>
+
+<!-- PAYMENT INSTRUCTIONS EDIT MODAL -->
+<div id="payinst-modal" role="dialog" aria-modal="true" aria-labelledby="payinst-modal-title">
+  <div class="payinst-box">
+    <div class="payinst-eyebrow">Payment Instructions</div>
+    <div class="payinst-title" id="payinst-modal-title">Edit Payment Instructions</div>
+    <div class="payinst-sub">These instructions will be shown to tenants on their portal so they know how to pay.</div>
+    <label for="payinst-textarea" style="position:absolute;left:-9999px;">Payment instructions</label>
+    <textarea id="payinst-textarea" placeholder="e.g. GCash: 0917 123 4567&#10;BDO: 1234-5678-9012&#10;Cash: Hand to admin at Unit 1"></textarea>
+    <div id="payinst-error" style="display:none;color:var(--rust);font-size:12px;margin-top:8px;font-weight:500;"></div>
+    <div class="payinst-actions">
+      <button class="btn-cancel" onclick="closePayInstModal()">Cancel</button>
+      <button class="btn-save" onclick="savePayInst()">Save Instructions</button>
+    </div>
+  </div>
+</div>
+
+<!-- ANNOUNCEMENTS EDIT MODAL -->
+<div id="announce-modal" role="dialog" aria-modal="true" aria-labelledby="announce-modal-title">
+  <div class="payinst-box">
+    <div class="payinst-eyebrow">Announcements</div>
+    <div class="payinst-title" id="announce-modal-title">Edit Announcements</div>
+    <div class="payinst-sub">Shown to every tenant at the top of their portal. Leave empty to hide the notice board.</div>
+    <label for="announce-textarea" style="position:absolute;left:-9999px;">Announcements</label>
+    <textarea id="announce-textarea" placeholder="e.g. Water interruption on Aug 15, 8am&ndash;5pm.&#10;Hallway cleaning every Saturday morning."></textarea>
+    <div id="announce-error" style="display:none;color:var(--rust);font-size:12px;margin-top:8px;font-weight:500;"></div>
+    <div class="payinst-actions">
+      <button class="btn-cancel" onclick="closeAnnounceModal()">Cancel</button>
+      <button class="btn-save" onclick="saveAnnouncements()">Save Announcements</button>
+    </div>
+  </div>
+</div>
+
+<!-- BRANDING / PROPERTY NAME MODAL -->
+<div id="branding-modal" role="dialog" aria-modal="true" aria-labelledby="branding-modal-title">
+  <div class="payinst-box">
+    <div class="payinst-eyebrow">Property</div>
+    <div class="payinst-title" id="branding-modal-title">Property Name</div>
+    <div class="payinst-sub">Used across the portal: the header, the login screen, printed statements, and payment reminders.</div>
+    <div class="field"><label for="branding-name">Property Name</label><input type="text" id="branding-name" maxlength="60" placeholder="e.g. Orange Apartment"></div>
+    <div class="field"><label for="branding-sub">Tagline / Location <span style="font-weight:400;color:var(--muted)">(optional, shown on statements)</span></label><input type="text" id="branding-sub" maxlength="80" placeholder="e.g. Tenant Billing Portal &middot; Baguio"></div>
+    <div id="branding-error" style="display:none;color:var(--rust);font-size:12px;margin-top:8px;font-weight:500;"></div>
+    <div class="payinst-actions">
+      <button class="btn-cancel" onclick="closeBrandingModal()">Cancel</button>
+      <button class="btn-save" onclick="saveBranding()">Save</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- supabase-js v2.45.4 vendored from the official npm package (dist/umd/supabase.js)
+     so the portal keeps working if the CDN is down and CSP can stay 'self'-only. -->
+<!-- __ASSET_V__ is replaced with the commit SHA at deploy time (see deploy.yml),
+     so browsers pick up new versions immediately instead of serving a stale
+     cached app.js for up to 10 minutes after a deploy. -->
+<script src="vendor/supabase-js-2.45.4.min.js?v=__ASSET_V__"></script>
+<!-- billing-core.js: pure billing/accounting logic (recurring cycles,
+     reconciliation, allocation, income statement math) used by app.js. -->
+<script src="billing-core.js?v=__ASSET_V__" defer></script>
+<script src="app.js?v=__ASSET_V__" defer></script>
+
+</body>
+</html>

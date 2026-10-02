@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>body{margin:0;background:#F8F4EE;-webkit-font-smoothing:antialiased}*{box-sizing:border-box}button,input,select{font-family:inherit}input::placeholder{color:#9A9187}a{color:#A84A15;text-decoration:none}a:hover{color:#B9531A}</style>
+</helmet>
+<div data-screen-label="Tenant detail" style="width:1440px;min-height:1000px;display:grid;grid-template-columns:256px minmax(0,1fr);background:linear-gradient(90deg,#FFFFFF 0 255px,#ECE5DC 255px 256px,#F8F4EE 256px);font-family:'Plus Jakarta Sans',system-ui,sans-serif;color:#1F1B16">
+  <dc-import name="OA Sidebar" active="tenants" hint-size="256px,1000px"></dc-import>
+  <main style="padding:30px 40px 44px;display:flex;flex-direction:column;gap:24px;min-width:0">
+    <dc-import name="OA Topbar" eyebrow="Tenants" eyebrow-href="Tenants.dc.html" title="Maria Santos" subtitle="Unit 301 · 3rd floor · tenant since March 2024" hint-size="100%,84px"></dc-import>
+
+    <section style="background:#FFFFFF;border:1px solid #ECE5DC;border-radius:18px;padding:24px 28px;display:flex;flex-direction:column;gap:22px">
+     <div style="display:flex;align-items:center;justify-content:space-between;gap:24px">
+      <div style="display:flex;align-items:center;gap:16px">
+        <span style="width:60px;height:60px;border-radius:50%;background:#E3F1F2;color:#1D6B73;display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:700;flex:none">MS</span>
+        <div style="display:flex;flex-direction:column;gap:6px"><span style="font-size:13px;color:#6E665D">Balance</span><span style="font-size:32px;font-weight:800;letter-spacing:-0.03em;line-height:1;font-variant-numeric:tabular-nums;white-space:nowrap">₱7,000</span></div>
+        <span style="display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 10px;border-radius:999px;background:#FFF3DA;color:#94590A;font-size:12.5px;font-weight:600;align-self:flex-end;white-space:nowrap;flex:none"><span style="width:6px;height:6px;border-radius:50%;background:currentColor"></span>Rent due today</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;flex:none;white-space:nowrap">
+        <a href="Receive Payment.dc.html" style="height:44px;padding:0 18px;border-radius:11px;background:#B9531A;color:#FFFFFF;display:inline-flex;align-items:center;gap:8px;font-size:14px;font-weight:700;text-decoration:none" style-hover="background:#9F4614;color:#FFFFFF"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 7h20v10H2zM12 14.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM6 12h.01M18 12h.01"></path></svg>Receive payment</a>
+        <button style="height:44px;padding:0 16px;border:1px solid #E4DCD1;border-radius:11px;background:#FFFFFF;display:inline-flex;align-items:center;gap:8px;font-size:14px;font-weight:600;color:#1F1B16;cursor:pointer" style-hover="background:#FBF8F4"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"></path></svg>Add bill</button>
+        <button style="height:44px;padding:0 16px;border:1px solid #E4DCD1;border-radius:11px;background:#FFFFFF;display:inline-flex;align-items:center;gap:8px;font-size:14px;font-weight:600;color:#1F1B16;cursor:pointer" style-hover="background:#FBF8F4"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2M6 14h12v8H6z"></path></svg>Statement</button>
+        <button title="More" style="width:44px;height:44px;border:1px solid #E4DCD1;border-radius:11px;background:#FFFFFF;display:flex;align-items:center;justify-content:center;color:#4A433B;cursor:pointer"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5h.01M12 12h.01M12 19h.01"></path></svg></button>
+      </div>
+     </div>
+     <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:24px;padding-top:20px;border-top:1px solid #F3EEE7">
+        <div style="display:flex;flex-direction:column;gap:4px"><span style="font-size:13px;color:#6E665D">Rent</span><span style="font-size:16px;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap">₱6,500 / month</span><span style="font-size:12.5px;color:#6E665D">Itemized utilities</span></div>
+        <div style="display:flex;flex-direction:column;gap:4px"><span style="font-size:13px;color:#6E665D">Paid through</span><span style="font-size:16px;font-weight:700;white-space:nowrap">Oct 1, 2026</span><span style="font-size:12.5px;color:#6E665D">Cycle starts on the 2nd</span></div>
+        <div style="display:flex;flex-direction:column;gap:4px"><span style="font-size:13px;color:#6E665D">Open bills</span><span style="font-size:16px;font-weight:700;white-space:nowrap">2 · ₱7,000</span><span style="font-size:12.5px;color:#6E665D">Next due Oct 5</span></div>
+        <div style="display:flex;flex-direction:column;gap:4px"><span style="font-size:13px;color:#6E665D">On-time payments</span><span style="font-size:16px;font-weight:700;white-space:nowrap">11 of 11</span><span style="font-size:12.5px;color:#6E665D">Last 12 months</span></div>
+     </div>
+    </section>
+
+    <div style="display:grid;grid-template-columns:minmax(0,1.75fr) minmax(0,1fr);gap:24px;align-items:start">
+      <div style="display:flex;flex-direction:column;gap:24px;min-width:0">
+        <section style="background:#FFFFFF;border:1px solid #ECE5DC;border-radius:18px;overflow:hidden">
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:20px 24px 16px">
+            <h2 style="margin:0;font-size:17px;font-weight:700;letter-spacing:-0.01em">Bills</h2>
+            <div style="display:flex;gap:2px;padding:4px;border-radius:12px;background:#F5F0EA">
+              <sc-for list="{{ tabs }}" as="t" hint-placeholder-count="3"><button onClick="{{ t.pick }}" style="{{ t.style }}">{{ t.label }}<span style="{{ t.countStyle }}">{{ t.count }}</span></button></sc-for>
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:minmax(180px,1fr) 70px 130px 84px 70px 28px;gap:16px;padding:12px 24px;background:#FBF8F4;border-top:1px solid #F3EEE7;border-bottom:1px solid #F3EEE7;font-size:12.5px;font-weight:600;color:#6E665D">
+            <span>Bill</span><span>Due</span><span>Status</span><span style="text-align:right">Amount</span><span>Paid on</span><span></span>
+          </div>
+          <sc-for list="{{ bills }}" as="b" hint-placeholder-count="6">
+            <div style="display:grid;grid-template-columns:minmax(180px,1fr) 70px 130px 84px 70px 28px;gap:16px;align-items:center;padding:15px 24px;border-bottom:1px solid #F3EEE7">
+              <div style="display:flex;flex-direction:column;gap:2px;min-width:0"><span style="font-size:14.5px;font-weight:600">{{ b.label }}</span><span style="font-size:12.5px;color:#6E665D">{{ b.sub }}</span></div>
+              <span style="font-size:14px;color:#4A433B;font-variant-numeric:tabular-nums">{{ b.due }}</span>
+              <span><span style="{{ b.pillStyle }}"><span style="width:6px;height:6px;border-radius:50%;background:currentColor"></span>{{ b.status }}</span></span>
+              <span style="text-align:right;font-size:14.5px;font-weight:700;font-variant-numeric:tabular-nums">{{ b.amt }}</span>
+              <span style="font-size:14px;color:#6E665D;font-variant-numeric:tabular-nums">{{ b.paidOn }}</span>
+              <button title="Bill actions" style="width:28px;height:28px;border:none;border-radius:8px;background:transparent;color:#6E665D;display:flex;align-items:center;justify-content:center;cursor:pointer" style-hover="background:#F5F0EA"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5h.01M12 12h.01M12 19h.01"></path></svg></button>
+            </div>
+          </sc-for>
+        </section>
+
+        <section style="background:#FFFFFF;border:1px solid #ECE5DC;border-radius:18px;overflow:hidden">
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:20px 24px 16px"><h2 style="margin:0;font-size:17px;font-weight:700;letter-spacing:-0.01em">Payments</h2><span style="font-size:13px;color:#6E665D">Applied to the oldest bills first</span></div>
+          <div style="display:grid;grid-template-columns:110px minmax(0,1fr) minmax(0,1fr) 110px;gap:16px;padding:12px 24px;background:#FBF8F4;border-top:1px solid #F3EEE7;border-bottom:1px solid #F3EEE7;font-size:12.5px;font-weight:600;color:#6E665D"><span>Date</span><span>Note</span><span>Applied to</span><span style="text-align:right">Amount</span></div>
+          <div style="display:grid;grid-template-columns:110px minmax(0,1fr) minmax(0,1fr) 110px;gap:16px;align-items:center;padding:15px 24px;border-bottom:1px solid #F3EEE7;font-size:14px"><span style="font-variant-numeric:tabular-nums">Sep 3</span><span>GCash · ref 8821 0043</span><span style="color:#6E665D">Rent – Sep, Water – Aug</span><span style="text-align:right;font-weight:700;font-variant-numeric:tabular-nums">₱7,000</span></div>
+          <div style="display:grid;grid-template-columns:110px minmax(0,1fr) minmax(0,1fr) 110px;gap:16px;align-items:center;padding:15px 24px;border-bottom:1px solid #F3EEE7;font-size:14px"><span style="font-variant-numeric:tabular-nums">Aug 4</span><span>GCash · ref 7710 2291</span><span style="color:#6E665D">Rent – Aug, Electricity – Jul</span><span style="text-align:right;font-weight:700;font-variant-numeric:tabular-nums">₱7,450</span></div>
+          <div style="display:grid;grid-template-columns:110px minmax(0,1fr) minmax(0,1fr) 110px;gap:16px;align-items:center;padding:15px 24px;font-size:14px"><span style="font-variant-numeric:tabular-nums">Jul 5</span><span>Cash to admin</span><span style="color:#6E665D">Rent – Jul, Water – Jun</span><span style="text-align:right;font-weight:700;font-variant-numeric:tabular-nums">₱6,900</span></div>
+        </section>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:24px;min-width:0">
+        <section style="background:#FFFFFF;border:1px solid #ECE5DC;border-radius:18px;padding:22px 24px;display:flex;flex-direction:column;gap:16px">
+          <div style="display:flex;justify-content:space-between;align-items:baseline"><h2 style="margin:0;font-size:17px;font-weight:700;letter-spacing:-0.01em">Rent cycles</h2><span style="font-size:13px;color:#6E665D">Last 12 months</span></div>
+          <div style="display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px">
+            <sc-for list="{{ cycles }}" as="c" hint-placeholder-count="12"><div title="{{ c.title }}" style="display:flex;flex-direction:column;align-items:center;gap:6px"><span style="{{ c.style }}"></span><span style="font-size:12px;color:#6E665D">{{ c.m }}</span></div></sc-for>
+          </div>
+          <div style="display:flex;gap:16px;font-size:12.5px;color:#6E665D;padding-top:14px;border-top:1px solid #F3EEE7">
+            <span style="display:inline-flex;align-items:center;gap:6px"><span style="width:10px;height:10px;border-radius:3px;background:#A9D9BE"></span>Paid</span>
+            <span style="display:inline-flex;align-items:center;gap:6px"><span style="width:10px;height:10px;border-radius:3px;background:#FFE7B8;box-shadow:inset 0 0 0 1.5px #E09B23"></span>Due</span>
+            <span style="display:inline-flex;align-items:center;gap:6px"><span style="width:10px;height:10px;border-radius:3px;background:#EF9A90"></span>Late</span>
+          </div>
+        </section>
+
+        <section style="background:#FFFFFF;border:1px solid #ECE5DC;border-radius:18px;padding:22px 24px;display:flex;flex-direction:column;gap:4px">
+          <h2 style="margin:0 0 8px;font-size:17px;font-weight:700;letter-spacing:-0.01em">Details</h2>
+          <div style="display:grid;grid-template-columns:130px minmax(0,1fr);gap:10px;padding:12px 0;border-top:1px solid #F3EEE7;font-size:14px"><span style="color:#6E665D">Access code</span><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span style="font-weight:700;letter-spacing:0.08em;padding:3px 8px;border-radius:7px;background:#F5F0EA">MS3K9D</span><button onClick="{{ copyLink }}" style="border:none;background:transparent;padding:0;font-size:13.5px;font-weight:700;color:#A84A15;cursor:pointer">{{ copyText }}</button></div></div>
+          <div style="display:grid;grid-template-columns:130px minmax(0,1fr);gap:10px;padding:12px 0;border-top:1px solid #F3EEE7;font-size:14px"><span style="color:#6E665D">Move-in date</span><span>Mar 2, 2024 <span style="color:#6E665D;font-size:12.5px">· billing date</span></span></div>
+          <div style="display:grid;grid-template-columns:130px minmax(0,1fr);gap:10px;padding:12px 0;border-top:1px solid #F3EEE7;font-size:14px"><span style="color:#6E665D">Recurring</span><div style="display:flex;flex-direction:column;gap:3px"><span>Rent ₱6,500, monthly</span><span style="font-size:12.5px;color:#1E7A52;font-weight:600">Auto-posts 7 days before due</span></div></div>
+          <div style="display:grid;grid-template-columns:130px minmax(0,1fr);gap:10px;padding:12px 0;border-top:1px solid #F3EEE7;font-size:14px"><span style="color:#6E665D">Phone</span><a style="color:#1F1B16;font-variant-numeric:tabular-nums">0917 555 0301</a></div>
+          <div style="display:grid;grid-template-columns:130px minmax(0,1fr);gap:10px;padding:12px 0;border-top:1px solid #F3EEE7;font-size:14px"><span style="color:#6E665D">Email</span><a style="color:#1F1B16">maria.santos@email.com</a></div>
+        </section>
+      </div>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  state = { tab: 'all', copied: false };
+  renderVals() {
+    const tone = { due: ['#FFF3DA', '#94590A'], paid: ['#E6F4EC', '#1E7A52'] };
+    const pill = k => ({ display: 'inline-flex', alignItems: 'center', gap: '6px', height: '26px', padding: '0 10px', borderRadius: '999px', fontSize: '12.5px', fontWeight: 600, whiteSpace: 'nowrap', background: tone[k][0], color: tone[k][1] });
+    const all = [
+      ['Rent – October', 'Oct 2 – Nov 1', 'Oct 2', 'Due today', 'due', '₱6,500', '—', 'open'],
+      ['Water – September', 'Metered · 12 m³', 'Oct 5', 'Due in 3 days', 'due', '₱500', '—', 'open'],
+      ['Rent – September', 'Sep 2 – Oct 1', 'Sep 2', 'Paid', 'paid', '₱6,500', 'Sep 3', 'paid'],
+      ['Water – August', 'Metered · 12 m³', 'Sep 5', 'Paid', 'paid', '₱500', 'Sep 3', 'paid'],
+      ['Rent – August', 'Aug 2 – Sep 1', 'Aug 2', 'Paid', 'paid', '₱6,500', 'Aug 4', 'paid'],
+      ['Electricity – July', 'Metered · 74 kWh', 'Aug 5', 'Paid', 'paid', '₱950', 'Aug 4', 'paid']
+    ].map(([label, sub, due, status, k, amt, paidOn, grp]) => ({ label, sub, due, status, pillStyle: pill(k), amt, paidOn, grp }));
+    const tab = this.state.tab;
+    const tabs = [['open', 'Open'], ['paid', 'Paid'], ['all', 'All']].map(([k, label]) => {
+      const on = k === tab;
+      return {
+        label, count: String(all.filter(b => k === 'all' || b.grp === k).length), pick: () => this.setState({ tab: k }),
+        style: { height: '34px', padding: '0 13px', border: 'none', borderRadius: '9px', background: on ? '#FFFFFF' : 'transparent', boxShadow: on ? '0 1px 3px rgba(60,40,20,0.12)' : 'none', color: on ? '#1F1B16' : '#6E665D', fontSize: '13px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '7px', cursor: 'pointer', whiteSpace: 'nowrap', flex: 'none' },
+        countStyle: { fontSize: '12px', fontWeight: 700, color: on ? '#B9531A' : '#9A9187' }
+      };
+    });
+    const ms = ['Nov', 'Dec', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct'];
+    const cycles = ms.map((m, i) => {
+      const due = i === 11;
+      return { m, title: due ? m + ' · due today' : m + ' · paid on time', style: { width: '100%', height: '30px', borderRadius: '7px', background: due ? '#FFE7B8' : '#A9D9BE', boxShadow: due ? 'inset 0 0 0 1.5px #E09B23' : 'none' } };
+    });
+    return {
+      tabs, cycles,
+      bills: all.filter(b => tab === 'all' || b.grp === tab),
+      copyText: this.state.copied ? 'Link copied' : 'Copy portal link',
+      copyLink: () => this.setState({ copied: true })
+    };
+  }
+}
+</script>
+</body>
+</html>

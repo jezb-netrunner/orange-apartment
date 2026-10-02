@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>body{margin:0;background:#F8F4EE;-webkit-font-smoothing:antialiased}*{box-sizing:border-box}button,input,select{font-family:inherit}input::placeholder{color:#9A9187}a{color:#A84A15;text-decoration:none}a:hover{color:#B9531A}</style>
+</helmet>
+<div data-screen-label="Receive payment" style="position:relative;width:1440px;height:960px;overflow:hidden;font-family:'Plus Jakarta Sans',system-ui,sans-serif;color:#1F1B16">
+  <div style="position:relative;z-index:0;isolation:isolate"><dc-import name="Billing" hint-size="1440px,960px"></dc-import></div>
+  <a href="Billing.dc.html" style="position:absolute;inset:0;z-index:50;background:rgba(31,27,22,0.4)"></a>
+  <aside style="position:absolute;top:0;right:0;bottom:0;z-index:60;width:540px;background:#FFFFFF;box-shadow:-30px 0 60px -24px rgba(31,27,22,0.4);display:flex;flex-direction:column">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;padding:28px 32px 20px;border-bottom:1px solid #F3EEE7">
+      <div style="display:flex;flex-direction:column;gap:5px"><h2 style="margin:0;font-size:22px;font-weight:700;letter-spacing:-0.02em">Receive payment</h2><span style="font-size:14px;color:#6E665D">Applied to the oldest open bills first</span></div>
+      <a href="Billing.dc.html" title="Close" style="width:40px;height:40px;border-radius:10px;border:1px solid #E4DCD1;display:flex;align-items:center;justify-content:center;color:#4A433B"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"></path></svg></a>
+    </div>
+    <div style="flex:1;min-height:0;overflow:hidden;padding:24px 32px;display:flex;flex-direction:column;gap:22px">
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <span style="font-size:13px;font-weight:600;color:#4A433B">Tenant</span>
+        <button style="display:flex;align-items:center;gap:12px;padding:12px 14px;border:1px solid #E4DCD1;border-radius:12px;background:#FFFFFF;text-align:left;cursor:pointer">
+          <span style="width:40px;height:40px;border-radius:50%;background:#E3F1F2;color:#1D6B73;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;flex:none">MS</span>
+          <div style="flex:1;display:flex;flex-direction:column;gap:2px"><span style="font-size:15px;font-weight:700;color:#1F1B16">Maria Santos · Unit 301</span><span style="font-size:13px;color:#6E665D">Owes ₱7,000 · rent paid through Oct 1</span></div>
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#6E665D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"></path></svg>
+        </button>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <span style="font-size:13px;font-weight:600;color:#4A433B">Amount received</span>
+        <div style="display:flex;align-items:center;gap:8px;height:64px;padding:0 18px;border:2px solid #E8772E;border-radius:14px;box-shadow:0 0 0 4px #FDEEE3">
+          <span style="font-size:24px;font-weight:700;color:#9A9187">₱</span><span style="font-size:30px;font-weight:800;letter-spacing:-0.03em;font-variant-numeric:tabular-nums">{{ amt }}</span><span style="width:2px;height:30px;background:#E8772E"></span>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <sc-for list="{{ fills }}" as="f" hint-placeholder-count="2"><button onClick="{{ f.pick }}" style="{{ f.style }}">{{ f.label }}</button></sc-for>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.3fr);gap:14px">
+        <div style="display:flex;flex-direction:column;gap:8px"><span style="font-size:13px;font-weight:600;color:#4A433B">Date</span><div style="height:46px;padding:0 14px;border:1px solid #E4DCD1;border-radius:11px;display:flex;align-items:center;gap:10px;font-size:14.5px"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="#6E665D" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM16 2v4M8 2v4M3 10h18"></path></svg>Oct 2, 2026</div></div>
+        <div style="display:flex;flex-direction:column;gap:8px"><span style="font-size:13px;font-weight:600;color:#4A433B">Note <span style="font-weight:500;color:#9A9187">(optional)</span></span><input placeholder="GCash ref, cash, bank…" style="height:46px;padding:0 14px;border:1px solid #E4DCD1;border-radius:11px;font-size:14.5px;outline:none;color:#1F1B16" style-focus="border-color:#E8772E;box-shadow:0 0 0 4px #FDEEE3"></div>
+      </div>
+      <button onClick="{{ toggleAdv }}" style="display:flex;align-items:center;gap:12px;padding:0;border:none;background:transparent;text-align:left;cursor:pointer">
+        <span style="{{ advBox }}"><sc-if value="{{ adv }}" hint-placeholder-val="{{ true }}"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-10"></path></svg></sc-if></span>
+        <div style="display:flex;flex-direction:column;gap:2px"><span style="font-size:14.5px;font-weight:600;color:#1F1B16">Apply any excess as advance rent</span><span style="font-size:13px;color:#6E665D">Extra money pays the next rent cycles</span></div>
+      </button>
+      <div style="display:flex;flex-direction:column;border:1px solid #ECE5DC;border-radius:14px;overflow:hidden">
+        <div style="display:flex;justify-content:space-between;padding:12px 16px;background:#FBF8F4;border-bottom:1px solid #F3EEE7;font-size:12.5px;font-weight:700;color:#4A433B"><span>How it will be applied</span><span>{{ applyCount }}</span></div>
+        <sc-for list="{{ lines }}" as="l" hint-placeholder-count="2">
+          <div style="display:flex;align-items:center;gap:12px;padding:13px 16px;border-bottom:1px solid #F3EEE7">
+            <span style="{{ l.iconStyle }}"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-10"></path></svg></span>
+            <div style="flex:1;display:flex;flex-direction:column;gap:2px"><span style="font-size:14.5px;font-weight:600">{{ l.label }}</span><span style="font-size:12.5px;color:#6E665D">{{ l.sub }}</span></div>
+            <span style="font-size:14.5px;font-weight:700;font-variant-numeric:tabular-nums">{{ l.amt }}</span>
+          </div>
+        </sc-for>
+        <sc-if value="{{ warn }}" hint-placeholder-val="{{ false }}">
+          <div style="padding:12px 16px;background:#FFF3DA;font-size:13px;color:#7A4A06;line-height:1.45">₱6,500 is more than Maria owes. Tick “Apply any excess as advance rent” to carry it into November.</div>
+        </sc-if>
+      </div>
+    </div>
+    <div style="display:flex;justify-content:flex-end;gap:10px;padding:18px 32px 24px;border-top:1px solid #F3EEE7">
+      <a href="Billing.dc.html" style="height:48px;padding:0 20px;border:1px solid #E4DCD1;border-radius:12px;display:inline-flex;align-items:center;font-size:14.5px;font-weight:600;color:#1F1B16">Cancel</a>
+      <button style="{{ recordStyle }}">{{ recordText }}</button>
+    </div>
+  </aside>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  state = { fill: 'full', adv: true };
+  renderVals() {
+    const plus = this.state.fill === 'plus', adv = this.state.adv;
+    const fills = [['full', 'Full balance ₱7,000'], ['plus', 'Balance + 1 month ₱13,500']].map(([k, label]) => {
+      const on = this.state.fill === k;
+      return { label, pick: () => this.setState({ fill: k }), style: { height: '38px', padding: '0 14px', borderRadius: '999px', border: on ? '1.5px solid #E8772E' : '1px solid #E4DCD1', background: on ? '#FDEEE3' : '#FFFFFF', color: on ? '#A84A15' : '#4A433B', fontSize: '13px', fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap', flex: 'none' } };
+    });
+    const ok = { width: '22px', height: '22px', borderRadius: '50%', background: '#E6F4EC', color: '#1E7A52', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' };
+    const advIc = { ...ok, background: '#E8F0FB', color: '#2C62B0' };
+    const lines = [
+      { label: 'Rent – October', sub: 'Due Oct 2 · settled', amt: '₱6,500', iconStyle: ok },
+      { label: 'Water – September', sub: 'Due Oct 5 · settled', amt: '₱500', iconStyle: ok }
+    ];
+    if (plus && adv) lines.push({ label: 'Rent – November', sub: 'Advance · covers Nov 2 – Dec 1', amt: '₱6,500', iconStyle: advIc });
+    const warn = plus && !adv;
+    const amt = plus ? '13,500' : '7,000';
+    return {
+      fills, lines, amt, adv, warn,
+      applyCount: lines.length + ' items',
+      toggleAdv: () => this.setState({ adv: !adv }),
+      advBox: { width: '22px', height: '22px', borderRadius: '6px', border: adv ? 'none' : '1.5px solid #CFC5B8', background: adv ? '#B9531A' : '#FFFFFF', color: '#FFFFFF', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' },
+      recordText: warn ? 'Fix the amount first' : 'Record ₱' + amt,
+      recordStyle: { height: '48px', padding: '0 24px', border: 'none', borderRadius: '12px', background: warn ? '#E4DCD1' : '#B9531A', color: warn ? '#6E665D' : '#FFFFFF', fontSize: '14.5px', fontWeight: 700, cursor: warn ? 'not-allowed' : 'pointer' }
+    };
+  }
+}
+</script>
+</body>
+</html>

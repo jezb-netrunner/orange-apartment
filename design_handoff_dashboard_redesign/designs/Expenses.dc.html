@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>body{margin:0;background:#F8F4EE;-webkit-font-smoothing:antialiased}*{box-sizing:border-box}button,input,select{font-family:inherit}input::placeholder{color:#9A9187}a{color:#A84A15;text-decoration:none}a:hover{color:#B9531A}</style>
+</helmet>
+<div data-screen-label="Expenses" style="width:1440px;min-height:1000px;display:grid;grid-template-columns:256px minmax(0,1fr);background:linear-gradient(90deg,#FFFFFF 0 255px,#ECE5DC 255px 256px,#F8F4EE 256px);font-family:'Plus Jakarta Sans',system-ui,sans-serif;color:#1F1B16">
+  <dc-import name="OA Sidebar" active="expenses" hint-size="256px,1000px"></dc-import>
+  <main style="padding:30px 40px 44px;display:flex;flex-direction:column;gap:24px;min-width:0">
+    <dc-import name="OA Topbar" title="Expenses" subtitle="October 2026 · ₱8,820 so far" hint-size="100%,62px"></dc-import>
+
+    <section style="background:#FFFFFF;border:1px solid #ECE5DC;border-radius:18px;padding:22px 24px;display:flex;flex-direction:column;gap:16px">
+      <h2 style="margin:0;font-size:17px;font-weight:700;letter-spacing:-0.01em">Log an expense</h2>
+      <div style="display:grid;grid-template-columns:150px 180px 150px 170px minmax(0,1fr) auto;gap:14px;align-items:end">
+        <div style="display:flex;flex-direction:column;gap:7px"><span style="font-size:13px;font-weight:600;color:#4A433B">Date</span><div style="height:46px;padding:0 14px;border:1px solid #E4DCD1;border-radius:11px;display:flex;align-items:center;font-size:14.5px">Oct 2, 2026</div></div>
+        <div style="display:flex;flex-direction:column;gap:7px"><span style="font-size:13px;font-weight:600;color:#4A433B">Category</span><div style="height:46px;padding:0 14px;border:1px solid #E4DCD1;border-radius:11px;display:flex;align-items:center;justify-content:space-between;font-size:14.5px">Maintenance<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="#6E665D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"></path></svg></div></div>
+        <div style="display:flex;flex-direction:column;gap:7px"><span style="font-size:13px;font-weight:600;color:#4A433B">Amount</span><div style="height:46px;padding:0 14px;border:1px solid #E4DCD1;border-radius:11px;display:flex;align-items:center;gap:6px;font-size:14.5px"><span style="color:#9A9187">₱</span><input placeholder="0" style="border:none;outline:none;width:100%;font-size:14.5px;color:#1F1B16;background:transparent"></div></div>
+        <div style="display:flex;flex-direction:column;gap:7px"><span style="font-size:13px;font-weight:600;color:#4A433B">Floor</span><div style="height:46px;padding:0 14px;border:1px solid #E4DCD1;border-radius:11px;display:flex;align-items:center;justify-content:space-between;font-size:14.5px">Building-wide<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="#6E665D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"></path></svg></div></div>
+        <div style="display:flex;flex-direction:column;gap:7px"><span style="font-size:13px;font-weight:600;color:#4A433B">Note</span><input placeholder="What was it for?" style="height:46px;padding:0 14px;border:1px solid #E4DCD1;border-radius:11px;font-size:14.5px;outline:none;color:#1F1B16" style-focus="border-color:#E8772E;box-shadow:0 0 0 4px #FDEEE3"></div>
+        <button style="height:46px;padding:0 20px;border:none;border-radius:11px;background:#B9531A;color:#FFFFFF;display:inline-flex;align-items:center;gap:8px;font-size:14px;font-weight:700;cursor:pointer" style-hover="background:#9F4614"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"></path></svg>Add</button>
+      </div>
+    </section>
+
+    <div style="display:grid;grid-template-columns:minmax(0,2.4fr) minmax(0,1fr);gap:24px;align-items:start">
+      <section style="background:#FFFFFF;border:1px solid #ECE5DC;border-radius:18px;overflow:hidden;min-width:0">
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:18px 24px 14px">
+          <div style="display:flex;align-items:center;gap:8px">
+            <button title="Previous month" style="width:34px;height:34px;border:1px solid #E4DCD1;border-radius:9px;background:#FFFFFF;display:flex;align-items:center;justify-content:center;color:#4A433B;cursor:pointer"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"></path></svg></button>
+            <h2 style="margin:0 6px;font-size:17px;font-weight:700;letter-spacing:-0.01em">October 2026</h2>
+            <button title="Next month" style="width:34px;height:34px;border:1px solid #E4DCD1;border-radius:9px;background:#FFFFFF;display:flex;align-items:center;justify-content:center;color:#C8BFB3;cursor:not-allowed"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"></path></svg></button>
+          </div>
+          <a style="display:inline-flex;align-items:center;gap:6px;font-size:13.5px;font-weight:700;color:#A84A15;cursor:pointer"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"></path></svg>Expenses CSV</a>
+        </div>
+        <div style="display:grid;grid-template-columns:60px 124px minmax(0,1fr) 104px 84px 28px;gap:16px;padding:12px 24px;background:#FBF8F4;border-top:1px solid #F3EEE7;border-bottom:1px solid #F3EEE7;font-size:12.5px;font-weight:600;color:#6E665D"><span>Date</span><span>Category</span><span>Note</span><span>Floor</span><span style="text-align:right">Amount</span><span></span></div>
+        <sc-for list="{{ rows }}" as="x" hint-placeholder-count="7">
+          <div style="display:grid;grid-template-columns:60px 124px minmax(0,1fr) 104px 84px 28px;gap:16px;align-items:center;padding:15px 24px;border-bottom:1px solid #F3EEE7;font-size:14px">
+            <span style="font-variant-numeric:tabular-nums;color:#4A433B">{{ x.date }}</span>
+            <span><span style="{{ x.catStyle }}">{{ x.cat }}</span></span>
+            <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ x.note }}</span>
+            <span style="color:#6E665D">{{ x.floor }}</span>
+            <span style="text-align:right;font-weight:700;font-variant-numeric:tabular-nums">{{ x.amt }}</span>
+            <button title="Edit" style="width:28px;height:28px;border:none;border-radius:8px;background:transparent;color:#6E665D;display:flex;align-items:center;justify-content:center;cursor:pointer" style-hover="background:#F5F0EA"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5h.01M12 12h.01M12 19h.01"></path></svg></button>
+          </div>
+        </sc-for>
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 24px;font-size:14px"><span style="color:#6E665D">7 expenses</span><span style="font-weight:700">Total <span style="font-variant-numeric:tabular-nums">₱8,820</span></span></div>
+      </section>
+
+      <div style="display:flex;flex-direction:column;gap:24px;min-width:0">
+        <section style="background:#FFFFFF;border:1px solid #ECE5DC;border-radius:18px;padding:22px 24px;display:flex;flex-direction:column;gap:18px">
+          <div style="display:flex;justify-content:space-between;align-items:baseline"><h2 style="margin:0;font-size:17px;font-weight:700;letter-spacing:-0.01em">By category</h2><span style="font-size:13px;color:#6E665D">October</span></div>
+          <sc-for list="{{ cats }}" as="c" hint-placeholder-count="6">
+            <div style="display:flex;flex-direction:column;gap:7px">
+              <div style="display:flex;justify-content:space-between;font-size:14px"><span style="font-weight:600">{{ c.label }}</span><span style="font-weight:700;font-variant-numeric:tabular-nums">{{ c.amt }}</span></div>
+              <div style="height:8px;border-radius:4px;background:#F1EBE3;overflow:hidden"><div style="{{ c.bar }}"></div></div>
+            </div>
+          </sc-for>
+        </section>
+        <section style="background:#FFFFFF;border:1px solid #ECE5DC;border-radius:18px;padding:22px 24px;display:grid;grid-template-columns:1fr 1fr;gap:18px">
+          <div style="display:flex;flex-direction:column;gap:4px"><span style="font-size:13px;color:#6E665D">September total</span><span style="font-size:20px;font-weight:800;letter-spacing:-0.02em;font-variant-numeric:tabular-nums">₱8,300</span><span style="font-size:12.5px;color:#C2362B;font-weight:600">October is ₱520 higher</span></div>
+          <div style="display:flex;flex-direction:column;gap:4px"><span style="font-size:13px;color:#6E665D">Tagged to a floor</span><span style="font-size:20px;font-weight:800;letter-spacing:-0.02em;font-variant-numeric:tabular-nums">₱2,000</span><span style="font-size:12.5px;color:#6E665D">₱6,820 building-wide</span></div>
+        </section>
+      </div>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  renderVals() {
+    const peso = n => '₱' + Math.round(n).toLocaleString('en-PH');
+    const C = {
+      Electricity: ['#FFF3DA', '#8A5508', '#E9A93A'], Water: ['#E8F0FB', '#2C62B0', '#6E9BE0'], Internet: ['#F1EAFB', '#6A46B0', '#A68AD9'],
+      Maintenance: ['#FDEEE3', '#A84A15', '#E8772E'], 'Taxes & Fees': ['#F3EFEA', '#5F574E', '#A89D90'], Other: ['#E3F1F2', '#1D6B73', '#6CB3B9']
+    };
+    const chip = c => ({ display: 'inline-flex', alignItems: 'center', height: '26px', padding: '0 10px', borderRadius: '8px', fontSize: '12.5px', fontWeight: 600, whiteSpace: 'nowrap', background: C[c][0], color: C[c][1] });
+    const X = [
+      ['Oct 2', 'Water', 'Building main meter, September', 'Building-wide', 1540],
+      ['Oct 2', 'Maintenance', 'Hallway light fixtures', '3rd floor', 1350],
+      ['Oct 2', 'Taxes & Fees', 'Barangay clearance renewal', 'Building-wide', 500],
+      ['Oct 1', 'Electricity', 'Common areas, September bill', 'Building-wide', 2480],
+      ['Oct 1', 'Internet', 'Fiber plan for common Wi-Fi', 'Building-wide', 1699],
+      ['Oct 1', 'Maintenance', 'Faucet repair, Unit 204', '2nd floor', 650],
+      ['Oct 1', 'Other', 'Cleaning supplies', 'Building-wide', 601]
+    ];
+    const totals = {};
+    X.forEach(x => { totals[x[1]] = (totals[x[1]] || 0) + x[4]; });
+    const max = Math.max(...Object.values(totals));
+    const cats = Object.keys(totals).sort((a, b) => totals[b] - totals[a]).map(k => ({ label: k, amt: peso(totals[k]), bar: { width: (totals[k] / max * 100).toFixed(1) + '%', height: '100%', borderRadius: '4px', background: C[k][2] } }));
+    return {
+      rows: X.map(([date, cat, note, floor, amt]) => ({ date, cat, catStyle: chip(cat), note, floor, amt: peso(amt) })),
+      cats
+    };
+  }
+}
+</script>
+</body>
+</html>
