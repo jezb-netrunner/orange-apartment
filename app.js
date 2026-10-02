@@ -1814,7 +1814,15 @@ const ICON_PATHS = {
   search:   'M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM21 21l-4.3-4.3',
   bell:     'M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.94 1.94 0 0 0 3.4 0',
   clock:    'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 7v5l3 2',
-  logout:   'M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9'
+  logout:   'M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9',
+  trend:    'M3 17l6-6 4 4 8-8M14 7h7v7',
+  arrowUp:  'M12 19V5M5 12l7-7 7 7',
+  arrowDown:'M12 5v14M19 12l-7 7-7-7',
+  userPlus: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM19 8v6M22 11h-6',
+  chat:     'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z',
+  grid:     'M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z',
+  chevDown: 'M6 9l6 6 6-6',
+  close:    'M18 6L6 18M6 6l12 12'
 };
 function icon(name, cls) {
   const d = ICON_PATHS[name];
@@ -1925,8 +1933,10 @@ function openMoreMenu(anchor) {
 }
 
 // Module page header: eyebrow, title, optional subtitle + action buttons.
-function pageHead(title, sub, actions) {
-  return '<div class="page-head"><div class="page-head-text"><h1 class="page-title">' + title + '</h1>'
+function pageHead(title, sub, actions, back) {
+  return '<div class="page-head"><div class="page-head-text">'
+    + (back ? '<button type="button" class="back-link" onclick="' + back.onclick + '">' + icon('back') + esc(back.label) + '</button>' : '')
+    + '<h1 class="page-title">' + title + '</h1>'
     + (sub ? '<div class="page-sub">' + sub + '</div>' : '') + '</div>'
     + (actions ? '<div class="page-actions">' + actions + '</div>' : '') + '</div>';
 }
@@ -1937,6 +1947,68 @@ function btn(label, onclick, opts) {
     + (opts.icon ? icon(opts.icon) : '') + '<span>' + label + '</span></button>';
 }
 function chip(tone, text) { return '<span class="chip chip-' + tone + '">' + text + '</span>'; }
+// ── 2026 redesign UI helpers: avatars, status pills, segmented tabs ──
+// Initials avatar; its color comes from a hash of the name (6 tones).
+function avatar(name, size) {
+  let h = 0;
+  for(const c of String(name || '?')) h = (h * 31 + c.charCodeAt(0)) % 1009;
+  return '<span class="oa-av oa-av-' + (size || 38) + ' oa-av-t' + (h % 6) + '" aria-hidden="true">' + esc(_initials(name)) + '</span>';
+}
+// Status pill with a dot. tone: late | due | paid | ahead | neutral
+function oaPill(tone, text) { return '<span class="oa-pill oa-pill-' + tone + '">' + text + '</span>'; }
+// A bill's status as a pill ("Overdue · 27 days", "Due today", "Due in 2 days"…).
+function billPill(b, justPaid) {
+  if(justPaid) return oaPill('paid', 'Paid · just now');
+  const ds = getDueStatus(b);
+  if(ds === 'overdue') { const n = daysOverdue(b); return oaPill('late', 'Overdue · ' + n + ' day' + (n !== 1 ? 's' : '')); }
+  if(ds === 'grace') return oaPill('due', 'Grace period');
+  if(ds === 'due-today') return oaPill('due', 'Due today');
+  if(ds === 'due-soon' || ds === 'upcoming') {
+    const d = diffDays(todayISO(), b.due);
+    return d <= 7 ? oaPill('due', d === 1 ? 'Due tomorrow' : 'Due in ' + d + ' days') : oaPill('neutral', 'Due ' + shortDate(b.due));
+  }
+  if(ds === 'awaiting') return oaPill('due', 'Needs amount');
+  if(ds === 'paid') return oaPill('paid', 'Paid');
+  return oaPill('neutral', 'No due date');
+}
+// Segmented control: [{ label, count?, active, onclick }]
+function segTabs(items, cls, label) {
+  return '<div class="oa-seg' + (cls ? ' ' + cls : '') + '" role="group"' + (label ? ' aria-label="' + esc(label) + '"' : '') + '>'
+    + items.map(x => '<button type="button" class="oa-seg-btn' + (x.active ? ' active' : '') + '" aria-pressed="' + !!x.active + '" onclick="' + x.onclick + '">'
+      + '<span>' + x.label + '</span>' + (x.count != null ? '<span class="oa-seg-n">' + x.count + '</span>' : '') + '</button>').join('') + '</div>';
+}
+// "6.5K" / "500" for small chart labels.
+function _kShort(v) {
+  const a = Math.abs(v);
+  return a >= 1000 ? (a / 1000).toFixed(a >= 10000 ? 0 : 1).replace(/\.0$/, '') + 'K' : String(Math.round(a));
+}
+function _monthName(ym, style) { return /^\d{4}-\d{2}$/.test(ym || '') ? new Date(ym + '-02').toLocaleString('default', { month: style || 'long' }) : ''; }
+
+// Bills marked paid this session from a list (Dashboard, Billing) stay on
+// screen as "Paid · just now" with an Undo, until the page is left.
+let _justPaid = []; // [{ tid, bi, label, due, amount, period, paidDate }]
+function _jpSame(j, b) { return !!b && b.label === j.label && b.due === j.due && Number(b.amount) === Number(j.amount) && (b.period || '') === (j.period || ''); }
+function _noteJustPaid(tid, bi) {
+  const t = tenants.find(x => x.id === tid), b = t && t.bills[bi];
+  if(!b || b.status !== 'paid') return;
+  _justPaid = _justPaid.filter(j => !(j.tid === tid && j.bi === bi));
+  _justPaid.push({ tid, bi, label: b.label, due: b.due, amount: b.amount, period: b.period || '', paidDate: b.paidDate || '' });
+}
+function _justPaidEntry(tid, bi) {
+  const t = tenants.find(x => x.id === tid), b = t && t.bills[bi];
+  return _justPaid.find(j => j.tid === tid && j.bi === bi && _jpSame(j, b) && b.status === 'paid' && (b.paidDate || '') === j.paidDate) || null;
+}
+// Undo a "Mark paid" from this session: exactly reverses confirmPaid().
+async function undoJustPaid(tid, bi) {
+  const j = _justPaidEntry(tid, bi);
+  if(!j) { showToast('That bill changed since — open it to make changes.', false); rerenderAdmin(); return; }
+  const ok = await saveBills(tid, bills => {
+    const x = bills[bi];
+    if(x && _jpSame(j, x) && x.status === 'paid') { x.status = 'unpaid'; x.paidDate = ''; }
+  }, 'Moved back to unpaid.');
+  if(ok === true) _justPaid = _justPaid.filter(e => e !== j);
+  if(ok) rerenderAdmin();
+}
 // Money as text: whole pesos stay whole ("6,000"), anything with centavos
 // always shows two decimals ("1,234.50", never "1,234.5"). `fixed` forces
 // two decimals for printed accounting documents.
@@ -2072,67 +2144,221 @@ function attentionRowHtml(it) {
 // ─────────────────────────────────────────────
 // HOME
 // ─────────────────────────────────────────────
+// Dashboard state
+let chartRange = 12;       // Income vs expenses: 6 | 12 months
+let chaseTab = 'action';   // Bills to chase: 'action' | 'former' | 'all'
+let _dashChart = null;     // rows behind the chart's hover tooltip
+
 function renderHome() {
-  const ym = _currentYM();
-  const monthShort = new Date(ym + '-02').toLocaleString('default', { month: 'short' });
-  let open = 0, overdue = 0, openN = 0, overdueN = 0;
+  const cur = _currentYM(), today = todayISO();
+  const hasExp = expensesAvailable && !_expensesLoadError;
+  const all = allTenants();
+  const head = pageHead(_greeting(), new Date().toLocaleDateString('en-PH', { weekday: 'long', month: 'long', day: 'numeric' }) + ' · here’s how ' + esc(propertyName || 'the building') + ' is doing');
+  if(!all.length) {
+    return head + '<div class="empty-state"><div class="icon">&#127962;</div><p>No tenants yet. Add your first tenant to get started.</p>' + btn('Add tenant', 'openAddModal()', { primary: true, icon: 'plus' }) + '</div>';
+  }
+  // One accrual series for the page — the same figures as Insights and the income statement.
+  const inc = computeIncomeStatement({ tenants: all, expenses, hasExpenses: hasExp, floorRank, floorCanon: appFloorCanon(), allocation: 'none',
+    from: addYM(cur, -11), to: cur, basis: 'accrual', prorate: _incStmtProrate() });
+  const rows = inc.perMonth.__total;
+  return head
+    + '<div class="dash-row">' + _dashNetCard(rows, hasExp) + _dashDueCard(today) + _dashQuickCard() + '</div>'
+    + _dashChartCard(rows, hasExp)
+    + _dashChaseCard(today);
+}
+
+// Net income for the last full month, its change, and a 6-month sparkline.
+function _dashNetCard(rows, hasExp) {
+  const val = r => hasExp ? r.net : r.revenue;
+  const n = rows.length, last = rows[n - 2], prev = rows[n - 3], now = rows[n - 1];
+  const v = val(last), pv = val(prev);
+  const pct = pv ? Math.round((v - pv) / Math.abs(pv) * 1000) / 10 : null;
+  const delta = pct === null ? '<span class="dash-note">No figures for ' + _monthName(prev.ym) + '</span>'
+    : '<span class="dash-note"><span class="oa-delta ' + (pct >= 0 ? 'up' : 'down') + '">' + icon(pct >= 0 ? 'arrowUp' : 'arrowDown') + Math.abs(pct) + '%</span>vs ' + _monthName(prev.ym) + '</span>';
+  const sp = rows.slice(-7, -1).map(val);
+  const lo = Math.min(...sp), hi = Math.max(...sp), span = (hi - lo) || 1;
+  const pts = sp.map((x, i) => [i * 150 / (sp.length - 1), 50 - (x - lo) / span * 44]);
+  const line = pts.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' ');
+  const end = pts[pts.length - 1];
+  const spark = '<svg class="dash-spark" viewBox="0 0 150 56" width="150" height="56" aria-hidden="true" focusable="false"><path class="sp-fill" d="' + line + ' L150 56 L0 56 Z"/><path class="sp-line" d="' + line + '"/>'
+    + '<circle class="sp-dot" cx="' + end[0].toFixed(1) + '" cy="' + end[1].toFixed(1) + '" r="4.5"/></svg>';
+  const money = x => (x < 0 ? '&minus;' : '') + peso(Math.abs(x));
+  const stat = (l, x) => '<div class="dash-stat"><span>' + l + '</span><strong>' + x + '</strong></div>';
+  return '<section class="card dash-card">'
+    + '<div class="dash-card-head"><span class="dash-ic accent">' + icon('trend') + '</span><span class="dash-card-title">' + (hasExp ? 'Net income' : 'Revenue earned') + '</span>'
+    +   '<span class="oa-tag">' + _monthName(last.ym) + '</span></div>'
+    + '<div class="dash-fig-row"><div class="dash-fig-col"><span class="dash-fig' + (v < 0 ? ' neg' : '') + '">' + money(v) + '</span>' + delta + '</div>' + spark + '</div>'
+    + '<div class="dash-foot dash-foot-3">' + stat('Income', peso(last.revenue)) + stat('Expenses', hasExp ? peso(last.expenses) : '&mdash;')
+    +   stat(_monthName(now.ym) + ' so far', money(val(now))) + '</div>'
+    + '</section>';
+}
+
+// Open bills falling due today through six days from now, with a day strip.
+function _dashDueCard(today) {
+  const days = [];
+  for(let i = 0; i < 7; i++) days.push({ iso: addDaysISO(today, i), total: 0, n: 0 });
+  const items = [];
   tenants.forEach(t => t.bills.forEach(b => {
+    if(!b.due || billAwaitingAmount(b)) return;
     const o = billOpen(b);
     if(o <= 0.005) return;
-    open += o; openN++;
-    if(getDueStatus(b) === 'overdue') { overdue += o; overdueN++; }
+    const d = diffDays(today, b.due);
+    if(d < 0 || d > 6) return;
+    days[d].total = r2(days[d].total + o); days[d].n++;
+    items.push({ t, b, o, d });
   }));
-  const cat = outstandingByCategory(tenants.flatMap(t => t.bills));
-  // Balances left by former tenants are still receivables; shown apart so the drill-down (current tenants) still ties.
-  const formerOpen = r2(archivedTenants.reduce((s, t) => s + tenantSummary(t).open, 0));
-  const all = allTenants();
-  const collected = cashInMonth(all, ym), billed = billedInMonth(all, ym);
-  const utilSettled = cashInMonth(all, ym, true);
-  const rate = billed > 0 ? Math.round(collected / billed * 100) : null;
-  const expOk = expensesAvailable && !_expensesLoadError;
-  const spent = expOk ? _expensesInMonth(ym) : 0;
-  // Cash in (utility payments included, since the utility costs are in `spent`) minus cash out.
-  const net = r2(collected + utilSettled - spent);
-
-  const kpis = '<div class="kpis">'
-    + '<button type="button" class="kpi" onclick="goBills(\'open\')"><div class="kpi-label">Outstanding</div><div class="kpi-value">' + peso(open) + '</div>'
-    +   (open ? '<div class="kpi-lines">' + balanceLinesHtml(cat, 'stat-line') + '</div>' : '<div class="kpi-sub">Nothing owed</div>')
-    +   (formerOpen > 0.005 ? '<div class="kpi-sub">+ ' + peso(formerOpen) + ' owed by former tenants</div>' : '') + '</button>'
-    + '<button type="button" class="kpi" onclick="goBills(\'overdue\')"><div class="kpi-label">Overdue</div><div class="kpi-value ' + (overdue ? 'bad' : 'good') + '">' + (overdue ? peso(overdue) : 'None') + '</div>'
-    +   '<div class="kpi-sub">' + (overdueN ? overdueN + ' bill' + (overdueN !== 1 ? 's' : '') + ' past due' : 'nothing past due') + '</div></button>'
-    + '<button type="button" class="kpi" onclick="go(\'reports\')"><div class="kpi-label">Collected · ' + monthShort + '</div><div class="kpi-value good">' + peso(collected) + '</div>'
-    +   '<div class="kpi-sub">' + peso(billed) + ' billed this month' + (collected > billed + 0.005 ? ' · includes older bills or advances' : rate !== null ? ' · ' + rate + '%' : '') + (utilSettled ? ' · utilities ' + peso(utilSettled) + ' passed through' : '') + '</div></button>'
-    + (expOk
-        ? '<button type="button" class="kpi" onclick="go(\'expenses\')"><div class="kpi-label">Net · ' + monthShort + '</div><div class="kpi-value ' + (net < 0 ? 'bad' : '') + '">' + (net < 0 ? '&minus;' : '') + peso(Math.abs(net)) + '</div>'
-          + '<div class="kpi-sub">' + peso(r2(collected + utilSettled)) + ' received' + (utilSettled ? ' (incl. utilities)' : '') + ' &minus; ' + peso(spent) + ' expenses</div></button>'
-        : '<div class="kpi"><div class="kpi-label">Tenants</div><div class="kpi-value">' + tenants.length + '</div><div class="kpi-sub">' + openN + ' open bill' + (openN !== 1 ? 's' : '') + '</div></div>')
-    + '</div>';
-
-  const quick = '<div class="quick-actions">'
-    + btn('Receive payment', 'openPayModal()', { primary: true, icon: 'cash' })
-    + btn('Add bill', 'openQuickBill()', { icon: 'plus' })
-    + btn('Add tenant', 'openAddModal()', { icon: 'users' })
-    + btn('Log expense', 'go(\'expenses\')', { icon: 'wallet' })
-    + '</div>';
-
-  const items = attentionItems();
-  const shown = items.slice(0, 6);
-  // Bills waiting for an amount rank after overdue ones; when the list is
-  // full they still get a line, so a meter reading is never forgotten.
-  const awaitingN = items.filter(x => x.ds === 'awaiting').length;
-  const awaitingHidden = awaitingN - shown.filter(x => x.ds === 'awaiting').length;
-  const attention = '<section class="card">'
-    + '<div class="card-head"><h2 class="card-title">Needs attention</h2>'
-    + (items.length ? '<button type="button" class="link-btn" onclick="goBills(\'open\');tableSortCol=\'status\';tableSortDir=\'asc\'">View all open bills</button>' : '') + '</div>'
-    + (shown.length ? '<div class="att-list">' + shown.map(attentionRowHtml).join('') + '</div>'
-        : '<div class="empty-inline">' + icon('check') + ' Nothing overdue, due in the next 3 days, or waiting for an amount.</div>')
-    + (awaitingHidden > 0 ? '<div class="empty-inline">' + icon('alert') + ' ' + awaitingHidden + ' more bill' + (awaitingHidden !== 1 ? 's are' : ' is') + ' waiting for an amount (e.g. a meter reading). <button type="button" class="link-btn inline" onclick="goBills(\'awaiting\')">Enter amounts</button></div>' : '')
+  items.sort((a, b) => a.d - b.d || a.t.name.localeCompare(b.t.name));
+  const total = r2(items.reduce((s, x) => s + x.o, 0));
+  const wd = iso => new Date(iso + 'T00:00:00').toLocaleDateString('en-PH', { weekday: 'short' });
+  const f = items[0];
+  const first = f ? 'First one ' + (f.d === 0 ? 'today' : f.d === 1 ? 'tomorrow' : 'on ' + wd(f.b.due)) + ': ' + esc(f.t.name) + ', ' + esc(f.b.label) + ' ' + peso(f.o) : 'Nothing falls due this week.';
+  const max = Math.max(1, ...days.map(x => x.total));
+  const strip = days.map((x, i) => {
+    const lbl = i === 0 ? 'Today' : wd(x.iso);
+    const tip = new Date(x.iso + 'T00:00:00').toLocaleDateString('en-PH', { weekday: 'short', month: 'short', day: 'numeric' }) + (x.n ? ' · ' + x.n + ' bill' + (x.n !== 1 ? 's' : '') + ', ₱' + fmtMoney(x.total) : ' · nothing due');
+    return '<div class="ds-day' + (i === 0 ? ' today' : '') + (x.n ? ' has' : '') + '" title="' + esc(tip) + '">'
+      + (x.n ? '<span class="ds-amt">' + _kShort(x.total) + '</span><span class="ds-bar" style="height:' + Math.max(7, Math.round(x.total / max * 40)) + 'px"></span>' : '<span class="ds-stub"></span>')
+      + '<span class="ds-lbl">' + lbl + '</span></div>';
+  }).join('');
+  return '<section class="card dash-card">'
+    + '<div class="dash-card-head"><span class="dash-ic warn">' + icon('calendar') + '</span><span class="dash-card-title">Due in the next 7 days</span>'
+    +   '<span class="oa-tag">' + items.length + ' bill' + (items.length !== 1 ? 's' : '') + '</span></div>'
+    + '<div class="dash-fig-col"><span class="dash-fig">' + peso(total) + '</span><span class="dash-note">' + first + '</span></div>'
+    + '<div class="dash-foot dash-strip" role="img" aria-label="Bills due each day for the next 7 days">' + strip + '</div>'
     + '</section>';
+}
 
-  return pageHead(_greeting(), new Date().toLocaleDateString('en-PH', { weekday: 'long', month: 'long', day: 'numeric' }) + ' · here\u2019s how ' + esc(propertyName || 'the building') + ' is doing')
-    + kpis + quick
-    + '<div class="home-grid">' + attention + recurringStatusCard() + '</div>'
-    + (!tenants.length ? '<div class="empty-state"><div class="icon">&#127962;</div><p>No tenants yet. Add your first tenant to get started.</p>' + btn('Add tenant', 'openAddModal()', { primary: true, icon: 'plus' }) + '</div>' : '');
+function _dashQuickCard() {
+  const qa = (ic, label, fn) => '<button type="button" class="dash-qa" onclick="' + fn + '"><span class="dash-qa-ic">' + icon(ic) + '</span><span class="dash-qa-label">' + label + '</span>' + icon('next', 'dash-qa-chev') + '</button>';
+  return '<section class="card dash-card dash-quick"><h2 class="dash-quick-title">Quick actions</h2>'
+    + qa('receipt', 'Add a bill', 'openQuickBill()') + qa('userPlus', 'Add a tenant', 'openAddModal()') + qa('wallet', 'Log an expense', 'go(\'expenses\')')
+    + _autoBillChip() + '</section>';
+}
+// Automatic billing at a glance; opens the recurring checker.
+function _autoBillChip() {
+  let review = 0;
+  tenants.forEach(t => {
+    review += unpostedCurrent(t).length;
+    const s = tenantSummary(t);
+    if(s.recon.enabled) s.recon.charges.forEach(c => { review += c.missing.length + (_creditApplicable(t, c) ? 1 : 0); });
+  });
+  const last = _autoBillLast;
+  const when = d => d === todayISO() ? 'today' : 'on ' + shortDate(d);
+  let tone = 'good', text;
+  if(!autoBilling.enabled) { tone = 'neutral'; text = 'Auto-billing off · post recurring bills from Billing'; }
+  else if(!last) text = 'Auto-billing on · checking recurring bills…';
+  else if(last.failed || last.noRev) { tone = 'warn'; text = 'Auto-billing: some bills could not be saved · open the checker'; }
+  else text = 'Auto-billing on · ' + (last.posted.length ? last.posted.length + ' bill' + (last.posted.length !== 1 ? 's' : '') + ' posted ' + when(last.day) : 'nothing new to post ' + when(last.day));
+  if(review && tone === 'good') { tone = 'warn'; text += ' · ' + review + ' to review'; }
+  return '<button type="button" class="dash-auto ' + tone + '" onclick="_billingTab=\'recurring\';go(\'billing\')">' + icon('repeat') + '<span>' + text + '</span></button>';
+}
+
+// Income vs expenses, grouped bars; hover/focus picks a month.
+function _dashChartCard(rows, hasExp) {
+  const R = _isPhone() ? 6 : (chartRange === 6 ? 6 : 12);
+  const rr = rows.slice(-R);
+  _dashChart = { rows: rr, hasExp };
+  const sum = k => r2(rr.reduce((s, r) => s + r[k], 0));
+  const inc = sum('revenue'), exp = hasExp ? sum('expenses') : 0, net = r2(inc - exp);
+  const max = Math.max(1, ...rr.map(r => Math.max(r.revenue, hasExp ? r.expenses : 0)));
+  const step = _niceStep(max / 4), top = Math.ceil(max / step) * step, nT = Math.round(top / step);
+  const pct = v => Math.max(0, v / top * 100).toFixed(2) + '%';
+  let yAxis = '', grid = '';
+  for(let k = 0; k <= nT; k++) {
+    const b = (k / nT * 100).toFixed(2) + '%';
+    yAxis += '<span style="bottom:' + b + '">' + _compactPeso(k * step).replace('k', 'K') + '</span>';
+    if(k) grid += '<i style="bottom:' + b + '"></i>';
+  }
+  const sel = R - 2;
+  const cols = rr.map((r, i) => '<div class="ch-col' + (i === sel ? ' sel' : '') + (i === R - 1 ? ' partial' : '') + '" tabindex="0" data-i="' + i + '" onmouseenter="dashChartSel(' + i + ')" onfocus="dashChartSel(' + i + ')"'
+      + ' aria-label="' + esc(fmtYM(r.ym) + (i === R - 1 ? ' so far' : '') + ': income ₱' + fmtMoney(r.revenue) + (hasExp ? ', expenses ₱' + fmtMoney(r.expenses) : '')) + '">'
+      + '<span class="ch-bar inc" style="height:' + pct(r.revenue) + '"></span>' + (hasExp ? '<span class="ch-bar exp" style="height:' + pct(r.expenses) + '"></span>' : '') + '</div>').join('');
+  const labels = rr.map((r, i) => '<span class="' + (i === sel ? 'sel' : '') + '">' + _monthName(r.ym, 'short') + '</span>').join('');
+  const toggle = segTabs([6, 12].map(n => ({ label: n + ' months', active: n === R, onclick: 'chartRange=' + n + ';rerenderAdmin()' })), 'sm ch-range', 'Chart range');
+  _postRender.push(() => dashChartSel(sel));
+  return '<section class="card dash-chart">'
+    + '<div class="ch-head"><div class="ch-titles"><h2 class="card-title">Income' + (hasExp ? ' vs expenses' : '') + '</h2>'
+    +   '<span class="ch-sub">Last ' + R + ' months' + (hasExp ? ' · net income <b>' + (net < 0 ? '&minus;' : '') + peso(Math.abs(net)) + '</b>' : '') + '</span></div>'
+    +   '<div class="ch-side"><div class="ch-legend"><span class="ch-key"><i class="k-inc"></i>Income</span><strong>' + peso(inc) + '</strong></div>'
+    +   (hasExp ? '<div class="ch-legend"><span class="ch-key"><i class="k-exp"></i>Expenses</span><strong>' + peso(exp) + '</strong></div>' : '') + toggle + '</div></div>'
+    + '<div class="ch-body"><div class="ch-y" aria-hidden="true">' + yAxis + '</div>'
+    +   '<div class="ch-plot r' + R + '" onmouseleave="dashChartSel(' + sel + ')"><div class="ch-grid" aria-hidden="true">' + grid + '</div>'
+    +     '<div class="ch-tip" id="ch-tip" aria-live="polite"></div><div class="ch-cols">' + cols + '</div></div>'
+    +   '<span></span><div class="ch-x r' + R + '" aria-hidden="true">' + labels + '</div></div>'
+    + '</section>';
+}
+function dashChartSel(i) {
+  const D = _dashChart, tip = document.getElementById('ch-tip');
+  if(!D || !tip || !D.rows[i]) return;
+  const r = D.rows[i], R = D.rows.length, partial = i === R - 1;
+  document.querySelectorAll('.ch-col').forEach((c, k) => c.classList.toggle('sel', k === i));
+  document.querySelectorAll('.ch-x span').forEach((c, k) => c.classList.toggle('sel', k === i));
+  const net = r2(r.revenue - (D.hasExp ? r.expenses : 0));
+  tip.innerHTML = '<b>' + fmtYM(r.ym, 'short') + (partial ? ' · so far' : '') + '</b><span><i class="k-inc"></i>Income ' + peso(r.revenue) + '</span>'
+    + (D.hasExp ? '<span><i class="k-exp"></i>Expenses ' + peso(r.expenses) + '</span><span class="ch-tip-net">Net <b>' + (net < 0 ? '&minus;' : '') + peso(Math.abs(net)) + '</b></span>' : '');
+  const w = 100 / R, edge = R === 12 ? 3 : 1;
+  tip.style.left = tip.style.right = ''; tip.className = 'ch-tip';
+  if(i <= edge) tip.style.left = (i * w).toFixed(2) + '%';
+  else if(i >= R - 1 - edge) tip.style.right = ((R - 1 - i) * w).toFixed(2) + '%';
+  else { tip.style.left = ((i + 0.5) * w).toFixed(2) + '%'; tip.classList.add('mid'); }
+}
+
+// Bills to chase: overdue and due within 7 days, plus former tenants' balances.
+function _dashChaseCard(today) {
+  const action = [], former = [], open = [];
+  tenants.forEach(t => t.bills.forEach((b, bi) => {
+    const jp = _justPaidEntry(t.id, bi);
+    if(jp) { const it = { t, b, bi, o: Number(b.amount) || 0, paid: true }; action.push(it); open.push(it); return; }
+    if(billAwaitingAmount(b)) return;
+    const o = billOpen(b);
+    if(o <= 0.005) return;
+    const it = { t, b, bi, o };
+    open.push(it);
+    const ds = getDueStatus(b);
+    if(ds === 'overdue' || ds === 'grace' || (b.due && diffDays(today, b.due) <= 6)) action.push(it);
+  }));
+  archivedTenants.forEach(t => (t.bills || []).forEach((b, bi) => {
+    const o = billOpen(b);
+    if(o <= 0.005 || billAwaitingAmount(b)) return;
+    const it = { t, b, bi, o, former: true };
+    former.push(it); open.push(it);
+  }));
+  const byDue = (a, b) => (a.b.due || '9999').localeCompare(b.b.due || '9999') || a.t.name.localeCompare(b.t.name);
+  [action, former, open].forEach(l => l.sort(byDue));
+  const lists = { action, former, all: open };
+  if(!lists[chaseTab]) chaseTab = 'action';
+  const list = lists[chaseTab];
+  const live = list.filter(x => !x.paid);
+  const tabs = segTabs([['action', 'Needs action'], ['former', 'Former tenants'], ['all', 'All open']].map(([k, l]) => ({
+    label: l, count: lists[k].filter(x => !x.paid).length, active: k === chaseTab, onclick: 'chaseTab=\'' + k + '\';rerenderAdmin()' })), '', 'Which bills');
+  const shown = list.slice(0, 8);
+  const row = it => {
+    const t = it.t, b = it.b;
+    const where = 'Unit ' + esc(t.unit) + (it.former ? ' · moved out' : t.floor ? ' · ' + esc(t.floor) : '');
+    const name = it.former ? '<span class="oa-name">' + esc(t.name) + '</span>' : '<a class="oa-name" href="#/tenants/' + encodeURIComponent(t.id) + '">' + esc(t.name) + '</a>';
+    const acts = it.former ? '<span class="oa-muted-sm" title="Restore the tenant (Tenants › Archived) to settle this bill">Moved out</span>'
+      : '<button type="button" class="oa-icon-btn" title="Copy payment reminder" aria-label="Copy payment reminder for ' + esc(t.name) + '" onclick="copyReminder(this.closest(\'[data-tid]\').dataset.tid)">' + icon('chat') + '</button>'
+        + (it.paid ? '<button type="button" class="oa-btn-undo" onclick="const r=this.closest(\'[data-tid]\');undoJustPaid(r.dataset.tid,+r.dataset.bi)">Undo</button>'
+          : '<button type="button" class="oa-btn-paid" onclick="const r=this.closest(\'[data-tid]\');quickMarkPaid(r.dataset.tid,+r.dataset.bi)">Mark paid</button>');
+    return '<div class="oa-tr' + (it.paid ? ' is-paid' : '') + '" data-tid="' + esc(t.id) + '" data-bi="' + it.bi + '">'
+      + '<div class="oa-who">' + avatar(t.name, 38) + '<div class="oa-who-text">' + name + '<span class="oa-sub">' + where + '</span></div></div>'
+      + '<span class="oa-cell-bill">' + esc(b.label || 'Bill') + '</span>'
+      + '<span class="oa-cell-due">' + (b.due ? shortDate(b.due) : '&mdash;') + '</span>'
+      + '<span class="oa-cell-status">' + billPill(b, it.paid) + '</span>'
+      + '<span class="oa-cell-amt">' + peso(it.o) + '</span>'
+      + '<div class="oa-cell-act">' + acts + '</div></div>';
+  };
+  const empty = { action: 'Nothing overdue or due in the next 7 days.', former: 'Former tenants owe nothing.', all: 'No open bills — everyone is settled.' }[chaseTab];
+  const awaitingN = tenants.reduce((n, t) => n + t.bills.filter(b => getDueStatus(b) === 'awaiting').length, 0);
+  return '<section class="card oa-table-card dash-chase">'
+    + '<div class="oa-card-head"><div><h2 class="card-title">Bills to chase</h2><span class="oa-card-sub">Overdue, and due in the next 7 days</span></div>' + tabs + '</div>'
+    + (shown.length
+      ? '<div class="oa-table t-chase" role="table"><div class="oa-thead" role="row"><span>Tenant</span><span>Bill</span><span>Due</span><span>Status</span><span class="r">Amount</span><span></span></div>' + shown.map(row).join('') + '</div>'
+      : '<div class="oa-empty">' + icon('check') + ' ' + empty + '</div>')
+    + (awaitingN ? '<div class="oa-hint">' + icon('alert') + ' ' + awaitingN + ' bill' + (awaitingN !== 1 ? 's are' : ' is') + ' waiting for an amount (e.g. a meter reading). <button type="button" class="link-btn inline" onclick="goBills(\'awaiting\')">Enter amounts</button></div>' : '')
+    + '<div class="oa-card-foot"><span>' + live.length + ' open · ' + peso(r2(live.reduce((s, x) => s + x.o, 0))) + (list.length > shown.length ? ' · showing ' + shown.length : '') + '</span>'
+    +   '<button type="button" class="link-btn oa-more" onclick="goBills(\'open\')">All open bills' + icon('next') + '</button></div>'
+    + '</section>';
 }
 function goBills(view) {
   billView = BILL_VIEWS[view] ? view : 'open';
@@ -4311,6 +4537,7 @@ async function confirmPaid(){
   // 'conflict' (truthy) also closes: the tenant row was reloaded, so the
   // remembered bill INDEX may now point at a different bill — retrying the
   // stale index could mark the wrong bill paid. The admin re-taps instead.
+  if(ok === true) _noteJustPaid(tid, bi);
   if(ok){ closePaidModal(); rerenderAdmin(); }
   // On a plain failure (no reload) the modal stays open so the admin can retry.
 }
