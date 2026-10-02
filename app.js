@@ -3607,46 +3607,70 @@ function renderReportsModule() {
 // ─────────────────────────────────────────────
 // SETTINGS MODULE
 // ─────────────────────────────────────────────
+let _setEdit = ''; // portal text being edited inline: 'payinst' | 'announce' | 'branding'
+function _autoBillLastLine() {
+  const last = _autoBillLast;
+  if(!autoBilling.enabled) return 'Automatic billing is off — post recurring bills from Billing.';
+  if(!last) return 'Checking recurring bills…';
+  const when = last.day === todayISO() ? 'today' : shortDate(last.day);
+  return 'Last run ' + when + ' · ' + (last.posted.length ? 'posted ' + last.posted.length + ' bill' + (last.posted.length !== 1 ? 's' : '') : 'nothing new to post')
+    + (last.failed ? ' · <span class="txt-bad">' + last.failed + ' could not be saved — try Run now</span>' : '')
+    + (last.noRev ? ' · <span class="txt-bad">' + last.noRev + ' skipped: background posting needs supabase-migration-2.sql</span>' : '');
+}
 function renderSettingsModule() {
-  const leadOpts = [0, 3, 5, 7, 10, 14, 21].map(d => '<option value="' + d + '"' + (autoBilling.leadDays === d ? ' selected' : '') + '>' + (d ? d + ' days before due' : 'On the due date') + '</option>').join('');
-  const autoCard = '<section class="card"><div class="card-head"><h2 class="card-title">' + icon('repeat') + ' Automatic billing</h2></div>'
-    + '<div class="set-row"><div><div class="set-label">Post recurring bills automatically</div><div class="set-hint">Every charge set to auto-post creates its bill ahead of the due date, each cycle — and catches up a cycle missed while nobody opened the portal (up to two months back). History from before a charge was active is never created automatically; a charge switched back on after a long pause restarts from the current cycle.</div></div>'
-    + '<label class="switch"><input type="checkbox" id="set-auto"' + (autoBilling.enabled ? ' checked' : '') + ' onchange="saveAutoBilling(\'enabled\')"><span class="switch-ui"></span><span class="sr-only">Automatic billing</span></label></div>'
-    + '<div class="set-row"><div><div class="set-label">Posting lead time</div><div class="set-hint">Rent is paid in advance, so tenants see the bill before it\'s due.</div></div>'
-    + '<select id="set-lead" class="tb-select" aria-label="Posting lead time" onchange="saveAutoBilling(\'lead\')">' + leadOpts + '</select></div>'
-    + '<div class="btn-row">' + btn('Run now', 'runAutoBilling({manual:true})', { icon: 'repeat' }) + '</div>'
-    + '</section>'
-    + '<section class="card"><div class="card-head"><h2 class="card-title">' + icon('calendar') + ' Late payments</h2></div>'
-    + '<div class="set-row"><div><div class="set-label">Grace period</div><div class="set-hint">Days after the due date before a bill shows as overdue and counts as late in punctuality.</div></div>'
-    + '<select id="set-grace" class="tb-select" aria-label="Grace period" onchange="saveGraceDays()">'
-    + [0, 1, 2, 3, 5, 7, 10, 15].map(d => '<option value="' + d + '"' + (graceDays === d ? ' selected' : '') + '>' + (d ? d + ' day' + (d !== 1 ? 's' : '') : 'None') + '</option>').join('')
-    + (![0, 1, 2, 3, 5, 7, 10, 15].includes(graceDays) ? '<option value="' + graceDays + '" selected>' + graceDays + ' days</option>' : '')
-    + '</select></div></section>';
-  const portalCard = (ic, label, val, empty, fn) => '<div class="set-row"><div class="set-main"><div class="set-label">' + label + '</div>'
-    + (val ? '<div class="set-preview">' + esc(val) + '</div>' : '<div class="set-hint">' + empty + '</div>') + '</div>'
-    + btn('Edit', fn, { icon: 'edit' }) + '</div>';
-  const portal = '<section class="card"><div class="card-head"><h2 class="card-title">Tenant portal</h2></div>'
-    + portalCard('cash', 'Payment instructions', paymentInstructions, 'Not set — tenants won\'t see how to pay.', 'openPayInstModal()')
-    + portalCard('mail', 'Announcements', announcements, 'Not set — the notice board is hidden.', 'openAnnounceModal()')
-    + portalCard('building', 'Property name', propertyName + (propertySubtitle ? ' · ' + propertySubtitle : ''), '', 'openBrandingModal()')
+  const head = (ic, tone, title, sub) => '<div class="st-head"><span class="st-ic ' + tone + '">' + icon(ic) + '</span><div><h2 class="card-title">' + title + '</h2>' + (sub ? '<span class="st-sub">' + sub + '</span>' : '') + '</div></div>';
+  const row = (label, hint, ctrl) => '<div class="st-row"><div class="st-row-text"><div class="st-label">' + label + '</div>' + (hint ? '<div class="st-hint">' + hint + '</div>' : '') + '</div>' + (ctrl || '') + '</div>';
+  const leadOpts = [0, 3, 5, 7, 10, 14, 21].map(d => '<option value="' + d + '"' + (autoBilling.leadDays === d ? ' selected' : '') + '>' + (d ? d + ' days before due' : 'On the due date') + '</option>').join('')
+    + (![0, 3, 5, 7, 10, 14, 21].includes(autoBilling.leadDays) ? '<option value="' + autoBilling.leadDays + '" selected>' + autoBilling.leadDays + ' days before due</option>' : '');
+  const autoCard = '<section class="card st-card">' + head('repeat', 'accent', 'Automatic billing')
+    + row('Post recurring bills automatically', 'Each recurring charge creates its bill ahead of the due date, every cycle. It also catches up a cycle missed while nobody opened the app, up to two months back. History from before a charge was active is never created automatically.',
+        '<label class="switch lg"><input type="checkbox" id="set-auto"' + (autoBilling.enabled ? ' checked' : '') + ' onchange="saveAutoBilling(\'enabled\')"><span class="switch-ui"></span><span class="sr-only">Post recurring bills automatically</span></label>')
+    + row('Posting lead time', 'Rent is paid in advance, so tenants see the bill before it\'s due.',
+        '<select id="set-lead" class="tb-select st-select" aria-label="Posting lead time" onchange="saveAutoBilling(\'lead\')">' + leadOpts + '</select>')
+    + '<div class="st-foot"><span>' + _autoBillLastLine() + '</span>' + btn('Run now', 'runAutoBilling({manual:true})', { icon: 'repeat' }) + '</div>'
     + '</section>';
-  const db = '<section class="card"><div class="card-head"><h2 class="card-title">Database</h2></div>'
-    + '<div class="set-row"><div class="set-label">Expenses ledger (migration 2)</div>' + (expensesAvailable ? chip('good', 'Installed') : chip('warn', 'Run supabase-migration-2.sql')) + '</div>'
-    + '<div class="set-row"><div class="set-label">Change protection · rev column (migration 2)</div>' + (tenants.length && tenants.some(t => t.rev == null) ? chip('warn', 'Run supabase-migration-2.sql — background posting is paused') : chip('good', 'Installed')) + '</div>'
-    + '<div class="set-row"><div class="set-label">Expense floor tags (migration 3)</div>' + (expensesFloorAvailable === false ? chip('warn', 'Run supabase-migration-3.sql') : expensesFloorAvailable ? chip('good', 'Installed') : chip('muted', 'Unknown')) + '</div>'
+  const graceSet = [0, 1, 2, 3, 5, 7].concat([0, 1, 2, 3, 5, 7].includes(graceDays) ? [] : [graceDays]).sort((a, b) => a - b);
+  const lateCard = '<section class="card st-card">' + head('calendar', 'warn', 'Late payments')
+    + '<div class="st-row st-col"><div class="st-row-text"><div class="st-label">Grace period</div><div class="st-hint">Days after the due date before a bill shows as overdue and counts as late.</div></div>'
+    + segTabs(graceSet.map(d => ({ label: d ? d + ' day' + (d !== 1 ? 's' : '') : 'None', active: graceDays === d, onclick: 'saveGraceDays(' + d + ')' })), 'st-grace', 'Grace period') + '</div>'
     + '</section>';
-  const floorsCard = '<section class="card"><div class="card-head"><h2 class="card-title">' + icon('building') + ' Floors</h2></div>'
-    + '<p class="card-text muted">The floors offered when tagging tenants and expenses. Renaming updates every tenant and expense on that floor.</p>'
+  const pill = (ok, okText, warnText) => ok === true ? oaPill('paid', okText) : ok === false ? oaPill('due', warnText) : oaPill('neutral', 'Unknown');
+  const dbCard = '<section class="card st-card">' + head('doc', 'neutral', 'Database')
+    + '<div class="st-db"><span>Expenses ledger <span class="oa-muted-sm">· migration 2</span></span>' + pill(expensesAvailable, 'Installed', 'Run supabase-migration-2.sql') + '</div>'
+    + '<div class="st-db"><span>Change protection <span class="oa-muted-sm">· migration 2</span></span>' + pill(!(tenants.length && tenants.some(t => t.rev == null)), 'Installed', 'Run migration 2 — background posting is paused') + '</div>'
+    + '<div class="st-db"><span>Expense floor tags <span class="oa-muted-sm">· migration 3</span></span>' + pill(expensesFloorAvailable === false ? false : expensesFloorAvailable ? true : null, 'Installed', 'Run supabase-migration-3.sql') + '</div>'
+    + '</section>';
+  // Tenant portal texts, edited in place.
+  const pRow = (key, label, val, empty, hint, editor) => '<div class="st-prow"><div class="st-prow-head"><span class="st-label">' + label + '</span>'
+    + (_setEdit === key ? '' : '<button type="button" class="btn-sec st-edit" onclick="' + { payinst: 'openPayInstModal()', announce: 'openAnnounceModal()', branding: 'openBrandingModal()' }[key] + '">Edit</button>') + '</div>'
+    + (_setEdit === key ? editor : '<div class="st-text' + (val ? '' : ' empty') + '">' + (val ? esc(val) : empty) + '</div>')
+    + '<div class="st-hint">' + hint + '</div></div>';
+  const ta = (id, val, ph, save, cancel) => '<div class="st-editor"><textarea id="' + id + '" rows="4" placeholder="' + esc(ph) + '" onkeydown="if(event.key===\'Escape\'){event.stopPropagation();' + cancel + '}">' + esc(val || '') + '</textarea>'
+    + '<div id="' + id.split('-')[0] + '-error" class="st-err" hidden></div>'
+    + '<div class="st-editor-actions"><button type="button" class="btn-sec" onclick="' + cancel + '">Cancel</button><button type="button" class="btn-pri" onclick="' + save + '">Save</button></div></div>';
+  const brandEditor = '<div class="st-editor" onkeydown="if(event.key===\'Escape\'){event.stopPropagation();closeBrandingModal()}else if(event.key===\'Enter\'&&event.target.tagName===\'INPUT\'){saveBranding()}"><div class="field"><label for="branding-name">Property name</label><input type="text" id="branding-name" maxlength="60" value="' + esc(propertyName) + '" placeholder="e.g. Orange Apartment"></div>'
+    + '<div class="field"><label for="branding-sub">Tagline / location <span class="opt">(optional, on statements)</span></label><input type="text" id="branding-sub" maxlength="80" value="' + esc(propertySubtitle) + '" placeholder="e.g. Tenant Billing Portal · Baguio"></div>'
+    + '<div id="branding-error" class="st-err" hidden></div>'
+    + '<div class="st-editor-actions"><button type="button" class="btn-sec" onclick="closeBrandingModal()">Cancel</button><button type="button" class="btn-pri" onclick="saveBranding()">Save</button></div></div>';
+  const portal = '<section class="card st-card">' + head('home', 'blue', 'Tenant portal', 'What tenants see when they sign in')
+    + pRow('payinst', 'Payment instructions', paymentInstructions, 'Not set — tenants won\'t see how to pay.', 'Shown on every tenant\'s “How to pay” screen.',
+        ta('payinst-textarea', paymentInstructions, 'e.g. GCash: 0917 123 4567\nBDO: 1234-5678-9012\nCash: hand to the admin at Unit 1', 'savePayInst()', 'closePayInstModal()'))
+    + pRow('announce', 'Announcements', announcements, 'Not set — the notice board is hidden.', 'Leave empty to hide the notice board.',
+        ta('announce-textarea', announcements, 'e.g. Water interruption on Aug 15, 8am–5pm.', 'saveAnnouncements()', 'closeAnnounceModal()'))
+    + pRow('branding', 'Property name', propertyName + (propertySubtitle ? ' · ' + propertySubtitle : ''), '', 'Appears in the portal header, on statements and in payment reminders.', brandEditor)
+    + '</section>';
+  const floorsCard = '<section class="card st-card">' + head('building', 'neutral', 'Floors', 'Offered when tagging tenants and expenses')
     + (allFloors().length ? allFloors().map(f => {
         const n = allTenants().filter(t => floorNorm(t.floor) === floorNorm(f)).length, m = expenses.filter(x => floorNorm(x.floor) === floorNorm(f)).length;
-        return '<div class="set-row"><div><div class="set-label">' + esc(f) + '</div><div class="set-hint">' + n + ' tenant' + (n !== 1 ? 's' : '') + ' · ' + m + ' expense' + (m !== 1 ? 's' : '') + '</div></div>'
-          + '<div class="btn-row">' + btn('Rename', 'renameFloor(this.dataset.f)', { icon: 'edit', attrs: ' data-f="' + esc(f) + '"' })
-          + btn('Remove', 'removeFloor(this.dataset.f)', { icon: 'trash', attrs: ' data-f="' + esc(f) + '"' }) + '</div></div>';
-      }).join('') : '<div class="set-hint">No floors yet.</div>')
-    + '<div class="btn-row">' + btn('Add floor', 'addFloorPrompt().then(()=>rerenderAdmin())', { icon: 'plus' }) + '</div>'
+        return '<div class="st-db"><span>' + esc(f) + ' <span class="oa-muted-sm">· ' + n + ' tenant' + (n !== 1 ? 's' : '') + ' · ' + m + ' expense' + (m !== 1 ? 's' : '') + '</span></span>'
+          + '<span class="st-floor-acts"><button type="button" class="oa-icon-btn" data-f="' + esc(f) + '" onclick="renameFloor(this.dataset.f)" aria-label="Rename ' + esc(f) + '" title="Rename (updates every tenant and expense on it)">' + icon('edit') + '</button>'
+          + '<button type="button" class="oa-icon-btn" data-f="' + esc(f) + '" onclick="removeFloor(this.dataset.f)" aria-label="Remove ' + esc(f) + '" title="Remove">' + icon('trash') + '</button></span></div>';
+      }).join('') : '<div class="st-db"><span class="oa-muted-sm">No floors yet.</span></div>')
+    + '<div class="st-foot">' + btn('Add floor', 'addFloorPrompt().then(()=>rerenderAdmin())', { icon: 'plus' }) + '</div>'
     + '</section>';
-  const account = '<section class="card"><div class="card-head"><h2 class="card-title">Account</h2></div><div class="btn-row">' + btn('Sign out', 'logout()', { icon: 'back' }) + '</div></section>';
-  return pageHead('Settings') + '<div class="settings-grid">' + autoCard + portal + floorsCard + db + account + '</div>';
+  if(_setEdit) _postRender.push(() => { const el = document.querySelector('.st-editor textarea, .st-editor input'); if(el && !document.activeElement.closest('.st-editor')) el.focus(); });
+  return pageHead('Settings', 'Billing rules, the tenant portal and the database')
+    + '<div class="st-grid"><div class="td-col">' + autoCard + lateCard + dbCard + '</div><div class="td-col">' + portal + floorsCard + '</div></div>';
 }
 async function renameFloor(f) {
   if(!_guardSettingsEdit()) return;
@@ -3687,9 +3711,10 @@ async function removeFloor(f) {
   try { await _saveManagedFloors(managedFloors.filter(x => floorNorm(x) !== floorNorm(f))); showToast('Floor removed.'); } catch(e) { showToast('Could not save: ' + e.message, false); }
   rerenderAdmin();
 }
-async function saveGraceDays() {
+async function saveGraceDays(days) {
   if(!_guardSettingsEdit()) { rerenderAdmin(); return; }
-  const v = Math.min(30, Math.max(0, Math.round(Number(document.getElementById('set-grace').value) || 0)));
+  const v = Math.min(30, Math.max(0, Math.round(Number(days) || 0)));
+  if(v === graceDays) return;
   try { await dbSetSetting('grace_days', String(v)); graceDays = v; showToast(v ? 'Grace period set to ' + v + ' day' + (v !== 1 ? 's' : '') + '.' : 'Grace period removed.'); }
   catch(e) { showToast('Could not save: ' + e.message, false); }
   rerenderAdmin();
@@ -5784,9 +5809,6 @@ document.addEventListener('DOMContentLoaded',()=>{
   _wire('tenant-modal',  closeModal);
   _wire('paiddate-modal', closePaidModal);
   _wire('moveout-modal', closeMoveOut);
-  _wire('payinst-modal', closePayInstModal);
-  _wire('announce-modal', closeAnnounceModal);
-  _wire('branding-modal', closeBrandingModal);
   _wire('stmt-modal',    closeStmtModal);
   _wire('incstmt-modal', closeIncStmtModal);
   _wire('genbills-modal', closeGenModal);
@@ -6560,19 +6582,16 @@ function _guardSettingsEdit() {
   }
   return true;
 }
+// Portal texts are edited in place on Settings (one at a time).
 function openPayInstModal() {
   if(!_guardSettingsEdit()) return;
-  document.getElementById('payinst-textarea').value = paymentInstructions || '';
-  document.getElementById('payinst-error').style.display = 'none';
-  openModal('payinst-modal');
+  _setEdit = 'payinst'; rerenderAdmin();
 }
-function closePayInstModal() {
-  closeModalEl('payinst-modal');
-}
+function closePayInstModal() { _setEdit = ''; rerenderAdmin(); }
 async function savePayInst() {
   const val = document.getElementById('payinst-textarea').value.trim();
   const errEl = document.getElementById('payinst-error');
-  errEl.style.display = 'none';
+  errEl.hidden = true;
   try {
     await dbSetSetting('payment_instructions', val);
     paymentInstructions = val;
@@ -6581,7 +6600,7 @@ async function savePayInst() {
     rerenderAdmin();
   } catch(e) {
     errEl.textContent = 'Save failed. Make sure the settings table exists in Supabase.';
-    errEl.style.display = 'block';
+    errEl.hidden = false;
   }
 }
 
@@ -6590,17 +6609,13 @@ async function savePayInst() {
 // ─────────────────────────────────────────────
 function openAnnounceModal() {
   if(!_guardSettingsEdit()) return;
-  document.getElementById('announce-textarea').value = announcements || '';
-  document.getElementById('announce-error').style.display = 'none';
-  openModal('announce-modal');
+  _setEdit = 'announce'; rerenderAdmin();
 }
-function closeAnnounceModal() {
-  closeModalEl('announce-modal');
-}
+function closeAnnounceModal() { _setEdit = ''; rerenderAdmin(); }
 async function saveAnnouncements() {
   const val = document.getElementById('announce-textarea').value.trim();
   const errEl = document.getElementById('announce-error');
-  errEl.style.display = 'none';
+  errEl.hidden = true;
   try {
     await dbSetSetting('announcements', val);
     announcements = val;
@@ -6609,7 +6624,7 @@ async function saveAnnouncements() {
     rerenderAdmin();
   } catch(e) {
     errEl.textContent = 'Save failed. Make sure the settings table exists in Supabase.';
-    errEl.style.display = 'block';
+    errEl.hidden = false;
   }
 }
 
@@ -6618,20 +6633,15 @@ async function saveAnnouncements() {
 // ─────────────────────────────────────────────
 function openBrandingModal() {
   if(!_guardSettingsEdit()) return;
-  document.getElementById('branding-name').value = propertyName;
-  document.getElementById('branding-sub').value = propertySubtitle;
-  document.getElementById('branding-error').style.display = 'none';
-  openModal('branding-modal');
+  _setEdit = 'branding'; rerenderAdmin();
 }
-function closeBrandingModal() {
-  closeModalEl('branding-modal');
-}
+function closeBrandingModal() { _setEdit = ''; rerenderAdmin(); }
 async function saveBranding() {
   const name = document.getElementById('branding-name').value.trim();
   const sub  = document.getElementById('branding-sub').value.trim();
   const errEl = document.getElementById('branding-error');
-  errEl.style.display = 'none';
-  if(!name){ errEl.textContent = 'Property name cannot be empty.'; errEl.style.display = 'block'; return; }
+  errEl.hidden = true;
+  if(!name){ errEl.textContent = 'Property name cannot be empty.'; errEl.hidden = false; return; }
   try {
     await dbSetSetting('property_name', name);
     await dbSetSetting('property_subtitle', sub);
@@ -6644,7 +6654,7 @@ async function saveBranding() {
     rerenderAdmin();
   } catch(e) {
     errEl.textContent = 'Save failed. Make sure the settings table exists in Supabase.';
-    errEl.style.display = 'block';
+    errEl.hidden = false;
   }
 }
 
@@ -6751,9 +6761,6 @@ document.addEventListener('keydown', function(e) {
   if(_el('moveout-modal'))  { closeMoveOut();      return; }
   if(_el('pay-modal'))      { closePayModal();     return; }
   if(_el('genbills-modal')) { closeGenModal();     return; }
-  if(_el('payinst-modal'))  { closePayInstModal(); return; }
-  if(_el('announce-modal')) { closeAnnounceModal();return; }
-  if(_el('branding-modal')) { closeBrandingModal();return; }
   if(_el('stmt-modal'))     { closeStmtModal();    return; }
   if(_el('incstmt-modal'))  { closeIncStmtModal(); return; }
   if(_el('addbill-modal'))  { closeQuickBill();    return; }
@@ -6765,7 +6772,7 @@ document.addEventListener('keydown', function(e) {
 // aria-modal, but without this the background stayed keyboard-reachable —
 // Tab could land on (and activate) destructive controls behind the overlay.
 // ─────────────────────────────────────────────
-const _MODAL_IDS = ['paiddate-modal','moveout-modal','pay-modal','genbills-modal','payinst-modal','announce-modal','branding-modal','stmt-modal','incstmt-modal','addbill-modal','tenant-modal'];
+const _MODAL_IDS = ['paiddate-modal','moveout-modal','pay-modal','genbills-modal','stmt-modal','incstmt-modal','addbill-modal','tenant-modal'];
 document.addEventListener('keydown', function(e) {
   if(e.key !== 'Tab') return;
   let openEl = null;

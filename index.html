@@ -541,55 +541,6 @@
   </div>
 </div>
 
-<!-- PAYMENT INSTRUCTIONS EDIT MODAL -->
-<div id="payinst-modal" role="dialog" aria-modal="true" aria-labelledby="payinst-modal-title">
-  <div class="payinst-box">
-    <div class="payinst-eyebrow">Payment Instructions</div>
-    <div class="payinst-title" id="payinst-modal-title">Edit Payment Instructions</div>
-    <div class="payinst-sub">These instructions will be shown to tenants on their portal so they know how to pay.</div>
-    <label for="payinst-textarea" style="position:absolute;left:-9999px;">Payment instructions</label>
-    <textarea id="payinst-textarea" placeholder="e.g. GCash: 0917 123 4567&#10;BDO: 1234-5678-9012&#10;Cash: Hand to admin at Unit 1"></textarea>
-    <div id="payinst-error" style="display:none;color:var(--rust);font-size:12px;margin-top:8px;font-weight:500;"></div>
-    <div class="payinst-actions">
-      <button class="btn-cancel" onclick="closePayInstModal()">Cancel</button>
-      <button class="btn-save" onclick="savePayInst()">Save Instructions</button>
-    </div>
-  </div>
-</div>
-
-<!-- ANNOUNCEMENTS EDIT MODAL -->
-<div id="announce-modal" role="dialog" aria-modal="true" aria-labelledby="announce-modal-title">
-  <div class="payinst-box">
-    <div class="payinst-eyebrow">Announcements</div>
-    <div class="payinst-title" id="announce-modal-title">Edit Announcements</div>
-    <div class="payinst-sub">Shown to every tenant at the top of their portal. Leave empty to hide the notice board.</div>
-    <label for="announce-textarea" style="position:absolute;left:-9999px;">Announcements</label>
-    <textarea id="announce-textarea" placeholder="e.g. Water interruption on Aug 15, 8am&ndash;5pm.&#10;Hallway cleaning every Saturday morning."></textarea>
-    <div id="announce-error" style="display:none;color:var(--rust);font-size:12px;margin-top:8px;font-weight:500;"></div>
-    <div class="payinst-actions">
-      <button class="btn-cancel" onclick="closeAnnounceModal()">Cancel</button>
-      <button class="btn-save" onclick="saveAnnouncements()">Save Announcements</button>
-    </div>
-  </div>
-</div>
-
-<!-- BRANDING / PROPERTY NAME MODAL -->
-<div id="branding-modal" role="dialog" aria-modal="true" aria-labelledby="branding-modal-title">
-  <div class="payinst-box">
-    <div class="payinst-eyebrow">Property</div>
-    <div class="payinst-title" id="branding-modal-title">Property Name</div>
-    <div class="payinst-sub">Used across the portal: the header, the login screen, printed statements, and payment reminders.</div>
-    <div class="field"><label for="branding-name">Property Name</label><input type="text" id="branding-name" maxlength="60" placeholder="e.g. Orange Apartment"></div>
-    <div class="field"><label for="branding-sub">Tagline / Location <span style="font-weight:400;color:var(--muted)">(optional, shown on statements)</span></label><input type="text" id="branding-sub" maxlength="80" placeholder="e.g. Tenant Billing Portal &middot; Baguio"></div>
-    <div id="branding-error" style="display:none;color:var(--rust);font-size:12px;margin-top:8px;font-weight:500;"></div>
-    <div class="payinst-actions">
-      <button class="btn-cancel" onclick="closeBrandingModal()">Cancel</button>
-      <button class="btn-save" onclick="saveBranding()">Save</button>
-    </div>
-  </div>
-</div>
-
-
 <!-- supabase-js v2.45.4 vendored from the official npm package (dist/umd/supabase.js)
      so the portal keeps working if the CDN is down and CSP can stay 'self'-only. -->
 <!-- __ASSET_V__ is replaced with the commit SHA at deploy time (see deploy.yml),
