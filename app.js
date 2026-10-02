@@ -1371,7 +1371,9 @@ function applyBranding() {
   const login = document.querySelector('.login-wordmark');
   if(login) login.textContent = propertyName;
   const nav = document.querySelector('.nav-wordmark');
-  if(nav) nav.innerHTML = '<span class="nav-dot"></span>' + esc(propertyName);
+  if(nav) nav.innerHTML = '<span class="nav-dot"></span><span class="nav-name">' + esc(propertyName) + '<small>' + (currentUser && currentUser !== 'admin' ? 'Tenant portal' : 'Property admin') + '</small></span>';
+  const logo = document.querySelector('.login-logo');
+  if(logo) logo.textContent = (propertyName || 'O').trim().charAt(0).toUpperCase();
 }
 
 async function dbSetSetting(key, value) {
@@ -1495,9 +1497,15 @@ function showToast(msg, ok=true) {
 }
 
 function switchTab(tab) {
-  document.querySelectorAll('.login-tab').forEach((t,i) => t.classList.toggle('active', (tab==='admin'&&i===0)||(tab==='tenant'&&i===1)));
-  document.getElementById('admin-form').style.display  = tab==='admin'  ? 'block' : 'none';
-  document.getElementById('tenant-form').style.display = tab==='tenant' ? 'block' : 'none';
+  const admin = tab === 'admin';
+  document.querySelectorAll('.login-tab').forEach(t => { const on = t.dataset.tab === tab; t.classList.toggle('active', on); t.setAttribute('aria-pressed', String(on)); });
+  document.getElementById('admin-form').style.display  = admin ? 'block' : 'none';
+  document.getElementById('tenant-form').style.display = admin ? 'none' : 'block';
+  document.getElementById('login-heading').textContent = admin ? 'Admin sign in' : 'Sign in';
+  document.getElementById('login-sub').textContent = admin ? 'Manage tenants, bills and payments.' : 'Enter the access code the building admin gave you.';
+  document.getElementById('login-kicker').textContent = admin ? 'Property admin' : 'Tenant portal';
+  document.getElementById('login-note').hidden = admin;
+  document.getElementById('login-lost').hidden = admin;
   document.getElementById('login-error').textContent = '';
 }
 async function adminLogin() {
@@ -1583,6 +1591,8 @@ async function tenantLogin() {
 // still say 'overdue' are treated exactly like 'unpaid'; no sync writes needed.
 
 async function showApp() {
+  // The sign-in screen opens on the form this device last used.
+  try { localStorage.setItem('oa_login_tab', currentUser === 'admin' ? 'admin' : 'tenant'); } catch {}
   document.getElementById('login-screen').style.display='none';
   document.getElementById('app').style.display='flex';
   document.body.classList.toggle('is-admin', currentUser==='admin');
@@ -1621,7 +1631,8 @@ async function showApp() {
     _autoBillDay = todayISO();
     runAutoBilling({ fresh: true });
   } else {
-    document.getElementById('header-info').textContent=`Unit ${currentUser.unit}`;
+    document.getElementById('header-info').innerHTML = '<span class="hi-text"><span class="hi-name">' + esc(currentUser.name) + '</span><span class="hi-unit">Unit ' + esc(currentUser.unit) + ((currentUser.floor || '').trim() ? ' · ' + esc(currentUser.floor) : '') + '</span></span>' + avatar(currentUser.name, 40);
+    applyBranding();
     // Reuse the page-load settings fetch instead of firing a second one.
     await (_portalSettingsPromise || loadPortalSettings().catch(()=>{}));
     renderTenant();
@@ -1668,6 +1679,7 @@ async function tryAutoLogin() {
     // the login screen with the box pre-ticked to match the saved preference.
     const rememberEl = document.getElementById('admin-remember');
     if(rememberEl) rememberEl.checked = true;
+    switchTab('admin');
   }
   if(!code) {
     try { code = (localStorage.getItem(PORTAL_CODE_KEY)||'').trim().toUpperCase(); } catch {}
@@ -1701,6 +1713,7 @@ async function tryAutoLogin() {
   setLoading(false);
 }
 async function logout() {
+  const wasAdmin = currentUser === 'admin';
   if(currentUser==='admin') {
     // Explicit sign-out always forgets the device, opt-in or not.
     _forgetPersistedAdminSession();
@@ -1737,6 +1750,7 @@ async function logout() {
   tableSortDir   = 'asc';
   tableRowLimit  = 50;
   portalMonth    = 'current';
+  portalView = 'home'; portalTab = 'bills'; _portalAllPays = false;
   billForms      = [];
   _showAllMonths = false;
   autoBilling    = { enabled: true, leadDays: 7 };
@@ -1744,11 +1758,14 @@ async function logout() {
   _autoBillDay   = '';
   _adminModule   = 'home';
   _tenantDetailId = null;
+  chartRange = 12; chaseTab = 'action'; tdBillTab = 'open'; insightWindow = '12m';
+  billSelection.clear(); _billFiltersOpen = false; _justPaid = []; _setEdit = '';
   closeMenu();
   document.body.classList.remove('is-admin');
   if(window.location.hash) history.replaceState(null, '', window.location.pathname);
   document.getElementById('login-screen').style.display='flex';
   document.getElementById('app').style.display='none';
+  switchTab(wasAdmin ? 'admin' : 'tenant');
   document.getElementById('admin-email').value='';
   document.getElementById('admin-pw').value='';
   const _adminRememberEl = document.getElementById('admin-remember');
@@ -1823,7 +1840,9 @@ const ICON_PATHS = {
   chat:     'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z',
   grid:     'M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z',
   chevDown: 'M6 9l6 6 6-6',
-  close:    'M18 6L6 18M6 6l12 12'
+  close:    'M18 6L6 18M6 6l12 12',
+  megaphone:'M3 11v2a1 1 0 0 0 1 1h2l5 4V6L6 10H4a1 1 0 0 0-1 1zM15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13',
+  bank:     'M3 21h18M5 21V10M19 21V10M9 21V10M15 21V10M12 3l9 5H3z'
 };
 function icon(name, cls) {
   const d = ICON_PATHS[name];
@@ -5487,282 +5506,246 @@ async function saveQuickBill(addAnother){
 
 
 // ─────────────────────────────────────────────
-// TIMELINE BUILDER (global so showFullTimeline can access it)
+// TENANT PORTAL
 // ─────────────────────────────────────────────
-function buildTimeline(bills, showAll) {
-  const sorted = bills.slice().sort((a,b)=>{
-    const da = a.paidDate||a.due||''; const db = b.paidDate||b.due||'';
-    return db.localeCompare(da);
+// Phones show one view at a time (Home, Bills, How to pay); desktops show
+// everything on one page (bills on the left, amount due / how to pay /
+// history on the right).
+let portalView = 'home';     // phones: 'home' | 'bills' | 'pay'
+let portalTab = 'bills';     // Bills view on phones: 'bills' | 'payments'
+let _portalAllPays = false;  // payment history: show every receipt
+function setPortalView(v) { portalView = v; renderTenant(); window.scrollTo(0, 0); }
+function setPortalMonth(ym) { portalMonth = ym; renderTenant(); }
+async function copyText(text, what) {
+  try { await navigator.clipboard.writeText(text); }
+  catch {
+    const ta = document.createElement('textarea'); ta.value = text; ta.style.cssText = 'position:fixed;left:-9999px;';
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); } catch { ta.remove(); showToast('Could not copy automatically.', false); return; }
+    ta.remove();
+  }
+  showToast((what || 'Text') + ' copied.');
+}
+// Payment instructions are free text; each "Label: details" line becomes a
+// method row with Copy, any other line stays as plain text.
+function _payMethods(text) {
+  return String(text || '').split(/\n+/).map(l => l.trim()).filter(Boolean).map(l => {
+    const m = /^([^:]{1,40}):\s*(.+)$/.exec(l);
+    const label = m ? m[1].trim() : '', value = m ? m[2].trim() : l;
+    const k = label.toLowerCase();
+    const kind = /gcash|maya|paymaya|e-?wallet/.test(k) ? 'wallet' : /bank|bdo|bpi|metrobank|landbank|pnb|unionbank|security|rcbc|chinabank|transfer/.test(k) ? 'bank' : /cash/.test(k) ? 'cash' : 'other';
+    return { label, value, kind };
   });
-  const groups = {};
-  const groupOrder = [];
-  sorted.forEach(b => {
-    const d = b.paidDate||b.due||'';
-    const key = d ? new Date(d+'T00:00:00').toLocaleString('default',{month:'long',year:'numeric'}) : 'Unknown date';
-    if(!groups[key]){ groups[key]=[]; groupOrder.push(key); }
-    groups[key].push(b);
-  });
-  const LIMIT = 3;
-  const visible = showAll ? groupOrder : groupOrder.slice(0,LIMIT);
-  const hidden  = groupOrder.length - visible.length;
-  const html = visible.map(month =>
-    '<div class="timeline-month-group"><div class="timeline-month-label">'+month+'</div>'+
-    groups[month].map(b=>
-      '<div class="timeline-item"><div class="timeline-dot"></div><div class="timeline-info">'+
-      // Cycle label so several bills paid on one day (advance payments) read apart.
-      '<div class="timeline-label">'+esc(b.label)+(isYM(b.period)?' <span style="font-weight:500;color:var(--muted)">· '+fmtYM(b.period,'short')+'</span>':'')+'</div>'+
-      '<div class="timeline-date">'+(b.paidDate?'Paid '+formatDate(b.paidDate):b.due?'Billed '+formatDate(b.due):'')+'</div>'+
-      ((b.payments&&b.payments.length)?b.payments.map(p=>'<div style="font-size:11px;color:var(--muted);margin-top:2px;">'+(Number(p.amount)<0?'Refunded &#8369;'+(-Number(p.amount)).toLocaleString():'&#8369;'+Number(p.amount).toLocaleString())+' &nbsp;&middot;&nbsp; '+formatDate(p.date)+(p.note?' &nbsp;&middot;&nbsp; '+esc(p.note):'')+' </div>').join(''):'')+
-      (b.remark?'<div style="font-size:11px;color:var(--muted);margin-top:3px;font-style:italic;">'+esc(b.remark)+'</div>':'')+
-      '</div><div class="timeline-amount">&#8369;'+Number(b.amount).toLocaleString()+'</div></div>'
-    ).join('')+'</div>'
-  ).join('');
-  const moreBtn = (!showAll && hidden>0)
-    ? '<button class="timeline-show-more" onclick="showFullTimeline(true)">Show full history &nbsp;('+hidden+' more month'+(hidden>1?'s':'')+')</button>'
-    : (showAll && groupOrder.length > LIMIT ? '<button class="timeline-show-more" onclick="showFullTimeline(false)">Show less</button>' : '');
-  return html + moreBtn;
+}
+function _payMethodsHtml(text) {
+  const rows = _payMethods(text);
+  if(!rows.length) return '';
+  return rows.map(r => {
+    const ic = r.kind === 'bank' ? icon('bank') : r.kind === 'cash' ? icon('cash') : '<b>' + esc((r.label || '•').charAt(0).toUpperCase()) + '</b>';
+    const copyable = r.label && r.kind !== 'cash' && /\d/.test(r.value);
+    return '<div class="pt-method"><span class="pt-method-ic k-' + r.kind + '">' + ic + '</span>'
+      + '<span class="pt-method-text">' + (r.label ? '<strong>' + esc(r.label) + '</strong>' : '') + '<span>' + esc(r.value) + '</span></span>'
+      + (copyable ? '<button type="button" class="pt-copy" data-copy="' + esc(r.value) + '" data-what="' + esc(r.label) + ' details" onclick="copyText(this.dataset.copy,this.dataset.what)" aria-label="Copy ' + esc(r.label) + ' details">Copy</button>' : '')
+      + '</div>';
+  }).join('');
 }
 
-
 function renderTenant(){
-  const t=currentUser; if(!t) return;
+  const t = currentUser; if(!t) return;
+  const today = todayISO(), curYM = today.slice(0, 7);
+  const peso2 = v => '&#8369;' + fmtMoney(v);
+  const rem = b => Math.max(0, billRemaining(b));
+  const first = esc(String(t.name || '').trim().split(/\s+/)[0] || t.name);
+  const where = 'Unit ' + esc(t.unit) + ((t.floor || '').trim() ? ' · ' + esc(t.floor) : '');
+  const isInclusive = t.billing_model === 'inclusive';
+  const monthName = _monthName(curYM);
 
-  // All unpaid bills (for summary stats)
-  const allActiveBills = t.bills.filter(b=>b.status!=='paid');
-  const paidBills = t.bills.filter(b=>b.status==='paid');
-
-  // Balance summary calculations
-  const now = new Date(); const curYM = now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
-  const thisMonthBills = allActiveBills.filter(b=>b.due&&b.due.startsWith(curYM));
-  const overdueBills   = allActiveBills.filter(b=>getDueStatus(b)==='overdue');
-  const thisMonthDue   = thisMonthBills.reduce((s,b)=>s+Math.max(0,billRemaining(b)),0);
-  const overdueDue     = overdueBills.reduce((s,b)=>s+Math.max(0,billRemaining(b)),0);
-  const totalDue       = allActiveBills.reduce((s,b)=>s+Math.max(0,billRemaining(b)),0);
-  const catDue         = outstandingByCategory(allActiveBills);
-
-  // ── All-inclusive tenants: one predictable number, so the header answers
-  // "am I paid up this month?" instead of repeating the same figure 3 times.
-  const isInclusive = t.billing_model==='inclusive';
+  // Balances (unpaid = not marked paid; amounts are what's still owed).
+  const allActiveBills = t.bills.filter(b => b.status !== 'paid');
+  const owing = allActiveBills.filter(b => !billAwaitingAmount(b) && rem(b) > 0.005);
+  const thisMonthBills = allActiveBills.filter(b => b.due && b.due.startsWith(curYM));
+  const overdueBills = allActiveBills.filter(b => getDueStatus(b) === 'overdue');
+  const thisMonthDue = thisMonthBills.reduce((s, b) => s + rem(b), 0);
+  const overdueDue = overdueBills.reduce((s, b) => s + rem(b), 0);
+  const totalDue = allActiveBills.reduce((s, b) => s + rem(b), 0);
+  const catDue = outstandingByCategory(allActiveBills);
+  const recon = reconcileTenant(t, { today, leadDays: autoBilling.leadDays });
+  const prim = recon.enabled ? recon.charges.find(c => c.tmplId === recon.primaryId) || null : null;
+  const mi = moveInOf(t);
+  const urgent = owing.slice().sort((a, b) => getDueUrgencyScore(a) - getDueUrgencyScore(b))[0] || null;
+  const isLater = b => !!(b.due && b.due.slice(0, 7) > curYM);
+  const upcoming = allActiveBills.filter(b => isLater(b) && !billAwaitingAmount(b)).sort((a, b) => a.due.localeCompare(b.due));
+  const nextUp = upcoming[0] || null;
+  const pastDue = allActiveBills.filter(b => !(b.due && b.due.startsWith(curYM)) && !isLater(b)).reduce((s, b) => s + rem(b), 0);
   // The live rent charge at this month's rate (a retired or stale rate would mislead the tenant).
   const _tmplRate = primaryTemplate(t);
-  const flatRate = (_tmplRate ? tmplRateAt(_tmplRate, curYM) : 0) || (!(t.templates||[]).length ? Number(t.flat_rate) || 0 : 0);
-  const monthName = now.toLocaleString('default',{month:'long'});
-  const curMonthBills  = t.bills.filter(b=>b.due&&b.due.startsWith(curYM));
-  const curMonthUnpaid = curMonthBills.filter(b=>b.status!=='paid' && !billAwaitingAmount(b));
-  const curMonthPaid   = curMonthBills.filter(b=>b.status==='paid');
-  // Past due = bills from earlier months (and undated ones). Bills for LATER
-  // months — posted ahead of time, or partly prepaid — are upcoming, not late.
-  const isLater        = b => !!(b.due && b.due.slice(0,7) > curYM);
-  const pastDue        = allActiveBills.filter(b=>!(b.due&&b.due.startsWith(curYM)) && !isLater(b))
-                          .reduce((s,b)=>s+Math.max(0,billRemaining(b)),0);
-  const upcomingBills  = allActiveBills.filter(b=>isLater(b) && !billAwaitingAmount(b)).sort((a,b)=>a.due.localeCompare(b.due));
-  const nextUp         = upcomingBills[0] || null;
-  let monthCardValue='', monthCardSub='', monthCardCls='';
-  if(curMonthUnpaid.length){
-    const most = curMonthUnpaid.slice().sort((a,b)=>getDueUrgencyScore(a)-getDueUrgencyScore(b))[0];
-    const ds = getDueStatus(most);
-    monthCardValue = '&#8369;'+thisMonthDue.toLocaleString();
-    monthCardCls = (ds==='overdue'||ds==='due-today') ? 'overdue' : '';
-    monthCardSub = ds==='overdue' ? 'Overdue — was due '+formatDate(most.due)
-                 : ds==='due-today' ? 'Due today'
-                 : 'Due '+formatDate(most.due);
-  } else if(curMonthPaid.length){
-    const lastPaid = curMonthPaid.slice().sort((a,b)=>(b.paidDate||'').localeCompare(a.paidDate||''))[0];
-    monthCardValue = 'Paid &#10003;';
-    monthCardCls = 'clear';
-    monthCardSub = lastPaid.paidDate ? 'on '+formatDate(lastPaid.paidDate) : 'Thank you!';
+  const flatRate = (_tmplRate ? tmplRateAt(_tmplRate, curYM) : 0) || (!(t.templates || []).length ? Number(t.flat_rate) || 0 : 0);
+  const kindOf = b => billCategory(b) === 'rent' ? 'Rent' : esc(b.label || 'Bill');
+  const paidThru = prim && !prim.variable && prim.paidThrough ? 'Rent is paid through ' + shortDate(prim.paidThrough) + '.' : '';
+  const nextCycle = prim && !prim.variable && mi && prim.startYM ? (() => { const w = cycleWindow(mi, addYM(prim.startYM, prim.covered)); return ' Your next cycle runs ' + shortDate(w.start) + ' – ' + shortDate(addDaysISO(w.end, -1)) + '.'; })() : '';
+
+  // ── Hero: amount due ──
+  let heroPill = '', heroSub = '', heroLabel = totalDue > 0.005 ? 'Amount due' : 'Nothing owed right now', heroFig = totalDue;
+  if(urgent) {
+    const ds = getDueStatus(urgent);
+    heroPill = ds === 'overdue' ? 'Overdue since ' + shortDate(urgent.due) : ds === 'due-today' ? kindOf(urgent) + ' due today' : ds === 'grace' ? kindOf(urgent) + ' in grace period' : urgent.due ? kindOf(urgent) + ' due ' + shortDate(urgent.due) : kindOf(urgent) + ' to pay';
+    heroSub = esc(urgent.label) + ' of ' + peso2(rem(urgent)) + (ds === 'overdue' ? ' was due ' + shortDate(urgent.due) + '.' : ds === 'due-today' ? ' is due today.' : urgent.due ? ' is due ' + shortDate(urgent.due) + '.' : ' is open.') + (paidThru ? ' ' + paidThru : '');
+  } else if(totalDue <= 0.005 && prim && !prim.variable && prim.nextDue && prim.nextAmount > 0.005) {
+    // Paid up: show what comes next for the main rent.
+    heroLabel = 'Next payment'; heroFig = prim.nextAmount;
+    heroPill = 'Due ' + shortDate(prim.nextDue);
+    heroSub = (paidThru ? paidThru + nextCycle : 'Nothing owed right now.');
   } else {
-    monthCardValue = 'No bill yet';
-    monthCardCls = 'clear';
-    monthCardSub = flatRate ? ('&#8369;'+flatRate.toLocaleString()+' expected for '+monthName) : ('Nothing posted for '+monthName+' yet');
+    heroPill = 'All paid up';
+    heroSub = (paidThru ? paidThru + nextCycle : 'Nothing owed right now.') + (nextUp ? ' Next bill: ' + peso2(rem(nextUp)) + ' due ' + shortDate(nextUp.due) + '.' : '');
+  }
+  const hero = '<section class="pt-hero pt-b v-home v-desk">'
+    + '<div class="pt-hero-top"><span>' + heroLabel + '</span><span class="pt-hero-pill">' + heroPill + '</span></div>'
+    + '<strong class="pt-hero-fig">' + peso2(heroFig) + '</strong>'
+    + (isInclusive && flatRate ? '<span class="pt-hero-rate">Monthly rate ' + peso2(flatRate) + ' · utilities included</span>' : '')
+    + '<p class="pt-hero-sub">' + heroSub + '</p>'
+    + (paymentInstructions ? '<button type="button" class="pt-hero-btn" onclick="setPortalView(\'pay\')">How to pay</button>' : '')
+    + '</section>';
+
+  // ── Desktop stat strip ──
+  const stat = (label, value, sub, cls) => '<div class="pt-stat"><span class="pt-stat-label">' + label + '</span><strong class="pt-stat-fig ' + (cls || '') + '">' + value + '</strong><span class="pt-stat-sub">' + sub + '</span></div>';
+  const listShort = bills => bills.slice(0, 2).map(b => kindOf(b) + ' ' + peso2(rem(b)) + (b.due ? (getDueStatus(b) === 'due-today' ? ' due today' : ' due ' + shortDate(b.due)) : '')).join(', ') + (bills.length > 2 ? ' +' + (bills.length - 2) + ' more' : '');
+  const catLine = [catDue.rent ? 'Rent ' + peso2(catDue.rent) : '', catDue.utilities ? 'Utilities ' + peso2(catDue.utilities) : '', catDue.other ? 'Other ' + peso2(catDue.other) : ''].filter(Boolean).join(' · ');
+  let strip;
+  if(isInclusive) {
+    const curMonthBills = t.bills.filter(b => b.due && b.due.startsWith(curYM));
+    const cmUnpaid = curMonthBills.filter(b => b.status !== 'paid' && !billAwaitingAmount(b));
+    const cmPaid = curMonthBills.filter(b => b.status === 'paid');
+    let mv, ms, mc = '';
+    if(cmUnpaid.length) {
+      const most = cmUnpaid.slice().sort((a, b) => getDueUrgencyScore(a) - getDueUrgencyScore(b))[0];
+      const ds = getDueStatus(most);
+      mv = peso2(thisMonthDue); mc = ds === 'overdue' ? 'bad' : '';
+      ms = ds === 'overdue' ? 'Overdue — was due ' + shortDate(most.due) : ds === 'due-today' ? 'Due today' : 'Due ' + shortDate(most.due);
+    } else if(cmPaid.length) {
+      const lp = cmPaid.slice().sort((a, b) => (b.paidDate || '').localeCompare(a.paidDate || ''))[0];
+      mv = 'Paid'; mc = 'good'; ms = (lp.paidDate ? 'Paid ' + shortDate(lp.paidDate) : 'Thank you!') + (nextUp ? ' · next due ' + shortDate(nextUp.due) : '');
+    } else { mv = 'No bill yet'; mc = 'good'; ms = flatRate ? peso2(flatRate) + ' expected for ' + monthName : 'Nothing posted for ' + monthName + ' yet'; }
+    strip = stat('Monthly rate', flatRate ? peso2(flatRate) : '&mdash;', 'Utilities included')
+      + stat(monthName, mv, ms, mc)
+      + stat('Past due', pastDue > 0.005 ? peso2(pastDue) : 'None', pastDue > 0.005 ? 'From earlier months — listed in your bills' : 'You are fully caught up', pastDue > 0.005 ? 'bad' : 'good');
+  } else {
+    const tmUnpaid = thisMonthBills.filter(b => rem(b) > 0.005 && !billAwaitingAmount(b)).sort((a, b) => getDueUrgencyScore(a) - getDueUrgencyScore(b));
+    strip = stat('This month', thisMonthDue > 0.005 ? peso2(thisMonthDue) : 'Settled', tmUnpaid.length ? listShort(tmUnpaid) : 'Nothing left to pay for ' + monthName, thisMonthDue > 0.005 ? '' : 'good')
+      + stat('Overdue', overdueDue > 0.005 ? peso2(overdueDue) : 'None', overdueDue > 0.005 ? overdueBills.length + ' bill' + (overdueBills.length !== 1 ? 's' : '') + ' past due' : 'Nothing late. Thank you!', overdueDue > 0.005 ? 'bad' : 'good')
+      + stat('Total outstanding', totalDue > 0.005 ? peso2(totalDue) : 'Settled', totalDue > 0.005 ? catLine : 'You are fully caught up', totalDue > 0.005 ? '' : 'good');
   }
 
-  // Month pill list — derive from all bills with a due date
+  // ── Bills: month pills, rows, footer ──
   const monthSet = new Set();
-  t.bills.filter(b=>b.due&&b.status!=='paid').forEach(b=>monthSet.add(b.due.slice(0,7)));
-  const monthList = Array.from(monthSet).sort().reverse(); // newest first
-
-  // Resolve active filter month
-  const activeYM = portalMonth==='current' ? curYM : portalMonth;
-  const activeMonthName = portalMonth==='all' ? '' : new Date(activeYM+'-02').toLocaleString('default',{month:'long',year:'numeric'});
-  const footerLabel = portalMonth!=='all' ? 'Due for '+activeMonthName.split(' ')[0] : 'Total Balance Due';
-
-  // Filter + sort active bills for display. Bills with NO due date are shown
-  // in every view — they're open obligations that belong to no month, and
-  // hiding them behind the 'All' pill made them effectively invisible.
-  function sortByUrgency(bills) {
-    return bills.slice().sort((a,b)=>getDueUrgencyScore(a)-getDueUrgencyScore(b));
-  }
-  const activeBills = sortByUrgency(
-    portalMonth==='all'
-      ? allActiveBills
-      : allActiveBills.filter(b=>!b.due || b.due.startsWith(activeYM))
-  );
-  const due = activeBills.reduce((s,b)=>s+Math.max(0,billRemaining(b)),0);
-  const hiddenDue = totalDue - due; // owed in months outside the current view
-  // Split what's outside the view into earlier (owed) and later (upcoming).
-  const hiddenLater = portalMonth==='all' ? 0 : allActiveBills
-    .filter(b=>b.due && b.due.slice(0,7) > activeYM).reduce((s,b)=>s+Math.max(0,billRemaining(b)),0);
-  const hiddenEarlier = Math.max(0, hiddenDue - hiddenLater);
-  // A tenant with only old debt must still be able to reach it: show the
-  // pills whenever any owing month differs from the current one.
-  const showPills = monthList.length > 1 || (monthList.length===1 && monthList[0]!==curYM);
-  const emptyMsg = portalMonth==='all'
-    ? 'All bills are settled.'
-    : (hiddenEarlier>0
-        ? 'No unpaid bills for '+activeMonthName+' — but &#8369;'+hiddenEarlier.toLocaleString()+' is still owed from earlier months.<br><button class="btn-statement" style="margin-top:10px;" onclick="setPortalMonth(\'all\')">View all bills</button>'
-        : hiddenLater>0
-        ? 'Nothing due for '+activeMonthName+'. Your next bill'+(nextUp?' (&#8369;'+Math.max(0,billRemaining(nextUp)).toLocaleString()+', due '+formatDate(nextUp.due)+')':'')+' is already posted.<br><button class="btn-statement" style="margin-top:10px;" onclick="setPortalMonth(\'all\')">View all bills</button>'
-        : 'No bills for '+activeMonthName+'.');
-
-  function dueMeta(b) {
-    const s = getDueStatus(b);
-    const d = b.due ? formatDate(b.due) : '';
-    if(s==='no-date')   return {chip:'', cls:''};
-    if(s==='awaiting')  return {chip:'Amount to follow', cls:'normal'};
-    if(s==='overdue')   return {chip:'Overdue · '+d,  cls:'overdue'};
-    if(s==='due-today') return {chip:'Due Today · '+d, cls:'today'};
-    if(s==='due-soon')  return {chip:'Due Soon · '+d,  cls:'soon'};
-    if(s==='grace')     return {chip:'Grace period · due '+d, cls:'soon'};
-    return {chip:'Due '+d, cls:'normal'};
-  }
-
-  const billRow = b => {
-    const dm = dueMeta(b);
-    const isPendingRemark = b.remark && b.remark.toLowerCase().includes('pending amount');
-    const amountHtml = billAwaitingAmount(b)
-      ? '<span class="pbill-pending-inline">TBD</span>'
-      : '&#8369;'+Number(b.amount).toLocaleString();
-    const chipHtml = b.due
-      ? `<span class="due-chip ${dm.cls}">${dm.chip}</span>`
-      : '<span class="pbill-due">No due date set</span>';
-    const remarkHtml = isPendingRemark
-      ? '<span class="pbill-pending-inline">&#9888; Amount pending</span>'
-      : b.remark ? `<span class="pbill-meta-note">${esc(b.remark)}</span>` : '';
-    const _safeLink = b.scanLink && /^https:\/\//i.test(b.scanLink) ? b.scanLink : '';
-    const scanHtml = _safeLink
-      ? `<a class="pbill-scan-link" href="${esc(_safeLink)}" target="_blank" rel="noopener"><span class="pbill-scan-link-icon">&#128196;</span>View Bill</a>`
-      : '';
-    const _paid = billTotalPaid(b);
-    const _rem  = billRemaining(b);
-    const hasPartialPayments = _paid > 0 && b.status !== 'paid';
-    const partialHtml = hasPartialPayments
-      ? `<span style="font-size:11px;font-weight:600;display:inline-flex;gap:10px;flex-wrap:wrap;margin-top:3px;">` +
-        `<span style="color:var(--green);">&#8369;${_paid.toLocaleString()} paid</span>` +
-        (_rem > 0 ? `<span style="color:var(--orange);">&#8369;${_rem.toLocaleString()} still due</span>` : `<span style="color:var(--green);">Settled</span>`) +
-        `</span>`
-      : '';
-    const paymentEntriesHtml = (b.payments&&b.payments.length&&b.status!=='paid')
-      ? `<div style="margin-top:6px;width:100%;">${b.payments.map(p=>`<div style="font-size:11px;color:var(--muted);padding:3px 0;display:flex;gap:8px;align-items:center;"><span style="flex-shrink:0;">${formatDate(p.date)}</span><span style="color:var(--green);font-weight:600;flex-shrink:0;">&#8369;${Number(p.amount).toLocaleString()} paid</span>${p.note?`<span style="font-style:italic;">${esc(p.note)}</span>`:''}</div>`).join('')}</div>`
-      : '';
-    return `<div class="portal-bill-row">
-      <div class="pbill-top">
-        <div class="pbill-label">${esc(b.label)}</div>
-        <div class="pbill-amount">${amountHtml}</div>
-      </div>
-      <div class="pbill-bottom">
-        ${chipHtml}
-        ${partialHtml}
-        ${remarkHtml}
-        ${scanHtml}
-      </div>
-      ${paymentEntriesHtml}
-    </div>`;
+  allActiveBills.forEach(b => { if(b.due) monthSet.add(b.due.slice(0, 7)); });
+  t.bills.forEach(b => { const ym = (b.due || '').slice(0, 7); if(ym && ym <= curYM && ym >= addYM(curYM, -2)) monthSet.add(ym); });
+  monthSet.add(curYM);
+  const monthList = Array.from(monthSet).sort().reverse();
+  const activeYM = portalMonth === 'current' ? curYM : portalMonth;
+  const isAll = portalMonth === 'all';
+  // Bills with no due date are open obligations in every view.
+  const inView = isAll ? allActiveBills.slice() : t.bills.filter(b => (b.due && b.due.startsWith(activeYM)) || (!b.due && b.status !== 'paid'));
+  const viewBills = inView.filter(b => b.status !== 'paid').sort((a, b) => getDueUrgencyScore(a) - getDueUrgencyScore(b))
+    .concat(inView.filter(b => b.status === 'paid').sort((a, b) => (b.due || '').localeCompare(a.due || '')));
+  const due = viewBills.filter(b => b.status !== 'paid').reduce((s, b) => s + rem(b), 0);
+  const hiddenLater = isAll ? 0 : allActiveBills.filter(b => b.due && b.due.slice(0, 7) > activeYM).reduce((s, b) => s + rem(b), 0);
+  const hiddenEarlier = isAll ? 0 : Math.max(0, totalDue - due - hiddenLater);
+  const activeMonthName = isAll ? '' : fmtYM(activeYM);
+  const pillFor = b => {
+    const ds = getDueStatus(b);
+    if(ds === 'paid') return oaPill('paid', b.paidDate ? 'Paid ' + shortDate(b.paidDate) : 'Paid');
+    if(ds === 'awaiting') return oaPill('neutral', 'Not billed yet');
+    if(ds === 'overdue') return oaPill('late', 'Overdue · ' + daysOverdue(b) + 'd');
+    if(ds === 'grace') return oaPill('due', 'Grace period');
+    if(ds === 'due-today') return oaPill('due', 'Due today');
+    if(ds === 'no-date') return oaPill('neutral', 'Open');
+    return oaPill('due', 'Due ' + shortDate(b.due));
   };
+  const subFor = b => {
+    const bits = [];
+    if(billAwaitingAmount(b)) bits.push('Waiting for the meter reading');
+    else {
+      const per = billPeriod(b);
+      if(mi && per && prim && b.tmplId === prim.tmplId) { const w = cycleWindow(mi, per); bits.push((isInclusive ? 'All-inclusive · ' : '') + shortDate(w.start) + ' – ' + shortDate(addDaysISO(w.end, -1))); }
+      if(b.due) bits.push('due ' + shortDate(b.due));
+    }
+    const paid = billTotalPaid(b);
+    if(paid > 0.005 && b.status !== 'paid') bits.push(peso2(paid) + ' paid · ' + peso2(rem(b)) + ' still due');
+    if(b.remark && !/pending amount/i.test(b.remark)) bits.push(esc(b.remark));
+    return bits.join(' · ');
+  };
+  const scan = b => b.scanLink && /^https:\/\//i.test(b.scanLink) ? ' <a class="pt-scan" href="' + esc(b.scanLink) + '" target="_blank" rel="noopener">View bill</a>' : '';
+  const billRow = b => '<div class="pt-bill' + (b.status === 'paid' ? ' is-paid' : billAwaitingAmount(b) ? ' is-wait' : '') + '">'
+    + '<div class="pt-bill-main"><span class="pt-bill-label">' + esc(b.label) + '</span><span class="pt-bill-sub">' + subFor(b) + scan(b) + '</span></div>'
+    + '<span class="pt-bill-status">' + pillFor(b) + '</span>'
+    + '<span class="pt-bill-amt">' + (billAwaitingAmount(b) ? '&mdash;' : peso2(b.amount)) + '</span></div>';
+  const showPills = monthList.length > 1;
+  const pills = showPills ? '<div class="pt-pills" role="group" aria-label="Month">'
+    + '<button type="button" class="pt-pill' + (isAll ? ' active' : '') + '" aria-pressed="' + isAll + '" onclick="setPortalMonth(\'all\')">All</button>'
+    + monthList.map(ym => { const on = !isAll && activeYM === ym; return '<button type="button" class="pt-pill' + (on ? ' active' : '') + '" aria-pressed="' + on + '" onclick="setPortalMonth(\'' + ym + '\')">' + fmtYM(ym, 'short') + '</button>'; }).join('') + '</div>' : '';
+  const emptyMsg = isAll ? 'All bills are settled.'
+    : hiddenEarlier > 0 ? 'No bills for ' + activeMonthName + ' — but ' + peso2(hiddenEarlier) + ' is still owed from earlier months. <button type="button" class="link-btn inline" onclick="setPortalMonth(\'all\')">View all bills</button>'
+    : hiddenLater > 0 ? 'Nothing due for ' + activeMonthName + '. Your next bill' + (nextUp ? ' (' + peso2(rem(nextUp)) + ', due ' + shortDate(nextUp.due) + ')' : '') + ' is already posted. <button type="button" class="link-btn inline" onclick="setPortalMonth(\'all\')">View all bills</button>'
+    : 'No bills for ' + activeMonthName + '.';
+  const footNote = !isAll && (hiddenEarlier > 0.005 || hiddenLater > 0.005) ? '<span class="pt-foot-note">' + (hiddenEarlier > 0.005 ? 'Total owed, all months: ' : 'Including bills posted for later months: ') + '<strong>' + peso2(totalDue) + '</strong></span>' : '';
 
-  // Month pill HTML
-  const monthPills = `
-    <div class="month-pill-wrap">
-      <button class="month-pill ${portalMonth==='all'?'active':''}" onclick="setPortalMonth('all')">All</button>
-      ${monthList.map(ym=>`<button class="month-pill ${(portalMonth==='current'&&ym===curYM)||(portalMonth===ym)?'active':''}" onclick="setPortalMonth('${ym}')">${new Date(ym+'-02').toLocaleString('default',{month:'short',year:'numeric'})}</button>`).join('')}
-    </div>`;
+  // ── Payment history ──
+  const receipts = tenantReceipts(t).filter(x => x.amount > 0);
+  const payRows = list => list.map(x => '<div class="pt-pay"><span class="pt-pay-ic">' + icon('check') + '</span>'
+    + '<div class="pt-pay-main"><div class="pt-pay-top"><strong>' + (x.date ? shortDateY(x.date) : 'Date not recorded') + '</strong><strong>' + peso2(x.amount) + '</strong></div>'
+    + '<span class="pt-pay-sub">' + [x.note ? esc(x.note) : '', receiptAppliedTo(x)].filter(Boolean).join(' · ') + '</span></div></div>').join('');
+  const shownPays = _portalAllPays ? receipts : receipts.slice(0, 3);
+  const payList = receipts.length ? '<div class="pt-pays">' + payRows(shownPays) + '</div>'
+    + (receipts.length > 3 ? '<button type="button" class="pt-more" onclick="_portalAllPays=!_portalAllPays;renderTenant()">' + (_portalAllPays ? 'Show less' : 'Show all ' + receipts.length + ' payments') + '</button>' : '')
+    : '<div class="pt-empty">No payments recorded yet.</div>';
+  const stmtBtn = '<button type="button" class="pt-stmt" onclick="openStmtModal(currentUser)">' + icon('download') + '<span>Statement</span></button>';
 
-  document.getElementById('main-content').innerHTML=`
-    <div class="portal-wrap">
-      <div class="page-eyebrow">Tenant Portal</div>
-      <div class="page-title">${esc(t.name)}</div>
-      <div class="portal-pull">
-        <div class="portal-pull-text">"Your bills, clearly laid out."</div>
-        <div class="portal-pull-sub">Unit ${esc(t.unit)}${(t.floor||'').trim()?' &nbsp;·&nbsp; '+esc(t.floor):''}${isInclusive?' &nbsp;·&nbsp; All-inclusive rate':''} &nbsp;·&nbsp; Contact management if anything looks incorrect.</div>
-      </div>
-      ${announcements?`
-      <div class="portal-announce">
-        <div class="portal-announce-eyebrow">&#128226; Announcements</div>
-        <div class="portal-announce-body">${esc(announcements)}</div>
-      </div>`:''}
-      ${isInclusive&&flatRate?`
-      <div class="portal-rate-banner">
-        <div class="portal-rate-main">
-          <div class="portal-rate-label">Your Monthly Rate</div>
-          <div class="portal-rate-value">&#8369;${flatRate.toLocaleString()}<span class="portal-rate-per">/month</span></div>
-        </div>
-        <div class="portal-rate-sub">All-inclusive</div>
-      </div>`:''}
-      ${isInclusive?`
-      <div class="portal-balance-strip inclusive-strip">
-        <div class="portal-bal-stat">
-          <div class="portal-bal-label">${esc(monthName)}</div>
-          <div class="portal-bal-value ${monthCardCls}">${monthCardValue}</div>
-          <div class="portal-bal-sub">${monthCardSub}</div>
-        </div>
-        <div class="portal-bal-stat">
-          <div class="portal-bal-label">Past Due</div>
-          <div class="portal-bal-value ${pastDue>0?'overdue':'clear'}">${pastDue?'&#8369;'+pastDue.toLocaleString():'None'}</div>
-          <div class="portal-bal-sub">${pastDue?'from earlier months &mdash; listed below':(nextUp?'you are caught up &middot; next &#8369;'+Math.max(0,billRemaining(nextUp)).toLocaleString()+' due '+formatDate(nextUp.due):'you are fully caught up')}</div>
-        </div>
-      </div>`:`
-      <div class="portal-balance-strip">
-        <div class="portal-bal-stat">
-          <div class="portal-bal-label">This Month</div>
-          <div class="portal-bal-value ${thisMonthDue===0?'clear':''}">${thisMonthDue?'&#8369;'+thisMonthDue.toLocaleString():'Settled'}</div>
-        </div>
-        <div class="portal-bal-stat">
-          <div class="portal-bal-label">Overdue</div>
-          <div class="portal-bal-value ${overdueDue>0?'overdue':'clear'}">${overdueDue?'&#8369;'+overdueDue.toLocaleString():'None'}</div>
-        </div>
-        <div class="portal-bal-stat">
-          <div class="portal-bal-label">Total Outstanding</div>
-          <div class="portal-bal-value ${totalDue===0?'clear':''}">${totalDue?'&#8369;'+totalDue.toLocaleString():'Settled'}</div>
-          ${totalDue?`<div class="portal-bal-break">${balanceLinesHtml(catDue,'portal-bal-line')}</div>`:''}
-        </div>
-      </div>`}
-      <div class="bills-card">
-        <div class="bills-card-head">
-          <div class="bills-card-head-row">
-            <div class="bills-card-title">Your Bills</div>
-            <div style="display:flex;gap:10px;align-items:center;">
-              ${!paidBills.length&&t.bills.length?`<button onclick="openStmtModal(currentUser)" class="btn-statement" style="font-size:11px;">Generate Statement</button>`:''}
-              <div class="bills-count">${activeBills.length} bill${activeBills.length!==1?'s':''}</div>
-            </div>
-          </div>
-          ${showPills ? monthPills : ''}
-        </div>
-        ${activeBills.length
-          ? activeBills.map(billRow).join('')
-          : `<div class="empty-state" style="padding:32px 24px"><div class="icon" style="font-size:24px;margin-bottom:8px">${portalMonth!=='all'&&hiddenEarlier>0?'&#9888;':'&#10003;'}</div><p>${emptyMsg}</p></div>`}
-        <div class="bills-footer">
-          <div>
-            <div class="footer-label">${footerLabel}</div>
-            ${portalMonth!=='all'&&hiddenDue>0?`<div class="footer-alltime${hiddenEarlier>0?'':' upcoming'}">${hiddenEarlier>0?'Total owed, all months':'Including bills posted for later months'}: <strong>&#8369;${totalDue.toLocaleString()}</strong></div>`:''}
-          </div>
-          <div class="footer-total">${due?'&#8369;'+due.toLocaleString():'Settled'}</div>
-        </div>
-      </div>
-      ${paymentInstructions ? `
-      <div class="portal-pay-inst">
-        <div class="portal-pay-inst-eyebrow">Payment Instructions</div>
-        <div class="portal-pay-inst-title">How to pay your bills</div>
-        <div class="portal-pay-inst-body">${esc(paymentInstructions)}</div>
-      </div>` : ''}
-      ${paidBills.length ? `
-      <div class="timeline-section">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;padding-bottom:8px;border-bottom:1px solid var(--border);">
-          <div class="timeline-section-title" style="margin-bottom:0;padding-bottom:0;border-bottom:none;">Payment History</div>
-          <button onclick="openStmtModal(currentUser)" class="btn-statement" style="font-size:11px;">Generate Statement</button>
-        </div>
-        ${buildTimeline(paidBills, false)}
-      </div>` : ''}
-    </div>`;
+  const billsCard = '<section class="pt-card pt-bills pt-b v-bills v-desk tab-' + portalTab + '">'
+    + '<div class="pt-card-head"><h2>Your bills</h2>' + stmtBtn + '</div>'
+    + '<div class="pt-tabs">' + segTabs([['bills', 'Bills'], ['payments', 'Payments']].map(([k, l]) => ({ label: l, active: portalTab === k, onclick: 'portalTab=\'' + k + '\';renderTenant()' })), '', 'Bills or payments') + '</div>'
+    + '<div class="pt-billpane">' + pills
+    +   (viewBills.length ? '<div class="pt-thead"><span>Bill</span><span>Status</span><span class="r">Amount</span></div>' + viewBills.map(billRow).join('') : '<div class="pt-empty">' + emptyMsg + '</div>')
+    +   '<div class="pt-foot"><div><span class="pt-foot-label">' + (due > 0.005 ? (isAll ? 'Total owed' : 'Owed for ' + activeMonthName) : 'Nothing owed') + '</span>' + footNote + '</div><strong>' + (due > 0.005 ? peso2(due) : 'Settled') + '</strong></div></div>'
+    + '<div class="pt-paypane">' + payList + '</div>'
+    + '</section>';
+
+  // Phone home: what's open now, with a link to every bill.
+  const breakdownBills = allActiveBills.slice().sort((a, b) => getDueUrgencyScore(a) - getDueUrgencyScore(b)).slice(0, 4);
+  const breakdown = '<section class="pt-card pt-break pt-b v-home">'
+    + (breakdownBills.length ? breakdownBills.map(b => { const ds = getDueStatus(b);
+        return '<div class="pt-brow"><div><span class="pt-bill-label">' + esc(b.label) + '</span><span class="pt-brow-sub ' + (ds === 'overdue' ? 'bad' : ds === 'due-today' || ds === 'grace' ? 'warn' : '') + '">'
+          + (billAwaitingAmount(b) ? 'Waiting for the meter reading' : ds === 'overdue' ? 'Overdue since ' + shortDate(b.due) : ds === 'due-today' ? 'Due today' : b.due ? 'Due ' + shortDate(b.due) : 'Open') + '</span></div>'
+          + '<strong>' + (billAwaitingAmount(b) ? '&mdash;' : peso2(rem(b))) + '</strong></div>'; }).join('')
+      : '<div class="pt-empty">' + icon('check') + ' Nothing to pay right now.</div>')
+    + '<button type="button" class="pt-more" onclick="setPortalView(\'bills\')">See all bills' + icon('next') + '</button></section>';
+
+  const ann = announcements ? '<div class="pt-ann-ic">' + icon('megaphone') + '</div><div><strong>From the building</strong><p>' + esc(announcements) + '</p></div>' : '';
+  const howto = paymentInstructions ? _payMethodsHtml(paymentInstructions) : '';
+  const howCard = howto ? '<section class="pt-card pt-how pt-b v-pay v-desk"><div class="pt-card-head"><h2>How to pay</h2></div>' + howto
+    + '<p class="pt-how-foot">After paying, send your reference number to the admin. Your balance updates once it\'s recorded.</p></section>' : '';
+  const history = '<section class="pt-card pt-history pt-b v-home v-desk"><div class="pt-card-head"><h2><span class="only-desk">Payment history</span><span class="only-phone">Recent payments</span></h2>' + stmtBtn + '</div>' + payList + '</section>';
+  const back = '<button type="button" class="pt-back pt-b v-bills v-pay" onclick="setPortalView(\'home\')">' + icon('back') + 'Home</button>';
+  const payIntro = '<div class="pt-b v-pay pt-pay-intro"><h1 class="pt-title">How to pay</h1><p>' + (totalDue > 0.005 ? 'You owe ' + peso2(totalDue) + '.' + (urgent ? ' ' + heroSub.split('. ')[0].replace(/\.$/, '') + '.' : '') + ' Use any of these:' : 'Nothing is owed right now. When a bill comes, use any of these:') + '</p></div>';
+  const afterCard = '<section class="pt-card pt-b v-pay pt-after"><h2>After you pay</h2><ol><li>Send your reference number to the admin.</li><li>Your balance updates here once the payment is recorded.</li></ol></section>'
+    + '<p class="pt-b v-pay pt-note">These instructions come from the building\'s settings and can be edited by the admin.</p>';
+  const noHow = !howto ? '<section class="pt-card pt-b v-pay"><div class="pt-empty">The admin hasn\'t added payment instructions yet — ask them how to pay.</div></section>' : '';
+
+  document.getElementById('main-content').innerHTML = '<div class="pt-wrap pv-' + portalView + '">'
+    + back
+    + '<div class="pt-hello pt-b v-home v-desk"><span class="only-phone pt-unit">' + where + '</span><h1 class="pt-title">Hi, ' + first + '</h1>'
+    +   '<span class="only-desk pt-hello-sub">' + where + ' · If anything here looks wrong, message the admin.</span></div>'
+    + (ann ? '<div class="pt-ann only-desk">' + ann + '</div>' : '')
+    + payIntro
+    + '<div class="pt-grid"><div class="pt-col">'
+    +   '<div class="pt-strip only-desk">' + strip + '</div>'
+    +   billsCard
+    + '</div><div class="pt-col">'
+    +   hero + breakdown
+    +   (ann ? '<div class="pt-ann only-phone pt-b v-home">' + ann + '</div>' : '')
+    +   howCard + noHow + afterCard
+    +   history
+    + '</div></div></div>';
 }
 
 function uid() {
@@ -5834,6 +5817,7 @@ document.addEventListener('DOMContentLoaded',()=>{
     if(cached && cached.name) { propertyName = cached.name; propertySubtitle = cached.sub || propertySubtitle; }
   } catch {}
   applyBranding();
+  try { if(localStorage.getItem('oa_login_tab') === 'admin') switchTab('admin'); } catch {}
   _portalSettingsPromise = loadPortalSettings().catch(()=>{});
 
   // Detect Supabase password recovery redirect
@@ -6675,25 +6659,6 @@ async function saveBranding() {
 // ─────────────────────────────────────────────
 // PORTAL MONTH FILTER
 // ─────────────────────────────────────────────
-function setPortalMonth(ym) {
-  portalMonth = ym;
-  renderTenant();
-}
-
-// ─────────────────────────────────────────────
-// TIMELINE EXPAND
-// ─────────────────────────────────────────────
-function showFullTimeline(expand) {
-  const t = currentUser;
-  const paidBills = t.bills.filter(b=>b.status==='paid');
-  const section = document.querySelector('.timeline-section');
-  if(!section) return;
-  // Preserve the full header row (title + Generate Statement button), not just the title
-  const headerRow = section.children[0];
-  const headerHtml = headerRow ? headerRow.outerHTML : '';
-  section.innerHTML = headerHtml + buildTimeline(paidBills, expand !== false);
-}
-
 
 // ─────────────────────────────────────────────
 // F-15: CSV EXPORT + PRINT VIEW
