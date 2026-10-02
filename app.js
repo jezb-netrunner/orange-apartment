@@ -1810,7 +1810,11 @@ const ICON_PATHS = {
   building: 'M4 21V3h11v18M15 9h5v12M8 7h3M8 11h3M8 15h3M2 21h20',
   alert:    'M12 9v4M12 17h.01M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z',
   trash:    'M3 6h18M8 6V4h8v2M6 6l1 15h10l1-15',
-  undo:     'M9 14L4 9l5-5M4 9h11a5 5 0 0 1 0 10h-3'
+  undo:     'M9 14L4 9l5-5M4 9h11a5 5 0 0 1 0 10h-3',
+  search:   'M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM21 21l-4.3-4.3',
+  bell:     'M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.94 1.94 0 0 0 3.4 0',
+  clock:    'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 7v5l3 2',
+  logout:   'M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9'
 };
 function icon(name, cls) {
   const d = ICON_PATHS[name];
@@ -1896,10 +1900,20 @@ function renderAdminNav() {
   const badge = k => (k === 'billing' && overdueN) ? '<span class="nav-badge" aria-label="' + overdueN + ' overdue">' + overdueN + '</span>' : '';
   const item = (m, cls) => '<a href="#/' + m.key + '" class="' + cls + (m.key === _adminModule ? ' active' : '') + '"'
     + (m.key === _adminModule ? ' aria-current="page"' : '') + '>' + icon(m.icon) + '<span>' + m.label + '</span>' + badge(m.key) + '</a>';
-  tabs.innerHTML = '<div class="admin-tabs-inner">' + ADMIN_MODULES.map(m => item(m, 'admin-tab')).join('') + '</div>';
+  // Desktop sidebar (2026 redesign): brand, Receive payment, grouped menu, account.
+  const sbItem = m => item(m, 'admin-tab').replace(/<\/span><\/a>$/, '</span>' + (m.key === 'tenants' && tenants.length ? '<span class="nav-count">' + tenants.length + '</span>' : '') + '</a>');
+  const grp = keys => ADMIN_MODULES.filter(m => keys.includes(m.key)).map(sbItem).join('');
+  const pName = (propertyName || 'Orange Apartment').trim() || 'Orange Apartment';
+  tabs.innerHTML = '<div class="sb-brand"><span class="sb-mark" aria-hidden="true">' + esc(pName.charAt(0).toUpperCase()) + '</span><div><div class="sb-name">' + esc(pName) + '</div><div class="sb-sub">Property admin</div></div></div>'
+    + '<button type="button" class="sb-cta" onclick="openPayModal()">' + icon('cash') + '<span>Receive payment</span></button>'
+    + '<div class="admin-tabs-inner"><div class="sb-label">Menu</div>' + grp(MOBILE_PRIMARY)
+    + '<div class="sb-label">Analyze</div>' + grp(ADMIN_MODULES.map(m => m.key).filter(k => !MOBILE_PRIMARY.includes(k))) + '</div>'
+    + '<div class="sb-foot"><div class="sb-user"><span class="sb-av" aria-hidden="true">AD</span><div class="sb-user-text"><span class="sb-user-name">Admin</span><span class="sb-user-sub">Signed in</span></div>'
+    + '<button type="button" class="sb-logout" onclick="logout()" aria-label="Sign out" title="Sign out">' + icon('logout') + '</button></div><div class="sb-powered">Powered by JEZ</div></div>';
   const moreActive = !MOBILE_PRIMARY.includes(_adminModule);
   bottom.innerHTML = ADMIN_MODULES.filter(m => MOBILE_PRIMARY.includes(m.key)).map(m => item(m, 'bn-item')).join('')
     + '<button type="button" class="bn-item' + (moreActive ? ' active' : '') + '" onclick="openMoreMenu(this)" aria-haspopup="menu">' + icon('more') + '<span>More</span></button>';
+  renderHeaderTools();
 }
 function openMoreMenu(anchor) {
   openMenu(anchor, [
@@ -2115,7 +2129,7 @@ function renderHome() {
     + (awaitingHidden > 0 ? '<div class="empty-inline">' + icon('alert') + ' ' + awaitingHidden + ' more bill' + (awaitingHidden !== 1 ? 's are' : ' is') + ' waiting for an amount (e.g. a meter reading). <button type="button" class="link-btn inline" onclick="goBills(\'awaiting\')">Enter amounts</button></div>' : '')
     + '</section>';
 
-  return pageHead('Overview', new Date().toLocaleDateString('en-PH', { weekday: 'long', month: 'long', day: 'numeric' }))
+  return pageHead(_greeting(), new Date().toLocaleDateString('en-PH', { weekday: 'long', month: 'long', day: 'numeric' }) + ' · here\u2019s how ' + esc(propertyName || 'the building') + ' is doing')
     + kpis + quick
     + '<div class="home-grid">' + attention + recurringStatusCard() + '</div>'
     + (!tenants.length ? '<div class="empty-state"><div class="icon">&#127962;</div><p>No tenants yet. Add your first tenant to get started.</p>' + btn('Add tenant', 'openAddModal()', { primary: true, icon: 'plus' }) + '</div>' : '');
@@ -6535,3 +6549,116 @@ document.addEventListener('keydown', function(e) {
   }
 });
 
+
+
+// ─────────────────────────────────────────────
+// HEADER TOOLS (2026 redesign): global search, due/overdue bell, phone FAB
+// ─────────────────────────────────────────────
+function _greeting() {
+  const h = new Date().getHours();
+  return h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
+}
+function _initials(n) {
+  const w = String(n || '?').trim().split(/\s+/);
+  return ((w[0] || '?').charAt(0) + (w.length > 1 ? w[w.length - 1].charAt(0) : '')).toUpperCase();
+}
+// Bills due today, plus bills that became overdue (past the grace period) within the last week.
+function _bellItems() {
+  const today = new Date(todayISO() + 'T00:00:00');
+  const out = [];
+  tenants.forEach(t => (t.bills || []).forEach(b => {
+    if(billOpen(b) <= 0.005) return;
+    const s = getDueStatus(b);
+    if(s === 'due-today') out.push({ t, b, kind: 'due', title: 'Due today', when: 'Today' });
+    else if(s === 'overdue' && b.due) {
+      const late = Math.round((today - new Date(b.due + 'T00:00:00')) / 86400000);
+      if(late - graceDays <= 7) out.push({ t, b, kind: 'late', title: 'Now overdue', when: late + (late === 1 ? ' day late' : ' days late') });
+    }
+  }));
+  return out;
+}
+function renderHeaderTools() {
+  try {
+    const right = document.querySelector('header .nav-right');
+    if(!right) return;
+    let tools = document.getElementById('hdr-tools');
+    if(!tools) {
+      tools = document.createElement('div');
+      tools.id = 'hdr-tools';
+      tools.className = 'hdr-tools';
+      tools.innerHTML = '<div class="hdr-search">' + icon('search')
+        + '<input type="search" id="hdr-q" placeholder="Search tenants, units or bills" autocomplete="off" aria-label="Search tenants, units or bills">'
+        + '<div class="hdr-pop" id="hdr-results" hidden></div></div>'
+        + '<div class="hdr-bell"><button type="button" class="hdr-bell-btn" id="hdr-bell-btn" aria-haspopup="true" aria-expanded="false" aria-label="Notifications"></button>'
+        + '<div class="hdr-pop" id="hdr-bell-pop" hidden></div></div>';
+      right.insertBefore(tools, right.firstChild);
+      const q = document.getElementById('hdr-q');
+      q.addEventListener('input', () => hdrSearch(q.value));
+      q.addEventListener('keydown', e => { if(e.key === 'Escape') { q.value = ''; hdrSearch(''); q.blur(); } });
+      q.addEventListener('blur', () => setTimeout(() => hdrSearch(''), 150));
+      document.getElementById('hdr-bell-btn').addEventListener('click', e => {
+        e.stopPropagation();
+        const p = document.getElementById('hdr-bell-pop');
+        p.hidden = !p.hidden;
+        e.currentTarget.setAttribute('aria-expanded', String(!p.hidden));
+      });
+      document.addEventListener('click', e => {
+        const p = document.getElementById('hdr-bell-pop');
+        if(p && !p.hidden && !e.target.closest('.hdr-bell')) { p.hidden = true; document.getElementById('hdr-bell-btn').setAttribute('aria-expanded', 'false'); }
+      });
+      document.addEventListener('keydown', e => {
+        const p = document.getElementById('hdr-bell-pop');
+        if(e.key === 'Escape' && p && !p.hidden) { p.hidden = true; document.getElementById('hdr-bell-btn').setAttribute('aria-expanded', 'false'); }
+      });
+    }
+    if(!document.getElementById('fab-pay')) {
+      const f = document.createElement('button');
+      f.type = 'button'; f.id = 'fab-pay'; f.className = 'fab-pay';
+      f.innerHTML = icon('cash') + '<span>Receive payment</span>';
+      f.addEventListener('click', () => openPayModal());
+      document.getElementById('app').appendChild(f);
+    }
+    const items = _bellItems();
+    const btn = document.getElementById('hdr-bell-btn');
+    btn.innerHTML = icon('bell') + (items.length ? '<span class="hdr-bell-count">' + items.length + '</span>' : '');
+    btn.setAttribute('aria-label', items.length ? items.length + ' notifications' : 'Notifications');
+    document.getElementById('hdr-bell-pop').innerHTML = '<div class="hdr-pop-head"><strong>Notifications</strong><span>Due today and newly overdue</span></div>'
+      + (items.length
+        ? items.map(n => '<button type="button" class="hdr-note" data-tid="' + esc(n.t.id) + '" onclick="openTenant(this.dataset.tid)">'
+            + '<span class="hdr-note-ic ' + n.kind + '">' + icon(n.kind === 'due' ? 'clock' : 'alert') + '</span>'
+            + '<span class="hdr-note-main"><span class="hdr-note-top">' + n.title + '<span>' + n.when + '</span></span>'
+            + '<span class="hdr-note-body">' + esc(n.t.name) + ' · Unit ' + esc(n.t.unit) + ' · ' + esc(n.b.label || 'Bill') + ' · ' + peso(billOpen(n.b)) + '</span></span></button>').join('')
+        : '<div class="hdr-empty">Nothing due today and nothing newly overdue.</div>')
+      + '<button type="button" class="hdr-pop-foot" onclick="goBills(\'open\')">View open bills</button>';
+  } catch(e) { console.warn('header tools:', e); }
+}
+function hdrSearch(raw) {
+  const box = document.getElementById('hdr-results');
+  if(!box) return;
+  const ql = String(raw || '').trim().toLowerCase();
+  if(!ql) { box.hidden = true; box.innerHTML = ''; return; }
+  const res = [];
+  tenants.forEach(t => {
+    if([t.name, t.unit, t.code, t.phone, t.email, t.floor].some(v => String(v || '').toLowerCase().includes(ql))) {
+      const open = tenantSummary(t).open;
+      res.push('<button type="button" class="hdr-res" data-tid="' + esc(t.id) + '" onmousedown="event.preventDefault()" onclick="hdrGo(this.dataset.tid)">'
+        + '<span class="hdr-res-ic">' + esc(_initials(t.name)) + '</span><span class="hdr-res-main"><span class="hdr-res-title">' + esc(t.name) + '</span>'
+        + '<span class="hdr-res-sub">Unit ' + esc(t.unit) + (t.floor ? ' · ' + esc(t.floor) : '') + (open ? ' · owes ' + peso(open) : '') + '</span></span><span class="hdr-res-kind">Tenant</span></button>');
+    }
+  });
+  tenants.forEach(t => (t.bills || []).forEach(b => {
+    if(billOpen(b) <= 0.005) return;
+    if([b.label, t.name].some(v => String(v || '').toLowerCase().includes(ql)))
+      res.push('<button type="button" class="hdr-res" data-tid="' + esc(t.id) + '" onmousedown="event.preventDefault()" onclick="hdrGo(this.dataset.tid)">'
+        + '<span class="hdr-res-ic bill">&#8369;</span><span class="hdr-res-main"><span class="hdr-res-title">' + esc(b.label || 'Bill') + '</span>'
+        + '<span class="hdr-res-sub">' + esc(t.name) + ' · Unit ' + esc(t.unit) + ' · ' + peso(billOpen(b)) + (b.due ? ' · due ' + shortDate(b.due) : '') + '</span></span><span class="hdr-res-kind">Bill</span></button>');
+  }));
+  box.innerHTML = res.length ? res.slice(0, 8).join('') : '<div class="hdr-empty">Nothing matches \u201c' + esc(String(raw).trim()) + '\u201d.</div>';
+  box.hidden = false;
+}
+function hdrGo(tid) {
+  const q = document.getElementById('hdr-q');
+  if(q) { q.value = ''; q.blur(); }
+  hdrSearch('');
+  openTenant(tid);
+}
