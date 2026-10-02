@@ -1772,13 +1772,14 @@ async function logout() {
 // row under the header; phones get a bottom bar with the four daily
 // modules and a "More" sheet for the rest.
 // ═════════════════════════════════════════════
+// Reports and Insights are two routes under one nav item (tabs on the page).
 const ADMIN_MODULES = [
-  { key:'home',     label:'Home',     icon:'home'    },
+  { key:'home',     label:'Dashboard', short:'Home', icon:'grid' },
   { key:'tenants',  label:'Tenants',  icon:'users'   },
   { key:'billing',  label:'Billing',  icon:'receipt' },
   { key:'expenses', label:'Expenses', icon:'wallet'  },
-  { key:'reports',  label:'Reports',  icon:'doc'     },
-  { key:'insights', label:'Insights', icon:'chart'   },
+  { key:'insights', label:'Reports & insights', icon:'chart', also:['reports'] },
+  { key:'reports',  label:'Reports',  icon:'doc', hidden:true },
   { key:'settings', label:'Settings', icon:'sliders' }
 ];
 const MOBILE_PRIMARY = ['home','tenants','billing','expenses'];
@@ -1871,7 +1872,6 @@ function renderAdmin() {
   document.querySelectorAll('.td-amt-input').forEach(el => { el.dataset.cancel = '1'; });
   _sumCache = new Map();
   _postRender = [];
-  vizTipHide();
   renderAdminNav();
   const renderers = {
     home: renderHome, tenants: renderTenantsModule, billing: renderBillingModule,
@@ -1906,8 +1906,9 @@ function renderAdminNav() {
   let overdueN = 0;
   tenants.forEach(t => t.bills.forEach(b => { if(billOpen(b) > 0.005 && getDueStatus(b) === 'overdue') overdueN++; }));
   const badge = k => (k === 'billing' && overdueN) ? '<span class="nav-badge" aria-label="' + overdueN + ' overdue">' + overdueN + '</span>' : '';
-  const item = (m, cls) => '<a href="#/' + m.key + '" class="' + cls + (m.key === _adminModule ? ' active' : '') + '"'
-    + (m.key === _adminModule ? ' aria-current="page"' : '') + '>' + icon(m.icon) + '<span>' + m.label + '</span>' + badge(m.key) + '</a>';
+  const on = m => m.key === _adminModule || (m.also || []).includes(_adminModule);
+  const item = (m, cls, short) => '<a href="#/' + m.key + '" class="' + cls + (on(m) ? ' active' : '') + '"'
+    + (on(m) ? ' aria-current="page"' : '') + '>' + icon(m.icon) + '<span>' + esc(short && m.short || m.label) + '</span>' + badge(m.key) + '</a>';
   // Desktop sidebar (2026 redesign): brand, Receive payment, grouped menu, account.
   const sbItem = m => item(m, 'admin-tab').replace(/<\/span><\/a>$/, '</span>' + (m.key === 'tenants' && tenants.length ? '<span class="nav-count">' + tenants.length + '</span>' : '') + '</a>');
   const grp = keys => ADMIN_MODULES.filter(m => keys.includes(m.key)).map(sbItem).join('');
@@ -1915,18 +1916,17 @@ function renderAdminNav() {
   tabs.innerHTML = '<div class="sb-brand"><span class="sb-mark" aria-hidden="true">' + esc(pName.charAt(0).toUpperCase()) + '</span><div><div class="sb-name">' + esc(pName) + '</div><div class="sb-sub">Property admin</div></div></div>'
     + '<button type="button" class="sb-cta" onclick="openPayModal()">' + icon('cash') + '<span>Receive payment</span></button>'
     + '<div class="admin-tabs-inner"><div class="sb-label">Menu</div>' + grp(MOBILE_PRIMARY)
-    + '<div class="sb-label">Analyze</div>' + grp(ADMIN_MODULES.map(m => m.key).filter(k => !MOBILE_PRIMARY.includes(k))) + '</div>'
+    + '<div class="sb-label">Analyze</div>' + grp(ADMIN_MODULES.filter(m => !m.hidden && !MOBILE_PRIMARY.includes(m.key)).map(m => m.key)) + '</div>'
     + '<div class="sb-foot"><div class="sb-user"><span class="sb-av" aria-hidden="true">AD</span><div class="sb-user-text"><span class="sb-user-name">Admin</span><span class="sb-user-sub">Signed in</span></div>'
     + '<button type="button" class="sb-logout" onclick="logout()" aria-label="Sign out" title="Sign out">' + icon('logout') + '</button></div><div class="sb-powered">Powered by JEZ</div></div>';
   const moreActive = !MOBILE_PRIMARY.includes(_adminModule);
-  bottom.innerHTML = ADMIN_MODULES.filter(m => MOBILE_PRIMARY.includes(m.key)).map(m => item(m, 'bn-item')).join('')
+  bottom.innerHTML = ADMIN_MODULES.filter(m => MOBILE_PRIMARY.includes(m.key)).map(m => item(m, 'bn-item', true)).join('')
     + '<button type="button" class="bn-item' + (moreActive ? ' active' : '') + '" onclick="openMoreMenu(this)" aria-haspopup="menu">' + icon('more') + '<span>More</span></button>';
   renderHeaderTools();
 }
 function openMoreMenu(anchor) {
   openMenu(anchor, [
-    { label:'Reports',  icon:'doc',     fn:()=>go('reports') },
-    { label:'Insights', icon:'chart',   fn:()=>go('insights') },
+    { label:'Reports & insights', icon:'chart', fn:()=>go('insights') },
     { label:'Settings', icon:'sliders', fn:()=>go('settings') },
     { label:'Sign out', icon:'back',    fn:()=>logout() }
   ], 'More');
@@ -3416,12 +3416,180 @@ document.addEventListener('keydown', e => {
 // ─────────────────────────────────────────────
 // REPORTS MODULE
 // ─────────────────────────────────────────────
+// Reports & insights share one page header with underline tabs.
+function _reportsHead(active, right) {
+  const tab = (k, l) => '<a href="#/' + k + '" class="oa-utab' + (active === k ? ' active' : '') + '"' + (active === k ? ' aria-current="page"' : '') + '>' + l + '</a>';
+  return pageHead('Reports &amp; insights', active === 'insights' ? 'How the building is doing · revenue on accrual basis' + (_incStmtProrate() ? ', spread over each billing cycle' : '') : 'Printable statements and exports')
+    + '<div class="oa-utabs"><nav class="oa-utabs-list" aria-label="Reports and insights">' + tab('insights', 'Insights') + tab('reports', 'Statements &amp; exports') + '</nav>' + (right || '') + '</div>';
+}
+function openInsightWindowMenu(anchor) {
+  openMenu(anchor, Object.entries(INSIGHT_WINDOWS).map(([k, l]) => ({ label: (insightWindow === k ? '✓ ' : '') + l, fn: () => { insightWindow = k; rerenderAdmin(); } })), 'Period');
+}
+function _pctDelta(cur, prev, upIsGood, tail) {
+  if(!prev) return '<span class="oa-stat-sub">' + (tail || 'no earlier figures') + '</span>';
+  const pct = Math.round((cur - prev) / Math.abs(prev) * 1000) / 10;
+  const good = pct === 0 ? null : (pct > 0) === upIsGood;
+  return '<span class="oa-stat-sub"><b class="' + (good === null ? '' : good ? 'up' : 'down') + '">' + (pct > 0 ? '+' : pct < 0 ? '−' : '') + Math.abs(pct) + '%</b> ' + (tail || '') + '</span>';
+}
+
+function renderInsightsModule() {
+  const all = allTenants();
+  const rg = _insightRange(insightWindow);
+  const period = '<div class="oa-utabs-right"><span class="oa-muted-sm">Period</span><button type="button" class="oa-dd sm" aria-haspopup="menu" onclick="openInsightWindowMenu(this)"><span>' + fmtYM(rg.from, 'short') + ' – ' + fmtYM(rg.to, 'short') + '</span>' + icon('chevDown') + '</button></div>';
+  const head = _reportsHead('insights', period);
+  if(!all.length) return head + '<div class="empty-state"><p>Insights appear once you have tenants and bills.</p></div>';
+  const hasExp = expensesAvailable && !_expensesLoadError;
+  const base = { tenants: all, expenses, hasExpenses: hasExp, floorRank, floorCanon: appFloorCanon(), allocation: 'none' };
+  // Same revenue recognition as the printed income statement, so the two tie out.
+  const prorate = _incStmtProrate();
+  const acc = computeIncomeStatement(Object.assign({}, base, { from: rg.from, to: rg.to, basis: 'accrual', prorate }));
+  const accPrev = computeIncomeStatement(Object.assign({}, base, { from: rg.prevFrom, to: rg.prevTo, basis: 'accrual', prorate }));
+  const cash = computeIncomeStatement(Object.assign({}, base, { from: rg.from, to: rg.to, basis: 'cash' }));
+  const today = todayISO();
+
+  // Collection rate: share of the period's billing already paid.
+  const effOf = (from, to) => {
+    let billed = 0, paid = 0;
+    const win = new Set(ymRange(from, to));
+    all.forEach(t => t.bills.forEach(b => {
+      if(!win.has(billPeriod(b)) || billPeriod(b) > _currentYM()) return;
+      const amt = Number(b.amount) || 0;
+      billed += amt; paid += Math.min(amt, billSettled(b));
+    }));
+    return { billed: r2(billed), paid: r2(paid), pct: billed > 0 ? Math.round(paid / billed * 100) : null };
+  };
+  const eff = effOf(rg.from, rg.to), effPrev = effOf(rg.prevFrom, rg.prevTo);
+  const prevLbl = 'vs previous ' + (rg.n === 1 ? 'month' : rg.n + ' months');
+  const T = acc.total, P = accPrev.total;
+  const tile = (label, value, sub, cls) => '<div class="oa-stat"><span class="oa-stat-label">' + label + '</span><strong class="oa-stat-fig' + (cls ? ' ' + cls : '') + '">' + value + '</strong>' + sub + '</div>';
+  const money = v => (v < 0 ? '&minus;' : '') + peso(Math.abs(v));
+  const tiles = '<div class="oa-stats">'
+    + tile('Revenue', peso(T.revenue.total), _pctDelta(T.revenue.total, P.revenue.total, true, prevLbl))
+    + (hasExp ? tile('Expenses', peso(T.expenses), _pctDelta(T.expenses, P.expenses, false, prevLbl)) : tile('Expenses', '&mdash;', '<span class="oa-stat-sub">ledger not set up</span>'))
+    + (hasExp ? tile('Net income', money(T.net), _pctDelta(T.net, P.net, true, '· ' + money(Math.round(T.net / Math.max(1, rg.n))) + ' a month'), T.net < 0 ? 'bad' : '') : '')
+    + tile('Collection rate', eff.pct === null ? '&mdash;' : eff.pct + '%', '<span class="oa-stat-sub">' + (eff.billed ? 'of everything billed was paid' : 'nothing billed yet')
+        + (eff.pct !== null && effPrev.pct !== null && eff.pct !== effPrev.pct ? ' · <b class="' + (eff.pct > effPrev.pct ? 'up' : 'down') + '">' + (eff.pct > effPrev.pct ? '+' : '−') + Math.abs(eff.pct - effPrev.pct) + ' pts</b>' : '') + '</span>', eff.pct !== null && eff.pct < 80 ? 'bad' : '')
+    + '</div>';
+  const archNote = _archivedLoadError ? '<div class="hint-note">' + icon('alert') + ' Archived tenants could not be loaded — former tenants\' history is missing from these figures. Refresh to retry.</div>' : '';
+  return head + archNote + tiles
+    + _netByMonthCard(acc, hasExp)
+    + '<div class="in-grid">' + _agingCard(today) + (hasExp ? _expenseMixCard(acc) : '') + '</div>'
+    + _floorTableCard(acc, cash)
+    + _passThroughCard(acc) + _punctualityCard(rg, today);
+}
+
+// Net income (revenue without an expense ledger) per month: best month in
+// brand orange, the month in progress lighter, dashed line at the average.
+function _netByMonthCard(acc, hasExp) {
+  const rows = acc.perMonth.__total;
+  const cur = _currentYM();
+  const val = r => hasExp ? r.net : r.revenue;
+  const full = rows.filter(r => r.ym < cur);
+  const avg = full.length ? Math.round(full.reduce((s, r) => s + val(r), 0) / full.length) : 0;
+  const best = (full.length ? full : rows).slice().sort((a, b) => val(b) - val(a))[0];
+  const max = Math.max(1, ...rows.map(r => Math.max(0, val(r))), avg);
+  const h = v => (Math.max(0, v) / max * 100).toFixed(2) + '%';
+  const cols = rows.map(r => {
+    const v = val(r), cls = r.ym === cur ? 'part' : best && r.ym === best.ym ? 'best' : '';
+    return '<div class="nm-col ' + cls + '" title="' + esc(fmtYM(r.ym) + (r.ym === cur ? ' (so far)' : '') + ': ₱' + fmtMoney(v)) + '">'
+      + '<span class="nm-val' + (v < 0 ? ' neg' : '') + '">' + (v < 0 ? '−' : '') + _kShort(v) + '</span><span class="nm-bar" style="height:' + h(v) + '"></span></div>';
+  }).join('');
+  const labels = rows.map(r => '<span>' + _monthName(r.ym, 'short') + '</span>').join('');
+  const what = hasExp ? 'Net income' : 'Revenue';
+  const sub = best ? 'Best month: ' + fmtYM(best.ym).replace(/ \d{4}$/, '') + ' at ' + peso(val(best)) + (rows.some(r => r.ym === cur) ? ' · ' + _monthName(cur) + ' is still in progress' : '') : '';
+  const table = '<details class="viz-table"><summary>Show as table</summary><div class="table-scroll"><table class="mini-table"><thead><tr><th>Month</th><th class="num">Revenue</th>' + (hasExp ? '<th class="num">Expenses</th><th class="num">Net</th>' : '') + '</tr></thead><tbody>'
+    + rows.map(r => '<tr><td>' + fmtYM(r.ym, 'short') + '</td><td class="num">' + peso(r.revenue) + '</td>' + (hasExp ? '<td class="num">' + peso(r.expenses) + '</td><td class="num' + (r.net < 0 ? ' txt-bad' : '') + '">' + (r.net < 0 ? '&minus;' : '') + peso(Math.abs(r.net)) + '</td>' : '') + '</tr>').join('')
+    + '</tbody></table></div></details>';
+  return '<section class="card in-chart">'
+    + '<div class="ch-head"><div class="ch-titles"><h2 class="card-title">' + what + ' by month</h2><span class="ch-sub">' + sub + '</span></div>'
+    + (full.length ? '<span class="nm-avg-key"><i></i>' + full.length + '-month average ' + peso(avg) + '</span>' : '') + '</div>'
+    + '<div class="nm-plot" role="img" aria-label="' + what + ' by month"><div class="nm-cols">' + cols + '</div>'
+    + (full.length ? '<i class="nm-avg" style="bottom:' + h(avg) + '"></i>' : '') + '</div>'
+    + '<div class="nm-x" aria-hidden="true">' + labels + '</div>'
+    + table + '</section>';
+}
+
+function _agingCard(today) {
+  const buckets = agingBuckets(allTenants(), today);
+  const total = r2(buckets.reduce((s, b) => s + b.amount, 0));
+  const late = r2(buckets.filter(b => !['current', 'nodate'].includes(b.key)).reduce((s, b) => s + b.amount, 0));
+  // Same tenants as the buckets above (current and former), same recognition as the statement.
+  const memo = computeIncomeStatement({ tenants: allTenants(), expenses: [], from: _currentYM(), to: _currentYM(), basis: 'accrual', prorate: _incStmtProrate(), hasExpenses: false }).memo.__total;
+  const max = Math.max(1, ...buckets.map(b => b.amount));
+  const label = { current: 'Not yet due', d30: '1–30 days late', d60: '31–60 days late', d90: '61–90 days late', d90p: 'Over 90 days', nodate: 'No due date' };
+  const rows = buckets.filter(b => b.key !== 'nodate' || b.amount > 0).map(b => '<div class="ag-row ag-' + b.key + '">'
+    + '<div class="ag-label"><strong>' + label[b.key] + '</strong><span>' + (b.count ? b.count + ' bill' + (b.count !== 1 ? 's' : '') : 'None') + '</span></div>'
+    + '<span class="ag-track"><i style="width:' + (b.amount > 0 ? Math.max(2, b.amount / max * 100).toFixed(1) : 0) + '%"></i></span>'
+    + '<strong class="ag-amt">' + peso(b.amount) + '</strong></div>').join('');
+  return '<section class="card in-card"><div class="in-card-head"><div><h2 class="card-title">Money owed, by age</h2><span class="ch-sub">'
+    + (!total ? 'Nobody owes anything right now.' : late ? peso(late) + ' of ' + peso(total) + ' is past due' : 'Everything owed is still within its due date.') + '</span></div>'
+    + '<button type="button" class="link-btn" onclick="goBills(\'overdue\')">Overdue bills</button></div>'
+    + '<div class="ag-list">' + rows + '</div>'
+    + '<div class="in-foot"><div><span>Collected in advance</span><strong>' + peso(memo.unearned) + '</strong></div><div><span>Tenant credits (overpaid)</span><strong>' + peso(memo.credits) + '</strong></div></div>'
+    + '</section>';
+}
+
+function _expenseMixCard(acc) {
+  const T = acc.total;
+  const cats = EXPENSE_CATEGORIES.map(c => ({ key: c.key, label: c.label, value: r2(T.direct[c.key] + T.shared[c.key] - T.recovered[c.key]) })).filter(x => x.value > 0).sort((a, b) => b.value - a.value);
+  const spent = T.expenses;
+  const sum = r2(cats.reduce((s, c) => s + c.value, 0)) || 1;
+  return '<section class="card in-card"><div class="in-card-head"><div><h2 class="card-title">Where the money goes</h2><span class="ch-sub">'
+    + peso(spent) + ' in expenses' + (T.recovered.total > 0.005 ? ' after ' + peso(T.recovered.total) + ' of utilities billed back' : '') + (T.revenue.total > 0 ? ' · ' + Math.round(spent / T.revenue.total * 100) + '% of revenue' : '') + '</span></div>'
+    + '<button type="button" class="link-btn" onclick="go(\'expenses\')">Expenses</button></div>'
+    + (cats.length
+      ? '<div class="mix-bar" role="img" aria-label="Expenses by category">' + cats.map(c => '<i class="c-' + c.key + '" style="width:' + (c.value / sum * 100).toFixed(2) + '%" title="' + esc(c.label + ': ₱' + fmtMoney(c.value)) + '"></i>').join('') + '</div>'
+        + '<div class="mix-legend">' + cats.map(c => '<div class="mix-item"><span class="mix-name"><i class="c-' + c.key + '"></i>' + esc(c.label) + '</span><span class="mix-pct">' + Math.round(c.value / sum * 100) + '%</span><strong>' + peso(c.value) + '</strong></div>').join('') + '</div>'
+      : '<div class="empty-inline">No expenses logged in this period.</div>')
+    + '</section>';
+}
+
+// By floor: each floor's revenue against its floor-tagged costs, then the
+// building-wide costs and the building total.
+function _floorTableCard(acc, cash) {
+  const floors = acc.floors;
+  if(!floors.some(f => f)) return '';
+  const hasExp = expensesAvailable && !_expensesLoadError;
+  const money = v => (v < 0 ? '&minus;' : '') + peso(Math.abs(v));
+  const dash = '<span class="oa-muted-sm">&mdash;</span>';
+  let floorExpSum = 0, owedSum = 0, curN = 0;
+  const rows = floors.map(f => {
+    const c = acc.columns[f], m = cash.memo[f];
+    const nCur = tenants.filter(t => floorNorm(t.floor) === floorNorm(f)).length;
+    const nFormer = archivedTenants.filter(t => floorNorm(t.floor) === floorNorm(f) && occupiedInRange(t, acc.from, acc.to)).length;
+    const owed = r2(allTenants().filter(t => floorNorm(t.floor) === floorNorm(f)).reduce((s, t) => s + tenantSummary(t).open, 0));
+    // Only floor-tagged costs: building-wide costs are not charged to a floor here.
+    const floorExp = r2(c.direct.total - c.recovered.total); // net of utilities billed back
+    floorExpSum = r2(floorExpSum + floorExp); owedSum = r2(owedSum + owed); curN += nCur;
+    const net = r2(c.revenue.total - floorExp);
+    return '<div class="oa-tr in-floor' + (hasExp ? '' : ' no-exp') + '"><strong>' + esc(f || 'No floor') + '</strong>'
+      + '<span class="oa-cell-bill">' + nCur + (nFormer ? ' + ' + nFormer + ' former' : '') + '</span>'
+      + '<span class="oa-cell-amt n">' + peso(c.revenue.total) + '</span>'
+      + (hasExp ? '<span class="oa-cell-amt n muted">' + (floorExp > 0.005 ? peso(floorExp) : dash) + '</span><span class="oa-cell-amt' + (net < 0 ? ' bad' : '') + '">' + money(net) + '</span>' : '')
+      + '<span class="oa-cell-amt n">' + (m && m.rate !== null ? m.rate + '%' : dash) + '</span>'
+      + '<span class="oa-cell-amt n">' + (owed ? peso(owed) : dash) + '</span></div>';
+  }).join('');
+  const shared = r2(acc.total.expenses - floorExpSum);
+  const tot = cash.memo.__total;
+  const bw = hasExp && Math.abs(shared) > 0.005 ? '<div class="oa-tr in-floor"><strong>Building-wide</strong><span class="oa-cell-bill">' + dash + '</span><span class="oa-cell-amt n">' + dash + '</span>'
+    + '<span class="oa-cell-amt n muted">' + peso(shared) + '</span><span class="oa-cell-amt' + (shared > 0 ? ' bad' : '') + '">' + money(-shared) + '</span><span class="oa-cell-amt n">' + dash + '</span><span class="oa-cell-amt n">' + dash + '</span></div>' : '';
+  const total = '<div class="oa-tr in-floor in-total' + (hasExp ? '' : ' no-exp') + '"><strong>Building total</strong><span class="oa-cell-bill"><b>' + curN + '</b></span><span class="oa-cell-amt">' + peso(acc.total.revenue.total) + '</span>'
+    + (hasExp ? '<span class="oa-cell-amt">' + peso(acc.total.expenses) + '</span><span class="oa-cell-amt' + (acc.total.net < 0 ? ' bad' : '') + '">' + money(acc.total.net) + '</span>' : '')
+    + '<span class="oa-cell-amt">' + (tot && tot.rate !== null ? tot.rate + '%' : '&mdash;') + '</span><span class="oa-cell-amt">' + peso(owedSum) + '</span></div>';
+  return '<section class="card oa-table-card in-floors"><div class="oa-card-head"><h2 class="card-title">By floor</h2>'
+    + '<span class="oa-muted-sm">' + (hasExp ? 'Floor expenses are floor-tagged, net of utilities billed back; the rest is building-wide · ' : '') + '<button type="button" class="link-btn inline" onclick="openIncStmtModal(\'floors-compare\')">Per-floor income statement</button></span></div>'
+    + '<div class="oa-table"><div class="oa-thead in-floor' + (hasExp ? '' : ' no-exp') + '" role="row"><span>Floor</span><span>Tenants</span><span class="r">Revenue</span>' + (hasExp ? '<span class="r">Expenses</span><span class="r">Net</span>' : '') + '<span class="r">Collection</span><span class="r">Owed now</span></div>'
+    + rows + bw + total + '</div></section>';
+}
+// A former tenant counts on a floor when they lived there during the period.
+function occupiedInRange(t, from, to) { return ymRange(from, to).some(ym => occupiedInMonth(t, ym)); }
+
 function renderReportsModule() {
   const floors = floorList();
   const tOpts = tenants.slice().sort((a, b) => unitRank(a.unit) - unitRank(b.unit) || a.name.localeCompare(b.name))
     .map(t => '<option value="' + esc(t.id) + '">' + esc(t.name) + ' · Unit ' + esc(t.unit) + '</option>').join('');
   const card = (ic, title, text, actions) => '<section class="card report-card"><div class="report-ico">' + icon(ic) + '</div><div class="report-body"><h2 class="card-title">' + title + '</h2><p class="card-text">' + text + '</p><div class="btn-row">' + actions + '</div></div></section>';
-  return pageHead('Reports', 'Printable statements and exports')
+  return _reportsHead('reports')
     + '<div class="report-grid">'
     + card('doc', 'Income statement', 'Revenue, expenses and net income for any period. <strong>Accrual basis</strong> by default (revenue in the cycle it\'s earned; advances held as unearned), or cash basis.',
         btn('Open', 'openIncStmtModal()', { primary: true, icon: 'print' }))
@@ -3787,8 +3955,7 @@ function exportExpensesCSV() {
 // Figures reuse computeIncomeStatement, so they tie out to the reports.
 // ─────────────────────────────────────────────
 const INSIGHT_WINDOWS = { '3m':'3 months', '6m':'6 months', '12m':'12 months', 'ytd':'Year to date' };
-let insightWindow = '6m';
-let _vizMonthly = null; // data behind the monthly chart's tooltip
+let insightWindow = '12m';
 
 // The income statement's saved "spread rent over each cycle" choice (off by default:
 // each charge counts in its billing month).
@@ -3813,192 +3980,11 @@ function _compactPeso(v) {
   const s = a >= 1e6 ? (a / 1e6).toFixed(a >= 1e7 ? 0 : 1) + 'M' : a >= 1e3 ? (a / 1e3).toFixed(a >= 1e4 ? 0 : 1) + 'k' : String(Math.round(a));
   return (v < 0 ? '−' : '') + '₱' + s.replace(/\.0(?=[kM])/, '');
 }
-function _delta(cur, prev, upIsGood) {
-  if(!prev) return '<span class="kpi-delta muted">no prior data</span>';
-  const pct = Math.round((cur - prev) / Math.abs(prev) * 100);
-  if(!pct) return '<span class="kpi-delta muted">same as prior period</span>';
-  const good = (pct > 0) === upIsGood;
-  return '<span class="kpi-delta ' + (good ? 'good' : 'bad') + '">' + (pct > 0 ? '▲ ' : '▼ ') + Math.abs(pct) + '%</span><span class="kpi-delta muted"> vs prior</span>';
-}
 
-function renderInsightsModule() {
-  const all = allTenants();
-  if(!all.length) return pageHead('Insights') + '<div class="empty-state"><p>Insights appear once you have tenants and bills.</p></div>';
-  const rg = _insightRange(insightWindow);
-  const hasExp = expensesAvailable && !_expensesLoadError;
-  const base = { tenants: all, expenses, hasExpenses: hasExp, floorRank, floorCanon: appFloorCanon(), allocation: 'none' };
-  // Same revenue recognition as the printed income statement, so the two tie out.
-  const prorate = _incStmtProrate();
-  const acc = computeIncomeStatement(Object.assign({}, base, { from: rg.from, to: rg.to, basis: 'accrual', prorate }));
-  const accPrev = computeIncomeStatement(Object.assign({}, base, { from: rg.prevFrom, to: rg.prevTo, basis: 'accrual', prorate }));
-  const cash = computeIncomeStatement(Object.assign({}, base, { from: rg.from, to: rg.to, basis: 'cash' }));
-  const cashPrev = computeIncomeStatement(Object.assign({}, base, { from: rg.prevFrom, to: rg.prevTo, basis: 'cash' }));
-  const today = todayISO();
 
-  // Collection efficiency: share of the period's billing already paid.
-  let billedWin = 0, paidWin = 0;
-  const inWin = new Set(acc.months);
-  all.forEach(t => t.bills.forEach(b => {
-    if(!inWin.has(billPeriod(b)) || billPeriod(b) > _currentYM()) return;
-    const amt = Number(b.amount) || 0;
-    billedWin += amt;
-    paidWin += Math.min(amt, billSettled(b));
-  }));
-  const eff = billedWin > 0 ? Math.round(paidWin / billedWin * 100) : null;
 
-  const win = '<div class="chips-row" role="group" aria-label="Period">'
-    + Object.entries(INSIGHT_WINDOWS).map(([k, l]) => '<button type="button" class="fchip' + (insightWindow === k ? ' active' : '') + '" aria-pressed="' + (insightWindow === k) + '" onclick="insightWindow=\'' + k + '\';rerenderAdmin()">' + l + '</button>').join('')
-    + '<span class="chips-note">' + fmtYM(rg.from, 'short') + ' – ' + fmtYM(rg.to, 'short') + '</span></div>';
 
-  const tile = (label, value, sub, cls) => '<div class="kpi"><div class="kpi-label">' + label + '</div><div class="kpi-value ' + (cls || '') + '">' + value + '</div><div class="kpi-sub">' + sub + '</div></div>';
-  const netV = acc.total.net;
-  const kpis = '<div class="kpis">'
-    + tile('Revenue earned', peso(acc.total.revenue.total), _delta(acc.total.revenue.total, accPrev.total.revenue.total, true))
-    + tile('Cash collected', peso(cash.total.revenue.total), _delta(cash.total.revenue.total, cashPrev.total.revenue.total, true))
-    + (hasExp ? tile('Net income', (netV < 0 ? '&minus;' : '') + peso(Math.abs(netV)), _delta(netV, accPrev.total.net, true), netV < 0 ? 'bad' : '')
-              : tile('Expenses', '&mdash;', 'ledger not set up'))
-    + tile('Billed & paid', eff === null ? '&mdash;' : eff + '%', billedWin ? peso(paidWin) + ' of ' + peso(billedWin) + ' billed (incl. utilities)' : 'nothing billed yet', eff !== null && eff < 80 ? 'bad' : '')
-    + '</div>';
 
-  const archNote = _archivedLoadError ? '<div class="hint-note">' + icon('alert') + ' Archived tenants could not be loaded — former tenants\' history is missing from these figures. Refresh to retry.</div>' : '';
-  return pageHead('Insights', 'How the building is doing · revenue on accrual basis' + (prorate ? ', spread over each billing cycle' : '') + ', as in the income statement') + archNote + win + kpis
-    + _monthlyChartCard(acc, hasExp)
-    + '<div class="insight-grid">' + _agingCard(today) + (hasExp ? _expenseMixCard(acc) : '') + _passThroughCard(acc) + '</div>'
-    + _floorTableCard(acc, cash)
-    + _punctualityCard(rg, today);
-}
-
-// Revenue vs expenses per month: grouped columns, one axis (both pesos).
-// Drawn at the container's real pixel width (re-drawn on resize) so text
-// and bar widths stay true to spec instead of scaling with a viewBox.
-function _monthlySvg(W) {
-  const rows = _vizMonthly || [];
-  const hasExp = expensesAvailable && !_expensesLoadError;
-  const H = 230, PL = 52, PR = 8, PT = 14, PB = 28;
-  const iw = W - PL - PR, ih = H - PT - PB;
-  const max = Math.max(1, ...rows.map(r => Math.max(r.revenue, hasExp ? r.expenses : 0)));
-  const step = _niceStep(max / 4);
-  const top = Math.ceil(max / step) * step;
-  const y = v => PT + ih - (v / top) * ih;
-  const slot = iw / Math.max(1, rows.length);
-  const bw = Math.min(24, Math.max(4, (slot - 10) / (hasExp ? 2 : 1) - 1));
-  const colPath = (x, v) => {
-    const y0 = PT + ih, y1 = y(v), h = y0 - y1;
-    if(h <= 0.5) return '';
-    const r = Math.min(4, h, bw / 2);
-    return 'M' + x.toFixed(1) + ',' + y0 + 'V' + (y1 + r).toFixed(1) + 'Q' + x.toFixed(1) + ',' + y1.toFixed(1) + ' ' + (x + r).toFixed(1) + ',' + y1.toFixed(1)
-      + 'H' + (x + bw - r).toFixed(1) + 'Q' + (x + bw).toFixed(1) + ',' + y1.toFixed(1) + ' ' + (x + bw).toFixed(1) + ',' + (y1 + r).toFixed(1) + 'V' + y0 + 'Z';
-  };
-  let grid = '';
-  for(let v = 0; v <= top + 0.001; v += step) {
-    const yy = y(v).toFixed(1);
-    grid += '<line x1="' + PL + '" x2="' + (W - PR) + '" y1="' + yy + '" y2="' + yy + '" class="vz-grid"/>'
-      + '<text x="' + (PL - 8) + '" y="' + yy + '" class="vz-axis vz-y">' + _compactPeso(v) + '</text>';
-  }
-  const every = slot < 34 ? 3 : slot < 48 ? 2 : 1;
-  const marks = rows.map((r, i) => {
-    const cx = PL + slot * i + slot / 2;
-    const groupW = hasExp ? bw * 2 + 2 : bw;
-    const x0 = cx - groupW / 2;
-    const lbl = new Date(r.ym + '-02').toLocaleString('default', { month: 'short' });
-    return '<g class="vz-hit" tabindex="0" data-i="' + i + '" aria-label="' + esc(fmtYM(r.ym) + ': revenue ' + _compactPeso(r.revenue) + (hasExp ? ', expenses ' + _compactPeso(r.expenses) : '')) + '">'
-      + '<rect class="vz-hitbox" x="' + (PL + slot * i).toFixed(1) + '" y="' + PT + '" width="' + slot.toFixed(1) + '" height="' + ih + '"/>'
-      + '<path class="vz-s1" d="' + colPath(x0, r.revenue) + '"/>'
-      + (hasExp ? '<path class="vz-s2" d="' + colPath(x0 + bw + 2, r.expenses) + '"/>' : '')
-      + (i % every === 0 || i === rows.length - 1 ? '<text x="' + cx.toFixed(1) + '" y="' + (H - 8) + '" class="vz-axis vz-x">' + lbl + '</text>' : '')
-      + '</g>';
-  }).join('');
-  return '<svg class="vz-svg" width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Revenue' + (hasExp ? ' and expenses' : '') + ' by month" onpointermove="vizTip(event)" onpointerleave="vizTipHide()" onfocusin="vizTip(event)" onfocusout="vizTipHide()">'
-    + grid + '<line x1="' + PL + '" x2="' + (W - PR) + '" y1="' + (PT + ih) + '" y2="' + (PT + ih) + '" class="vz-base"/>' + marks + '</svg>';
-}
-function drawMonthlyChart() {
-  const box = document.getElementById('vz-monthly');
-  if(!box) return;
-  box.innerHTML = _monthlySvg(Math.max(300, Math.floor(box.clientWidth || 640)));
-}
-function _monthlyChartCard(acc, hasExp) {
-  const rows = acc.perMonth.__total;
-  _vizMonthly = rows;
-  const svg = '<div id="vz-monthly" class="vz-box">' + _monthlySvg(640) + '</div>';
-  _postRender.push(drawMonthlyChart);
-  const tot = acc.total;
-  const best = rows.slice().sort((a, b) => (b.revenue - b.expenses) - (a.revenue - a.expenses))[0];
-  const summary = hasExp
-    ? 'Net ' + (tot.net < 0 ? 'loss' : 'income') + ' over the period: <strong>' + (tot.net < 0 ? '&minus;' : '') + peso(Math.abs(tot.net)) + '</strong> (' + peso(Math.round(tot.net / rows.length)) + ' a month on average)'
-      + (best && rows.length > 1 ? '. Best month: ' + fmtYM(best.ym, 'short') + ' at ' + peso(r2(best.revenue - best.expenses)) + '.' : '.')
-    : 'Revenue over the period: <strong>' + peso(tot.revenue.total) + '</strong>.';
-  const table = '<details class="viz-table"><summary>Show as table</summary><div class="table-scroll"><table class="mini-table"><thead><tr><th>Month</th><th class="num">Revenue</th>' + (hasExp ? '<th class="num">Expenses</th><th class="num">Net</th>' : '') + '</tr></thead><tbody>'
-    + rows.map(r => '<tr><td>' + fmtYM(r.ym, 'short') + '</td><td class="num">' + peso(r.revenue) + '</td>' + (hasExp ? '<td class="num">' + peso(r.expenses) + '</td><td class="num' + (r.net < 0 ? ' txt-bad' : '') + '">' + (r.net < 0 ? '&minus;' : '') + peso(Math.abs(r.net)) + '</td>' : '') + '</tr>').join('')
-    + '</tbody></table></div></details>';
-  return '<section class="card viz-card"><div class="card-head"><h2 class="card-title">Revenue' + (hasExp ? ' vs expenses' : '') + ' by month</h2>'
-    + (hasExp ? '<div class="vz-legend"><span><i class="vz-key vz-s1"></i>Revenue earned</span><span><i class="vz-key vz-s2"></i>Expenses</span></div>' : '') + '</div>'
-    + '<p class="card-text">' + summary + '</p>' + svg + table + '</section>';
-}
-function vizTip(e) {
-  const g = e.target && e.target.closest ? e.target.closest('.vz-hit') : null;
-  const tip = document.getElementById('viz-tip') || (() => { const d = document.createElement('div'); d.id = 'viz-tip'; d.className = 'viz-tip'; d.setAttribute('role', 'status'); document.body.appendChild(d); return d; })();
-  if(!g || !_vizMonthly) { tip.style.display = 'none'; return; }
-  const r = _vizMonthly[Number(g.dataset.i)];
-  if(!r) return;
-  tip.textContent = '';
-  const head = document.createElement('div'); head.className = 'vt-head'; head.textContent = fmtYM(r.ym); tip.appendChild(head);
-  const row = (cls, label, v) => {
-    const d = document.createElement('div'); d.className = 'vt-row';
-    const k = document.createElement('i'); k.className = 'vz-line ' + cls; d.appendChild(k);
-    const b = document.createElement('strong'); b.textContent = '₱' + (Math.round(v * 100) / 100).toLocaleString(); d.appendChild(b);
-    const s = document.createElement('span'); s.textContent = ' ' + label; d.appendChild(s);
-    tip.appendChild(d);
-  };
-  row('vz-s1', 'revenue', r.revenue);
-  if(expensesAvailable && !_expensesLoadError) { row('vz-s2', 'expenses', r.expenses); row('vz-net', 'net', r.net); }
-  tip.style.display = 'block';
-  const rect = g.getBoundingClientRect();
-  const px = e.clientX || (rect.left + rect.width / 2);
-  const tw = tip.offsetWidth;
-  tip.style.left = Math.max(8, Math.min(window.innerWidth - tw - 8, px - tw / 2)) + 'px';
-  tip.style.top = Math.max(8, rect.top - tip.offsetHeight - 8) + 'px';
-}
-function vizTipHide() { const t = document.getElementById('viz-tip'); if(t) t.style.display = 'none'; }
-
-// Horizontal bars: one hue; value at the tip; bar length = magnitude.
-function _hbars(items, fmt, cls) {
-  const max = Math.max(1, ...items.map(x => x.value));
-  return '<div class="hb-list' + (cls ? ' ' + cls : '') + '">' + items.map(x => '<div class="hb-row"' + (x.title ? ' title="' + esc(x.title) + '"' : '') + '>'
-    + '<div class="hb-label">' + x.label + (x.sub ? ' <span class="muted">' + x.sub + '</span>' : '') + '</div>'
-    + '<div class="hb-track"><span class="hb-bar" style="width:' + (x.value > 0 ? Math.max(1.5, x.value / max * 100).toFixed(1) : 0) + '%"></span></div>'
-    + '<div class="hb-val">' + fmt(x) + '</div></div>').join('') + '</div>';
-}
-
-function _agingCard(today) {
-  const buckets = agingBuckets(allTenants(), today);
-  const total = r2(buckets.reduce((s, b) => s + b.amount, 0));
-  const late = r2(buckets.filter(b => !['current', 'nodate'].includes(b.key)).reduce((s, b) => s + b.amount, 0));
-  // Same tenants as the buckets above (current and former), same recognition as the statement.
-  const memo = computeIncomeStatement({ tenants: allTenants(), expenses: [], from: _currentYM(), to: _currentYM(), basis: 'accrual', prorate: _incStmtProrate(), hasExpenses: false }).memo.__total;
-  const oldest = buckets.slice().reverse().find(b => b.amount > 0 && b.key !== 'current' && b.key !== 'nodate');
-  const note = !total ? 'Nobody owes anything right now.'
-    : late ? peso(late) + ' of ' + peso(total) + ' is past due' + (oldest && (oldest.key === 'd90p' || oldest.key === 'd90') ? ' — some of it for over ' + (oldest.key === 'd90p' ? '90' : '60') + ' days.' : '.')
-    : 'Everything owed is still within its due date.';
-  return '<section class="card"><div class="card-head"><h2 class="card-title">Money owed, by age</h2>'
-    + '<button type="button" class="link-btn" onclick="goBills(\'overdue\')">Overdue bills</button></div>'
-    + '<p class="card-text">' + note + '</p>'
-    + _hbars(buckets.map(b => ({ label: b.label, sub: b.count ? '· ' + b.count + ' bill' + (b.count !== 1 ? 's' : '') : '', value: b.amount })), x => peso(x.value))
-    + '<div class="mini-stats"><div><span class="muted">Collected in advance</span><strong>' + peso(memo.unearned) + '</strong></div>'
-    + '<div><span class="muted">Tenant credits (overpaid)</span><strong>' + peso(memo.credits) + '</strong></div></div>'
-    + '</section>';
-}
-
-function _expenseMixCard(acc) {
-  const T = acc.total;
-  const cats = EXPENSE_CATEGORIES.map(c => ({ label: c.label, value: r2(T.direct[c.key] + T.shared[c.key] - T.recovered[c.key]) })).filter(x => x.value > 0).sort((a, b) => b.value - a.value);
-  const spent = T.expenses;
-  const meter = '';
-  return '<section class="card"><div class="card-head"><h2 class="card-title">Where the money goes</h2><button type="button" class="link-btn" onclick="go(\'expenses\')">Expenses</button></div>'
-    + (cats.length ? '<p class="card-text">' + peso(spent) + ' spent' + (T.recovered.total > 0.005 ? ' after ' + peso(T.recovered.total) + ' of utilities billed back to tenants' : '') + (T.revenue.total > 0 ? ' — ' + Math.round(spent / T.revenue.total * 100) + '% of revenue.' : '.') + '</p>'
-        + _hbars(cats.map(c => Object.assign(c, { sub: '· ' + Math.round(c.value / spent * 100) + '%' })), x => peso(x.value), 's2')
-        : '<div class="empty-inline">No expenses logged in this period.</div>')
-    + meter + '</section>';
-}
 
 // Utilities billed back to tenants: collected for the provider, so kept
 // out of revenue (IFRS 15 — the landlord acts as agent) and shown here.
@@ -4016,31 +4002,6 @@ function _passThroughCard(acc) {
     + '</section>';
 }
 
-function _floorTableCard(acc, cash) {
-  const floors = acc.floors;
-  if(!floors.some(f => f)) return '';
-  const hasExp = expensesAvailable && !_expensesLoadError;
-  const rows = floors.map(f => {
-    const c = acc.columns[f];
-    const m = cash.memo[f];
-    const onFloor = tenants.filter(t => floorNorm(t.floor) === floorNorm(f));
-    const owed = r2(allTenants().filter(t => floorNorm(t.floor) === floorNorm(f)).reduce((s, t) => s + tenantSummary(t).open, 0));
-    const n = onFloor.length;
-    // Only floor-tagged costs: building-wide costs are not charged to a floor here.
-    const floorExp = r2(c.direct.total - c.recovered.total); // net of utilities billed back
-    const net = r2(c.revenue.total - floorExp);
-    const margin = c.revenue.total > 0 ? Math.round(net / c.revenue.total * 100) : null;
-    return '<tr><td><strong>' + esc(f || 'No floor') + '</strong><div class="muted">' + n + ' tenant' + (n !== 1 ? 's' : '') + '</div></td>'
-      + '<td class="num">' + peso(c.revenue.total) + '</td>'
-      + (hasExp ? '<td class="num">' + (floorExp > 0.005 ? peso(floorExp) : '<span class="muted">&mdash;</span>') + '</td><td class="num' + (net < 0 ? ' txt-bad' : '') + '">' + (net < 0 ? '&minus;' : '') + peso(Math.abs(net)) + (margin !== null ? '<div class="muted">' + margin + '% margin</div>' : '') + '</td>' : '')
-      + '<td class="num">' + (m && m.rate !== null ? m.rate + '%' : '&mdash;') + '</td>'
-      + '<td class="num">' + (owed ? peso(owed) : '<span class="muted">&mdash;</span>') + '</td></tr>';
-  }).join('');
-  return '<section class="card"><div class="card-head"><h2 class="card-title">Floors</h2><button type="button" class="link-btn" onclick="openIncStmtModal(\'floors-compare\')">Per-floor income statement</button></div>'
-    + '<div class="table-scroll"><table class="mini-table"><thead><tr><th>Floor</th><th class="num">Revenue</th>' + (hasExp ? '<th class="num">Floor expenses*</th><th class="num">Net</th>' : '')
-    + '<th class="num">Collected</th><th class="num">Owed now</th></tr></thead><tbody>' + rows + '</tbody></table></div>'
-    + '<p class="card-text muted">Revenue on accrual basis. ' + (hasExp ? '*Expenses tagged to that floor, less utilities billed back to its tenants' + (acc.total.shared.total > 0 ? '; building-wide costs of ' + peso(acc.total.shared.total) + ' are not split across floors here (the per-floor income statement can allocate them)' : '') + '. ' : '') + 'Collected = cash received vs billed in the period.</p></section>';
-}
 
 function _punctualityCard(rg, today) {
   const rel = paymentReliability(allTenants(), rg.from, rg.to, today, graceDays);
@@ -5919,9 +5880,8 @@ window.addEventListener('resize',()=>{
     const w = window.innerWidth;
     const crossed = (_lastWidth<=768&&w>768)||(_lastWidth>768&&w<=768);
     _lastWidth = w;
-    // Bill list switches between table and phone layout at 768px.
-    if(crossed && currentUser==='admin') { if(document.getElementById('bill-rows')) renderBillRows(); }
-    if(currentUser==='admin') drawMonthlyChart();
+    // Phone and desktop layouts differ at 768px (bill sort control, chart range).
+    if(crossed && currentUser==='admin') _safeRerender();
   }, 250);
 });
 
