@@ -675,30 +675,6 @@ main { flex: 1; padding: 52px 40px; max-width: 1120px; margin: 0 auto; width: 10
   white-space: pre-wrap;
 }
 
-/* PAYMENT INSTRUCTIONS EDIT MODAL */
-#payinst-modal { display: none; position: fixed; inset: 0; background: rgba(17,17,17,0.5); backdrop-filter: blur(4px); z-index: 2000; align-items: center; justify-content: center; }
-#payinst-modal.open { display: flex !important; }
-.payinst-box {
-  background: var(--white); border-radius: 12px; padding: 28px;
-  width: 100%; max-width: 460px;
-  box-shadow: 0 24px 64px rgba(17,17,17,0.2);
-  animation: rise 0.25s cubic-bezier(.16,1,.3,1);
-}
-.payinst-eyebrow { font-size: 10px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--green); margin-bottom: 6px; }
-.payinst-title { font-family: 'Source Serif 4', serif; font-size: 18px; font-weight: 600; color: var(--ink); margin-bottom: 6px; }
-.payinst-sub { font-size: 12px; color: var(--muted); margin-bottom: 18px; line-height: 1.6; }
-.payinst-box textarea {
-  width: 100%; height: 140px; padding: 10px 12px;
-  border: 1.5px solid var(--border); border-radius: 8px;
-  font-family: 'Inter', sans-serif; font-size: 13px; color: var(--ink);
-  resize: vertical; outline: none; line-height: 1.6;
-  background: var(--bg);
-}
-.payinst-box textarea:focus { border-color: var(--green); }
-.payinst-actions { display: flex; gap: 8px; margin-top: 16px; }
-.payinst-actions .btn-cancel { flex: 1; }
-.payinst-actions .btn-save { flex: 2; background: var(--green); }
-.payinst-actions .btn-save:hover { background: #219a52; }
 
 /* PAYMENT HISTORY TIMELINE */
 .timeline-section { margin-top: 28px; }
@@ -816,7 +792,7 @@ main { flex: 1; padding: 52px 40px; max-width: 1120px; margin: 0 auto; width: 10
 .bill-remark-field { grid-column: 1 / -1; }
 
 /* Breathing room so fixed dialogs never touch the screen edge on phones */
-#paiddate-modal, #stmt-modal, #incstmt-modal, #payinst-modal, #genbills-modal, #addbill-modal { padding: 16px; }
+#paiddate-modal, #stmt-modal, #incstmt-modal, #genbills-modal, #addbill-modal { padding: 16px; }
 
 /* ── MOBILE-FIRST RESPONSIVE ── */
 @media (max-width: 768px) {
@@ -1049,12 +1025,6 @@ main { flex: 1; padding: 52px 40px; max-width: 1120px; margin: 0 auto; width: 10
   .exp-form-grid, .exp-form-grid.has-floor { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 }
 
-/* ── ANNOUNCEMENTS + BRANDING MODALS (same pattern as payinst) ── */
-#announce-modal, #branding-modal {
-  display: none; position: fixed; inset: 0; background: rgba(17,17,17,0.5);
-  backdrop-filter: blur(4px); z-index: 2000; align-items: center; justify-content: center;
-}
-#announce-modal.open, #branding-modal.open { display: flex !important; }
 
 /* Tenant bills footer: all-months total when the month filter hides debt */
 .bills-footer > div:first-child { display: flex; flex-direction: column; gap: 3px; }
