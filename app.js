@@ -2016,6 +2016,7 @@ function _noteJustPaid(tid, bi) {
   _justPaid.push({ tid, bi, label: b.label, due: b.due, amount: b.amount, period: b.period || '', paidDate: b.paidDate || '' });
 }
 function _justPaidEntry(tid, bi) {
+  if(!_justPaid.length) return null;
   const t = tenants.find(x => x.id === tid), b = t && t.bills[bi];
   return _justPaid.find(j => j.tid === tid && j.bi === bi && _jpSame(j, b) && b.status === 'paid' && (b.paidDate || '') === j.paidDate) || null;
 }
@@ -2966,7 +2967,7 @@ function billRowsForView(noFilters) {
       const isOpen = b.status !== 'paid' && open > 0.005;
       const awaiting = ds === 'awaiting';
       // Marked paid from this list a moment ago: stays, with Undo.
-      if(!former && billView !== 'paid' && _justPaidEntry(t.id, bi)) { rows.push({ tenant: t, bill: b, bi, ds, open, former }); return; }
+      if(!noFilters && !former && billView !== 'paid' && _justPaidEntry(t.id, bi)) { rows.push({ tenant: t, bill: b, bi, ds, open, former }); return; }
       if(billView === 'open' && !isOpen && !awaiting) return;
       if(billView === 'awaiting' && !awaiting) return;
       if(billView === 'overdue' && !(isOpen && ds === 'overdue')) return;
