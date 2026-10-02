@@ -2408,45 +2408,59 @@ function recurringStatusCard() {
 // ─────────────────────────────────────────────
 let tSearch = '', tFloor = '', tStatus = '';
 const T_STATUS = { '':'All tenants', owing:'Has a balance', overdue:'Overdue', awaiting:'Needs an amount', settled:'Settled', advance:'Paid ahead', behind:'Behind on cycles', issues:'Needs reconciling', nomovein:'No move-in date' };
+const T_TABS = [['', 'All'], ['owing', 'Owing'], ['overdue', 'Overdue'], ['advance', 'Paid ahead']];
 
 function renderTenantsModule() {
   if(_tenantDetailId) {
     const t = tenants.find(x => x.id === _tenantDetailId);
     if(t) return renderTenantDetail(t);
     const a = archivedTenants.find(x => x.id === _tenantDetailId);
-    return pageHead('Tenant not found', a ? esc(a.name) + ' is archived.' : 'This tenant may have been archived or deleted.')
-      + btn('Back to tenants', 'go(\'tenants\')', { icon: 'back' });
+    return pageHead('Tenant not found', a ? esc(a.name) + ' is archived.' : 'This tenant may have been archived or deleted.', '', { label: 'Tenants', onclick: 'go(\'tenants\')' });
   }
+  const floorsN = new Set(tenants.map(t => floorNorm(t.floor)).filter(Boolean)).size;
+  const owed = r2(tenants.reduce((s, t) => s + tenantBalance(t), 0));
+  const sub = tenants.length + ' active' + (floorsN ? ' across ' + floorsN + ' floor' + (floorsN !== 1 ? 's' : '') : '') + ' · ' + (owed ? peso(owed) + ' owed' : 'nothing owed');
+  const tabs = segTabs(T_TABS.map(([k, l]) => ({ label: l, count: _tenantStatusList(k).length, active: tStatus === k, onclick: 'tStatus=\'' + k + '\';rerenderAdmin()' })), 'on-bg tn-tabs', 'Show tenants');
+  const extra = tStatus && !T_TABS.some(x => x[0] === tStatus)
+    ? '<button type="button" class="oa-filter-chip" onclick="tStatus=\'\';rerenderAdmin()" aria-label="Clear filter: ' + esc(T_STATUS[tStatus]) + '">' + esc(T_STATUS[tStatus]) + icon('close') + '</button>' : '';
   const floors = floorList();
-  const statusSel = '<select id="t-status" class="tb-select" aria-label="Filter by status" onchange="tStatus=this.value;renderTenantList()">'
-    + Object.entries(T_STATUS).map(([k, l]) => '<option value="' + k + '"' + (tStatus === k ? ' selected' : '') + '>' + l + '</option>').join('') + '</select>';
-  const floorSel = floors.length ? '<select id="t-floor" class="tb-select" aria-label="Filter by floor" onchange="tFloor=this.value;renderTenantList()">'
-    + '<option value="">All floors</option>' + floors.map(f => '<option value="' + esc(f) + '"' + (tFloor === f ? ' selected' : '') + '>' + esc(f) + '</option>').join('')
-    + (tenants.some(t => !floorKey(t)) ? '<option value="__none__"' + (tFloor === '__none__' ? ' selected' : '') + '>No floor set</option>' : '') + '</select>' : '';
+  const floorLbl = !tFloor ? 'All floors' : tFloor === '__none__' ? 'No floor set' : tFloor;
+  const floorBtn = floors.length ? '<button type="button" class="oa-dd" onclick="openFloorFilterMenu(this)" aria-haspopup="menu" aria-label="Floor: ' + esc(floorLbl) + '"><span>' + esc(floorLbl) + '</span>' + icon('chevDown') + '</button>' : '';
   _postRender.push(renderTenantList);
-  return pageHead('Tenants', tenants.length + ' active', btn('Add tenant', 'openAddModal()', { primary: true, icon: 'plus' }))
-    + '<div class="toolbar">'
-    +   '<input type="search" id="tenant-search" class="tb-search" placeholder="Search name, unit, code…" value="' + esc(tSearch) + '" oninput="tSearch=this.value;renderTenantList()" aria-label="Search tenants">'
-    +   floorSel + statusSel
-    +   '<button type="button" class="tb-btn" onclick="openViewMenu(this)" aria-haspopup="menu">' + icon('sliders') + '<span>' + esc(SORT_LABELS[sortOrder] || 'Sort') + '</span></button>'
+  return pageHead('Tenants', sub, '<button type="button" class="oa-round-add" onclick="openAddModal()" aria-label="Add tenant">' + icon('plus') + '</button>')
+    + '<div class="oa-toolbar tn-toolbar">' + tabs + extra
+    +   '<label class="oa-search">' + icon('search') + '<input type="search" id="tenant-search" placeholder="Name, unit or access code" value="' + esc(tSearch) + '" oninput="tSearch=this.value;renderTenantList()" aria-label="Search tenants"></label>'
+    +   floorBtn
+    +   '<button type="button" class="oa-icon-btn lg" onclick="openViewMenu(this)" aria-haspopup="menu" aria-label="Sort, group and more filters" title="Sort, group and more filters">' + icon('sliders') + '</button>'
+    +   '<span class="oa-toolbar-gap"></span>' + btn('Add tenant', 'openAddModal()', { primary: true, icon: 'plus', cls: 'tn-add' })
     + '</div>'
-    + '<div id="tenant-list" class="t-list"></div>'
-    + '<details class="archived-section" ontoggle="if(this.open)loadArchivedTenants()"><summary>Archived tenants</summary><div id="archived-tenants-wrap" class="archived-wrap"></div></details>';
+    + '<section class="card oa-table-card tn-card" id="tenant-list"></section>'
+    + '<details class="archived-section" id="archived-section" ontoggle="if(this.open)loadArchivedTenants()"><summary>Archived tenants</summary><div id="archived-tenants-wrap" class="archived-wrap"></div></details>';
 }
 function openViewMenu(anchor) {
   const items = Object.entries(SORT_LABELS).map(([k, l]) => ({ label: (sortOrder === k ? '✓ ' : '') + l, fn: () => { sortOrder = k; rerenderAdmin(); } }));
   Object.entries(GROUP_LABELS).forEach(([k, l]) => items.push({ label: (groupMode === k ? '✓ ' : '') + 'Group: ' + l, fn: () => { groupMode = k; rerenderAdmin(); } }));
-  openMenu(anchor, items, 'Sort & group');
+  Object.entries(T_STATUS).filter(([k]) => k && !T_TABS.some(x => x[0] === k)).forEach(([k, l]) => items.push({ label: (tStatus === k ? '✓ ' : '') + 'Show: ' + l, fn: () => { tStatus = tStatus === k ? '' : k; rerenderAdmin(); } }));
+  openMenu(anchor, items, 'Sort, group & filter');
+}
+function openFloorFilterMenu(anchor) {
+  const opts = [['', 'All floors']].concat(floorList().map(f => [f, f]));
+  if(tenants.some(t => !floorKey(t))) opts.push(['__none__', 'No floor set']);
+  openMenu(anchor, opts.map(([k, l]) => ({ label: (tFloor === k ? '✓ ' : '') + l, fn: () => { tFloor = k; rerenderAdmin(); } })), 'Floor');
+}
+function openArchivedSection() {
+  const d = document.getElementById('archived-section');
+  if(!d) return;
+  d.open = true;
+  d.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
-function tenantsForList() {
-  let list = tenants.slice();
-  if(tFloor) { const want = floorNorm(tFloor === '__none__' ? '' : tFloor); list = list.filter(t => floorNorm(t.floor) === want); }
-  const q = tSearch.trim().toLowerCase();
-  if(q) list = list.filter(t => [t.name, t.unit, t.floor, t.code, t.phone, t.email].some(v => String(v || '').toLowerCase().includes(q)));
-  if(tStatus) list = list.filter(t => {
+// Tenants matching a status filter (before floor/search) — also the tab counts.
+function _tenantStatusList(st) {
+  if(!st) return tenants;
+  return tenants.filter(t => {
     const s = tenantSummary(t);
-    switch(tStatus) {
+    switch(st) {
       case 'owing':    return s.open > 0;
       case 'awaiting': return s.awaiting > 0;
       case 'overdue':  return s.overdue > 0;
@@ -2458,6 +2472,12 @@ function tenantsForList() {
     }
     return true;
   });
+}
+function tenantsForList() {
+  let list = _tenantStatusList(tStatus).slice();
+  if(tFloor) { const want = floorNorm(tFloor === '__none__' ? '' : tFloor); list = list.filter(t => floorNorm(t.floor) === want); }
+  const q = tSearch.trim().toLowerCase();
+  if(q) list = list.filter(t => [t.name, t.unit, t.floor, t.code, t.phone, t.email].some(v => String(v || '').toLowerCase().includes(q)));
   const urg = t => t.bills.filter(x => billOpen(x) > 0.005).reduce((m, x) => Math.min(m, getDueUrgencyScore(x)), 10000);
   return list.sort((a, b) => {
     let r = 0;
@@ -2472,26 +2492,80 @@ function tenantsForList() {
   });
 }
 
+// The main rent's most recent cycles (n), ending at the furthest cycle paid
+// ahead: paid | ahead | due | late | waived — for the cycle squares.
+function rentCycles(t, n) {
+  const c = tenantSummary(t).primary;
+  if(!c || c.variable || !c.cyclesStarted || !c.startYM) return [];
+  const tmpl = (t.templates || []).find(x => x.id === c.tmplId) || {};
+  const skip = new Set(Array.isArray(tmpl.skip) ? tmpl.skip : []);
+  const today = todayISO(), mi = moveInOf(t);
+  const end = Math.max(c.cyclesStarted, c.covered) - 1;
+  const out = [];
+  for(let k = Math.max(0, end - n + 1); k <= end; k++) {
+    const ym = addYM(c.startYM, k);
+    let st;
+    if(skip.has(ym) && !(k < c.covered && k >= c.cyclesStarted)) st = 'waived';
+    else if(k < c.covered) st = k < c.cyclesStarted ? 'paid' : 'ahead';
+    else st = diffDays((c.dues && c.dues[ym]) || templateDueDate(t, tmpl, ym), today) > graceDays ? 'late' : 'due';
+    const w = cycleWindow(mi, ym);
+    const word = { paid: 'paid', ahead: 'paid ahead', due: 'due', late: 'late', waived: 'waived' }[st];
+    out.push({ ym, st, title: fmtYM(ym, 'short') + ' cycle (' + shortDate(w.start) + ' – ' + shortDate(addDaysISO(w.end, -1)) + '): ' + word });
+  }
+  return out;
+}
+function cycleSquares(t, n, cls) {
+  const cy = rentCycles(t, n);
+  return cy.length ? '<span class="oa-cy' + (cls ? ' ' + cls : '') + '" role="img" aria-label="Last ' + cy.length + ' rent cycles: ' + cy.map(x => x.st).join(', ') + '">'
+    + cy.map(x => '<i class="q-' + x.st + '" title="' + esc(x.title) + '"></i>').join('') + '</span>' : '';
+}
+// Tenant status as a pill: Overdue · Due today · Due Oct 4 · Paid ahead · Settled.
+function tenantPill(t) {
+  const s = tenantSummary(t);
+  if(s.overdue > 0) return oaPill('late', 'Overdue');
+  if(s.open > 0) return oaPill('due', s.nextDue === todayISO() ? 'Due today' : s.nextDue ? 'Due ' + shortDate(s.nextDue) : 'Owing');
+  if(s.awaiting) return oaPill('due', 'Needs amount');
+  if(s.primary && s.primary.status === 'advance') return oaPill('ahead', 'Paid ahead');
+  return oaPill('neutral', 'Settled');
+}
+// Monthly rate of the main recurring charge (all-inclusive: the flat rate).
+function tenantRate(t) {
+  const p = primaryTemplate(t);
+  return p ? tmplRate(p) : (Number(t.flat_rate) || 0);
+}
+
 function tenantRowHtml(t) {
   const s = tenantSummary(t);
-  const model = t.billing_model === 'inclusive' ? 'All-inclusive' : '';
-  const sub = ['Unit ' + esc(t.unit), floorKey(t) ? esc(t.floor) : '', model].filter(Boolean).join(' · ');
-  return '<div class="t-row" role="link" tabindex="0" data-tid="' + esc(t.id) + '" onclick="openTenant(this.dataset.tid)" onkeydown="if(event.key===\'Enter\'&&event.target===this)openTenant(this.dataset.tid)">'
-    + '<div class="t-main"><div class="t-name">' + esc(t.name) + '</div><div class="t-sub">' + sub + '</div></div>'
-    + '<div class="t-status">' + tenantStatusChip(s) + tenantCycleNote(s) + (s.issues ? chip('warn', s.issues + ' to reconcile') : '') + '</div>'
-    + '<div class="t-bal">' + (s.open ? peso(s.open) : '<span class="muted">&mdash;</span>') + '</div>'
-    + '<div class="t-actions">'
-    +   '<button type="button" class="btn-mini" onclick="event.stopPropagation();openPayModal(this.closest(\'[data-tid]\').dataset.tid)">' + icon('cash') + '<span>Receive</span></button>'
-    +   '<button type="button" class="btn-icon" aria-label="More actions for ' + esc(t.name) + '" aria-haspopup="menu" onclick="event.stopPropagation();openTenantMenu(this,this.closest(\'[data-tid]\').dataset.tid)">' + icon('kebab') + '</button>'
-    + '</div></div>';
+  const rate = tenantRate(t);
+  const p = s.primary;
+  const thru = p && !p.variable ? (p.paidThrough ? shortDateY(p.paidThrough) : 'Not yet') : '';
+  const phoneSub = 'Unit ' + esc(t.unit) + (thru && thru !== 'Not yet' ? ' · Paid to ' + thru : '');
+  return '<div class="oa-tr tn-row" role="link" tabindex="0" data-tid="' + esc(t.id) + '" onclick="openTenant(this.dataset.tid)" onkeydown="if(event.key===\'Enter\'&&event.target===this)openTenant(this.dataset.tid)">'
+    + '<div class="oa-who">' + avatar(t.name, 40) + '<div class="oa-who-text"><span class="oa-name">' + esc(t.name) + '</span>'
+    +   '<span class="oa-sub dt-only">' + (t.phone ? esc(t.phone) : t.email ? esc(t.email) : '&nbsp;') + '</span><span class="oa-sub ph-only">' + phoneSub + '</span></div></div>'
+    + '<div class="tn-two"><strong>Unit ' + esc(t.unit) + '</strong><span>' + (floorKey(t) ? esc(t.floor) : '&mdash;') + '</span></div>'
+    + '<div class="tn-two tn-billing"><strong>' + (rate ? peso(rate) + ' / month' : '&mdash;') + '</strong><span>' + (t.billing_model === 'inclusive' ? 'All-inclusive' : 'Itemized') + '</span></div>'
+    + '<div class="tn-thru">' + (thru ? '<span>' + thru + '</span>' + cycleSquares(t, 6) : '<span class="oa-muted-sm">' + (moveInOf(t) ? 'No recurring rent' : 'No move-in date') + '</span>') + '</div>'
+    + '<div class="tn-status">' + tenantPill(t) + (s.issues ? '<span class="tn-issue">' + s.issues + ' to reconcile</span>' : '') + '</div>'
+    + '<div class="oa-cell-amt tn-bal' + (s.overdue > 0 ? ' bad' : '') + (s.open ? '' : ' zero') + '">' + (s.open ? peso(s.open) : '&mdash;') + '</div>'
+    + '<span class="tn-chev" aria-hidden="true">' + icon('next') + '</span>'
+    + '</div>';
 }
 
 function renderTenantList() {
   const c = document.getElementById('tenant-list');
   if(!c) return;
-  if(!tenants.length) { c.innerHTML = '<div class="empty-state"><div class="icon">&#127962;</div><p>No tenants yet. Add your first tenant to get started.</p></div>'; return; }
+  if(!tenants.length) { c.innerHTML = '<div class="empty-state"><div class="icon">&#127962;</div><p>No tenants yet. Add your first tenant to get started.</p>' + btn('Add tenant', 'openAddModal()', { primary: true, icon: 'plus' }) + '</div>'; return; }
   const list = tenantsForList();
-  if(!list.length) { c.innerHTML = '<div class="empty-state"><p>No tenants match. <button type="button" class="link-btn" onclick="tSearch=\'\';tFloor=\'\';tStatus=\'\';rerenderAdmin()">Clear filters</button></p></div>'; return; }
+  const head = '<div class="oa-thead tn-row" role="row"><span>Tenant</span><span>Unit</span><span class="tn-billing">Billing</span><span>Paid through · last 6 cycles</span><span>Status</span><span class="r">Balance</span><span></span></div>';
+  const legend = '<span class="oa-cy-legend"><span><i class="q-paid"></i>Paid</span><span><i class="q-ahead"></i>Ahead</span><span><i class="q-due"></i>Due</span><span><i class="q-late"></i>Late</span></span>';
+  const arch = archivedTenants.length;
+  const foot = '<div class="oa-card-foot"><span class="tn-foot-left"><span>Showing ' + list.length + ' of ' + tenants.length + '</span>' + legend + '</span>'
+    + (arch ? '<button type="button" class="link-btn" onclick="openArchivedSection()">Archived tenants (' + arch + ')</button>' : '<button type="button" class="link-btn" onclick="openArchivedSection()">Archived tenants</button>') + '</div>';
+  if(!list.length) {
+    c.innerHTML = '<div class="oa-empty tn-empty">No tenants match. Try another filter or search. <button type="button" class="link-btn" onclick="tSearch=\'\';tFloor=\'\';tStatus=\'\';rerenderAdmin()">Clear filters</button></div>' + foot;
+    return;
+  }
   // Grouping: floor headers (auto when floor labels exist and the list is
   // unit/floor-sorted), or one header per unit for shared per-head units.
   let keyOf = null, labelOf = null, rankOf = null;
@@ -2501,20 +2575,24 @@ function renderTenantList() {
   } else if(groupMode === 'unit') {
     keyOf = t => (t.unit || '').trim(); labelOf = k => k ? 'Unit ' + esc(k) : 'No unit'; rankOf = unitRank;
   }
-  if(!keyOf) { c.innerHTML = list.map(tenantRowHtml).join(''); return; }
-  const keys = [], map = {};
-  list.forEach(t => { const k = keyOf(t); if(!(k in map)) { map[k] = []; keys.push(k); } map[k].push(t); });
-  keys.sort((a, b) => { if(!a) return 1; if(!b) return -1; const r = rankOf(a) - rankOf(b); return (sortOrder === 'unit-desc' ? -r : r) || a.localeCompare(b); });
-  c.innerHTML = keys.map(k => {
-    const g = map[k];
-    const out = g.reduce((s, t) => s + tenantBalance(t), 0);
-    const aw = g.reduce((s, t) => s + tenantSummary(t).awaiting, 0);
-    const allInc = groupMode === 'unit' && g.every(t => t.billing_model === 'inclusive');
-    return '<div class="group-head"><span class="group-name">' + labelOf(k) + '</span><span class="group-meta">' + g.length + ' tenant' + (g.length !== 1 ? 's' : '')
-      + (allInc ? ' · all-inclusive' : '') + ' · ' + (out ? peso(out) + ' outstanding' : aw ? '' : 'settled')
-      + (aw ? (out ? ' · ' : '') + aw + ' bill' + (aw !== 1 ? 's need' : ' needs') + ' an amount' : '') + '</span></div>'
-      + g.map(tenantRowHtml).join('');
-  }).join('');
+  let body;
+  if(!keyOf) body = list.map(tenantRowHtml).join('');
+  else {
+    const keys = [], map = {};
+    list.forEach(t => { const k = keyOf(t); if(!(k in map)) { map[k] = []; keys.push(k); } map[k].push(t); });
+    keys.sort((a, b) => { if(!a) return 1; if(!b) return -1; const r = rankOf(a) - rankOf(b); return (sortOrder === 'unit-desc' ? -r : r) || a.localeCompare(b); });
+    body = keys.map(k => {
+      const g = map[k];
+      const out = g.reduce((s, t) => s + tenantBalance(t), 0);
+      const aw = g.reduce((s, t) => s + tenantSummary(t).awaiting, 0);
+      const allInc = groupMode === 'unit' && g.every(t => t.billing_model === 'inclusive');
+      return '<div class="oa-group"><span class="oa-group-name">' + labelOf(k) + '</span><span class="oa-group-meta">' + g.length + ' tenant' + (g.length !== 1 ? 's' : '')
+        + (allInc ? ' · all-inclusive' : '') + ' · ' + (out ? peso(out) + ' owed' : aw ? '' : 'nothing owed')
+        + (aw ? (out ? ' · ' : '') + aw + ' bill' + (aw !== 1 ? 's need' : ' needs') + ' an amount' : '') + '</span></div>'
+        + g.map(tenantRowHtml).join('');
+    }).join('');
+  }
+  c.innerHTML = '<div class="oa-table">' + head + body + '</div>' + foot;
 }
 
 function openTenantMenu(anchor, tid) {
