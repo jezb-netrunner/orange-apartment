@@ -3582,7 +3582,7 @@ function _floorOptions(current) {
   const floors = allFloors();
   const cur = current ? (appFloorCanon()(current) || current) : '';
   if(cur && !floors.includes(cur)) floors.push(cur);
-  return '<option value=""' + (!cur ? ' selected' : '') + '>Whole building (shared)</option>'
+  return '<option value=""' + (!cur ? ' selected' : '') + '>Building-wide</option>'
     + floors.map(f => '<option value="' + esc(f) + '"' + (f === cur ? ' selected' : '') + '>' + esc(f) + '</option>').join('')
     + '<option value="__add__">+ Add a floor…</option>';
 }
@@ -3608,23 +3608,21 @@ async function addFloorPrompt() {
 function _expFormHtml(idSuffix, x) {
   const today = todayISO();
   const floorField = expensesFloorAvailable !== false
-    ? `<div class="field"><label for="exp-floor-${idSuffix}">Floor</label><select id="exp-floor-${idSuffix}" data-last="${esc(x ? (appFloorCanon()(x.floor || '') || x.floor || '') : '')}" onchange="expFloorPicked(this)">${_floorOptions(x ? x.floor || '' : '')}</select></div>`
+    ? `<div class="field ex-f-floor"><label for="exp-floor-${idSuffix}">Floor</label><select id="exp-floor-${idSuffix}" data-last="${esc(x ? (appFloorCanon()(x.floor || '') || x.floor || '') : '')}" onchange="expFloorPicked(this)">${_floorOptions(x ? x.floor || '' : '')}</select></div>`
     : '';
-  return `<div class="exp-form">
-    <div class="exp-form-grid${floorField?' has-floor':''}">
-      <div class="field"><label for="exp-date-${idSuffix}">Date</label><input type="date" id="exp-date-${idSuffix}" value="${esc(x?x.expense_date:today)}"></div>
-      <div class="field"><label for="exp-cat-${idSuffix}">Category</label>
-        <select id="exp-cat-${idSuffix}">${EXPENSE_CATEGORIES.map(c=>`<option value="${c.key}"${x&&x.category===c.key?' selected':''}>${c.label}</option>`).join('')}</select>
+  return `<div class="ex-form${floorField ? ' has-floor' : ''}">
+      <div class="field ex-f-date"><label for="exp-date-${idSuffix}">Date</label><input type="date" id="exp-date-${idSuffix}" value="${esc(x ? x.expense_date : today)}"></div>
+      <div class="field ex-f-cat"><label for="exp-cat-${idSuffix}">Category</label>
+        <select id="exp-cat-${idSuffix}">${EXPENSE_CATEGORIES.map(c => `<option value="${c.key}"${x && x.category === c.key ? ' selected' : ''}>${c.label}</option>`).join('')}</select>
       </div>
-      <div class="field"><label for="exp-amount-${idSuffix}">Amount (&#8369;)</label><input type="text" id="exp-amount-${idSuffix}" inputmode="decimal" autocomplete="off" placeholder="0" value="${x?x.amount:''}"></div>
+      <div class="field ex-f-amt"><label for="exp-amount-${idSuffix}">Amount</label><div class="ex-peso"><span aria-hidden="true">&#8369;</span><input type="text" id="exp-amount-${idSuffix}" inputmode="decimal" autocomplete="off" placeholder="0" value="${x ? x.amount : ''}"></div></div>
       ${floorField}
-      <div class="field exp-note-field"><label for="exp-note-${idSuffix}">Note <span class="opt">(optional)</span></label><input type="text" id="exp-note-${idSuffix}" maxlength="200" placeholder="e.g. BENECO bill for July" value="${esc(x?x.note||'':'')}"></div>
-    </div>
-    <div class="exp-form-actions">
-      ${x?`<button type="button" class="btn-cancel" onclick="cancelExpenseEdit()">Cancel</button><button type="button" class="btn-save" data-id="${esc(x.id)}" onclick="saveExpenseEdit(this.dataset.id)">Save</button>`
-         :`<button type="button" class="btn-save" onclick="addExpense()">+ Add expense</button>`}
-    </div>
-  </div>`;
+      <div class="field ex-f-note"><label for="exp-note-${idSuffix}">Note</label><input type="text" id="exp-note-${idSuffix}" maxlength="200" placeholder="What was it for?" value="${esc(x ? x.note || '' : '')}"></div>
+      <div class="ex-f-actions">
+      ${x ? `<button type="button" class="btn-sec" onclick="cancelExpenseEdit()">Cancel</button><button type="button" class="btn-pri" data-id="${esc(x.id)}" onclick="saveExpenseEdit(this.dataset.id)">Save</button>`
+         : `<button type="button" class="btn-pri" onclick="addExpense()">${icon('plus')}<span>Add</span></button>`}
+      </div>
+    </div>`;
 }
 
 function renderExpensesModule() {
@@ -3634,55 +3632,67 @@ function renderExpensesModule() {
       Run <strong>supabase-migration-2.sql</strong> in the Supabase SQL Editor (Dashboard &gt; SQL Editor), then refresh this page.
     </div></div>`;
   }
-  const ym = _expYM();
+  const ym = _expYM(), isCur = ym === _currentYM();
   const monthLabel = fmtYM(ym);
   const monthTotal = _expensesInMonth(ym);
-  // All cash received (utility payments too — their costs are in the spend) minus spent.
-  const collected = r2(cashInMonth(allTenants(), ym) + cashInMonth(allTenants(), ym, true));
-  const net = r2(collected - monthTotal);
+  const prevYM = addYM(ym, -1), prevTotal = _expensesInMonth(prevYM);
   const monthExpenses = expenses
-    .filter(x=>(x.expense_date||'').startsWith(ym))
-    .slice().sort((a,b)=>(b.expense_date||'').localeCompare(a.expense_date||''));
+    .filter(x => (x.expense_date || '').startsWith(ym))
+    .slice().sort((a, b) => (b.expense_date || '').localeCompare(a.expense_date || ''));
+  const catKey = x => EXPENSE_CATEGORIES.some(c => c.key === x.category) ? x.category : 'other';
   const byCat = {};
-  monthExpenses.forEach(x=>{ const k = EXPENSE_CATEGORIES.some(c=>c.key===x.category) ? x.category : 'other'; byCat[k] = r2((byCat[k]||0) + (Number(x.amount)||0)); });
+  monthExpenses.forEach(x => { const k = catKey(x); byCat[k] = r2((byCat[k] || 0) + (Number(x.amount) || 0)); });
   const catMax = Math.max(1, ...Object.values(byCat));
-  const catHtml = Object.keys(byCat).length
-    ? '<div class="exp-cats">' + EXPENSE_CATEGORIES.filter(c=>byCat[c.key]).map(c =>
-        `<div class="exp-cat-row"><span class="exp-cat exp-cat-${c.key}">${c.label}</span><span class="exp-cat-bar"><span style="width:${(byCat[c.key]/catMax*100).toFixed(1)}%"></span></span><span class="exp-cat-amt">${peso(byCat[c.key])}</span></div>`).join('') + '</div>'
-    : '';
   const loadErrNote = _expensesLoadError
-    ? `<div class="exp-setup-note" style="margin-bottom:12px;">Expenses could not be loaded just now — the list below may be incomplete. Refresh the page to retry.</div>`
-    : '';
+    ? `<div class="exp-setup-note ex-note-err">Expenses could not be loaded just now — the list below may be incomplete. Refresh the page to retry.</div>` : '';
   const floorNote = expensesFloorAvailable === false
     ? `<div class="hint-note">${icon('alert')} To tag expenses by floor, run <strong>supabase-migration-3.sql</strong> in the Supabase SQL Editor and refresh.</div>` : '';
-  const rows = monthExpenses.length ? monthExpenses.map(x =>
-    _editingExpenseId===x.id
-      ? `<div class="exp-edit-wrap">${_expFormHtml('edit', x)}</div>`
-      : `<div class="exp-row" data-id="${esc(x.id)}">
-          <span class="exp-date">${shortDate(x.expense_date)}</span>
-          <span class="exp-cat exp-cat-${esc(x.category||'other')}">${esc(_expCatLabel(x.category))}</span>
-          <span class="exp-note">${(x.floor||'').trim()?'<span class="exp-floor">'+esc(x.floor)+'</span> ':(expensesFloorAvailable?'<span class="exp-floor muted">Whole building</span> ':'')}${esc(x.note||'')}</span>
-          <span class="exp-amt">${peso(x.amount)}</span>
-          <span class="exp-actions">
-            <button type="button" class="btn-icon" onclick="editExpense(this.closest('[data-id]').dataset.id)" aria-label="Edit expense">${icon('edit')}</button>
-            <button type="button" class="btn-icon del" onclick="deleteExpense(this.closest('[data-id]').dataset.id)" aria-label="Delete expense">${icon('trash')}</button>
-          </span>
-        </div>`).join('')
-    : `<div class="exp-empty">No expenses recorded for ${esc(monthLabel)}.</div>`;
-  return pageHead('Expenses', 'What the building spends', btn('Export CSV', 'exportExpensesCSV()', { icon: 'download' }))
+  const showFloor = expensesFloorAvailable !== false;
+  const rows = monthExpenses.map(x =>
+    _editingExpenseId === x.id
+      ? `<div class="ex-edit-row">${_expFormHtml('edit', x)}</div>`
+      : `<div class="oa-tr ex-row${showFloor ? '' : ' no-floor'}" data-id="${esc(x.id)}">
+          <span class="oa-cell-due">${shortDate(x.expense_date)}</span>
+          <span><span class="oa-cat c-${esc(catKey(x))}">${esc(_expCatLabel(x.category))}</span></span>
+          <span class="ex-note">${esc(x.note || '') || '<span class="oa-muted-sm">&mdash;</span>'}</span>
+          ${showFloor ? `<span class="oa-cell-bill ex-floor">${(x.floor || '').trim() ? esc(x.floor) : 'Building-wide'}</span>` : ''}
+          <span class="oa-cell-amt">${peso(x.amount)}</span>
+          <button type="button" class="oa-icon-btn ghost sm" aria-label="Actions for this expense" aria-haspopup="menu" onclick="openExpenseMenu(this,this.closest('[data-id]').dataset.id)">${icon('kebab')}</button>
+        </div>`).join('');
+  const table = `<section class="card oa-table-card ex-month">
+      <div class="oa-card-head ex-month-head"><div class="ex-month-nav">
+        <button type="button" class="oa-icon-btn" onclick="shiftExpenseMonth(-1)" aria-label="Previous month">${icon('back')}</button>
+        <h2 class="card-title">${esc(monthLabel)}</h2>
+        <button type="button" class="oa-icon-btn" onclick="shiftExpenseMonth(1)" aria-label="Next month">${icon('next')}</button>
+        <label class="ex-jump" title="Jump to a month">${icon('calendar')}<input type="month" id="exp-month-filter" value="${ym}" onchange="setExpenseMonth(this.value)" aria-label="Jump to a month"></label>
+      </div><button type="button" class="link-btn oa-more" onclick="exportExpensesCSV()">${icon('download')}Expenses CSV</button></div>
+      ${monthExpenses.length
+        ? `<div class="oa-table"><div class="oa-thead ex-row${showFloor ? '' : ' no-floor'}" role="row"><span>Date</span><span>Category</span><span>Note</span>${showFloor ? '<span>Floor</span>' : ''}<span class="r">Amount</span><span></span></div>${rows}</div>`
+        : `<div class="oa-empty">No expenses recorded for ${esc(monthLabel)}.</div>`}
+      <div class="oa-card-foot"><span>${monthExpenses.length} expense${monthExpenses.length !== 1 ? 's' : ''}</span><strong class="ex-total">Total ${peso(monthTotal)}</strong></div>
+    </section>`;
+  const cats = Object.keys(byCat).sort((a, b) => byCat[b] - byCat[a]);
+  const catCard = `<section class="card ex-cats"><div class="td-card-head"><h2 class="card-title">By category</h2><span class="oa-muted-sm">${_monthName(ym)}</span></div>
+      ${cats.length ? cats.map(k => `<div class="ex-cat"><div class="ex-cat-top"><span>${esc(_expCatLabel(k))}</span><strong>${peso(byCat[k])}</strong></div><span class="ex-bar"><i class="c-${k}" style="width:${(byCat[k] / catMax * 100).toFixed(1)}%"></i></span></div>`).join('')
+        : '<p class="card-text muted">Nothing spent this month yet.</p>'}
+    </section>`;
+  const diff = r2(monthTotal - prevTotal);
+  const tagged = showFloor ? r2(monthExpenses.filter(x => (x.floor || '').trim()).reduce((s, x) => s + (Number(x.amount) || 0), 0)) : 0;
+  const cmpCard = `<section class="card ex-compare">
+      <div class="ex-cmp"><span class="oa-muted-sm">${_monthName(prevYM)} total</span><strong>${peso(prevTotal)}</strong>
+        <span class="ex-diff${diff > 0.005 ? ' up' : diff < -0.005 ? ' down' : ''}">${Math.abs(diff) < 0.005 ? 'Same as ' + _monthName(prevYM) : _monthName(ym) + (isCur ? ' so far is ' : ' was ') + peso(Math.abs(diff)) + (diff > 0 ? ' higher' : ' lower')}</span></div>
+      ${showFloor ? `<div class="ex-cmp"><span class="oa-muted-sm">Tagged to a floor</span><strong>${peso(tagged)}</strong><span class="oa-muted-sm">${peso(r2(monthTotal - tagged))} building-wide</span></div>` : ''}
+    </section>`;
+  return pageHead('Expenses', esc(monthLabel) + ' · ' + peso(monthTotal) + (isCur ? ' so far' : ' spent'))
     + loadErrNote + floorNote
-    + `<div class="month-nav">
-        <button type="button" class="btn-icon" onclick="shiftExpenseMonth(-1)" aria-label="Previous month">${icon('back')}</button>
-        <input type="month" id="exp-month-filter" value="${ym}" onchange="setExpenseMonth(this.value)" aria-label="Month">
-        <button type="button" class="btn-icon" onclick="shiftExpenseMonth(1)" aria-label="Next month">${icon('next')}</button>
-      </div>`
-    + `<div class="kpis kpis-3">
-        <div class="kpi"><div class="kpi-label">Spent · ${esc(fmtYM(ym,'short'))}</div><div class="kpi-value">${peso(monthTotal)}</div><div class="kpi-sub">${monthExpenses.length} expense${monthExpenses.length!==1?'s':''}</div></div>
-        <div class="kpi"><div class="kpi-label">Collected</div><div class="kpi-value good">${peso(collected)}</div><div class="kpi-sub">payments received, incl. utilities</div></div>
-        <div class="kpi"><div class="kpi-label">Net cash</div><div class="kpi-value ${net<0?'bad':''}">${net<0?'&minus;':''}${peso(Math.abs(net))}</div><div class="kpi-sub">all payments received (incl. utilities) &minus; spent</div></div>
-      </div>`
-    + (_editingExpenseId ? '' : `<section class="card"><div class="card-head"><h2 class="card-title">Log an expense</h2></div>${_expFormHtml('new', null)}</section>`)
-    + `<section class="card"><div class="card-head"><h2 class="card-title">${esc(monthLabel)}</h2></div>${catHtml}<div class="exp-list">${rows}</div></section>`;
+    + (_editingExpenseId ? '' : `<section class="card ex-log"><h2 class="card-title">Log an expense</h2>${_expFormHtml('new', null)}</section>`)
+    + `<div class="ex-grid">${table}<div class="td-col">${catCard}${cmpCard}</div></div>`;
+}
+function openExpenseMenu(anchor, id) {
+  openMenu(anchor, [
+    { label: 'Edit', icon: 'edit', fn: () => editExpense(id) },
+    { label: 'Delete', icon: 'trash', danger: true, fn: () => deleteExpense(id) }
+  ], 'Expense');
 }
 
 let _expenseSaving = false;
@@ -4202,7 +4212,7 @@ function snapFloor(s) {
 function _fillFloorSelect(cur) {
   const sel = document.getElementById('m-floor');
   if(!sel) return;
-  sel.innerHTML = _floorOptions(cur).replace('Whole building (shared)', 'No floor');
+  sel.innerHTML = _floorOptions(cur).replace('>Building-wide<', '>No floor<');
   sel.dataset.last = sel.value;
 }
 async function tenantFloorPicked(sel) {
