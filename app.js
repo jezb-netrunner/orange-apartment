@@ -1940,13 +1940,23 @@ function rerenderAdmin() {
   const main = document.getElementById('main-content');
   const inMain = a && main && main.contains(a);
   const focusId = inMain && a.id ? a.id : '';
-  // Id-less controls (tabs, range toggles) are matched by their onclick.
+  // Id-less controls (tabs, range toggles) are matched by their onclick —
+  // inside the same row for per-row buttons, else only when unique.
   const focusKey = inMain && !focusId ? a.getAttribute('onclick') || '' : '';
+  const byKey = () => [...main.querySelectorAll('[onclick]')].filter(e => e.getAttribute('onclick') === focusKey);
+  const row = focusKey ? a.closest('[data-tid]') : null;
+  const rowSel = row ? '[data-tid="' + CSS.escape(row.dataset.tid) + '"]' + (row.dataset.bi != null ? '[data-bi="' + CSS.escape(row.dataset.bi) + '"]' : '') : '';
+  const unique = focusKey && !row && byKey().length === 1;
   renderAdmin();
   requestAnimationFrame(() => {
     window.scrollTo(0, y);
-    const el = (focusId && document.getElementById(focusId))
-      || (focusKey && main && [...main.querySelectorAll('[onclick]')].find(e => e.getAttribute('onclick') === focusKey));
+    let el = focusId && document.getElementById(focusId);
+    if(!el && rowSel && main) {
+      el = byKey().find(e => e.closest(rowSel));
+      // The control changed (Mark paid ↔ Undo): stay in the same row.
+      if(!el) { const r = main.querySelector(rowSel); el = r && (r.matches('button, a') ? r : r.querySelector('button')); }
+    }
+    if(!el && unique && main) { const m = byKey(); el = m.length === 1 ? m[0] : null; }
     if(el) { try { el.focus({ preventScroll: true }); } catch {} }
   });
 }
@@ -2057,7 +2067,14 @@ function _justPaidEntry(tid, bi) {
   return _justPaid.find(j => j.tid === tid && j.bi === bi && _jpSame(j, b) && b.status === 'paid' && (b.paidDate || '') === j.paidDate) || null;
 }
 // Undo a "Mark paid" from this session: exactly reverses confirmPaid().
+const _undoBusy = new Set();
 async function undoJustPaid(tid, bi) {
+  const key = tid + '|' + bi;
+  if(_undoBusy.has(key)) return; // a double click: the first one is saving
+  _undoBusy.add(key);
+  try { await _undoJustPaid(tid, bi); } finally { _undoBusy.delete(key); }
+}
+async function _undoJustPaid(tid, bi) {
   const j = _justPaidEntry(tid, bi);
   if(!j) { showToast('That bill changed since — open it to make changes.', false); rerenderAdmin(); return; }
   const ok = await saveBills(tid, bills => {
@@ -2261,7 +2278,7 @@ function _autoBillChip() {
   let tone = 'good', text;
   if(!autoBilling.enabled) { tone = 'neutral'; text = 'Auto-billing off · post recurring bills from Billing'; }
   else if(!last) text = 'Auto-billing on · checking recurring bills…';
-  else if(last.failed) { tone = 'warn'; text = 'Auto-billing: ' + last.failed + ' bill' + (last.failed !== 1 ? 's' : '') + ' could not be saved · open the checker'; }
+  else if(last.failed) { tone = 'warn'; text = 'Auto-billing: ' + last.failed + ' tenant' + (last.failed !== 1 ? 's' : '') + ' could not be updated · open the checker'; }
   else if(last.noRev) { tone = 'warn'; text = 'Auto-billing paused for ' + last.noRev + ' tenant' + (last.noRev !== 1 ? 's' : '') + ' · run migration 2 (Settings)'; }
   else text = 'Auto-billing on · ' + (last.posted.length ? last.posted.length + ' bill' + (last.posted.length !== 1 ? 's' : '') + ' posted ' + when(last.day) : 'nothing new to post ' + when(last.day));
   if(review && tone === 'good') { tone = 'warn'; text += ' · ' + review + ' to review'; }
@@ -2807,11 +2824,14 @@ async function toggleTemplateAuto(tid, i, on) {
 
 // Save computed bills/templates for one tenant with the optimistic-
 // concurrency guard. `compute(t)` returns {bills?, templates?} or null.
-async function saveTenantData(tid, compute, toastMsg) {
+// `planned` (optional, from _tenantSnap): the tenant as it was when a
+// precomputed result was built; if it changed meanwhile, nothing is saved.
+async function saveTenantData(tid, compute, toastMsg, planned) {
   await _autoBillIdle();
   return _withTenantLock(tid, async () => {
     const t = tenants.find(x => x.id === tid);
     if(!t) return false;
+    if(planned && !_snapSame(t, planned)) { _changedWhileSaving(); return false; }
     const res = compute(t);
     if(!res) return false;
     const patch = {};
@@ -2831,10 +2851,16 @@ async function saveTenantData(tid, compute, toastMsg) {
   });
 }
 
-// One write at a time per tenant: a second quick action (a double-clicked
-// Undo, a repeated inline edit) starts from the first one's saved rev and
-// bills instead of failing the rev guard.
+// One write at a time per tenant. A queued write re-checks that the bills it
+// was planned on (by index, or precomputed) are still the current ones —
+// the earlier write bumps the rev, so the server guard alone can't tell.
 const _tenantWriteQ = new Map();
+function _tenantSnap(t) { return { b: t && t.bills, m: t && t.templates }; }
+function _snapSame(t, snap) { return !!t && t.bills === snap.b && t.templates === snap.m; }
+function _changedWhileSaving() {
+  showToast('This tenant\'s bills changed while saving (another change finished first). Nothing was saved — please check and try again.', false);
+  rerenderAdmin();
+}
 function _withTenantLock(tid, fn) {
   const prev = _tenantWriteQ.get(tid) || Promise.resolve();
   const p = prev.catch(() => {}).then(fn);
@@ -2933,6 +2959,7 @@ async function unwaiveCycle(tid, tmplId, period) {
 async function reconApplyCredit(tid, tmplId) {
   const t = tenants.find(x => x.id === tid);
   if(!t) return;
+  const snap = _tenantSnap(t);
   const c = tenantSummary(t).recon.charges.find(x => x.tmplId === tmplId);
   // Credit is consumed forward, cycle by cycle — so cycles that were never
   // billed are posted first; otherwise the money would skip over them.
@@ -2944,7 +2971,7 @@ async function reconApplyCredit(tid, tmplId) {
   const lines = res.lines.map(l => '• ' + l.label + (l.period ? ' (' + fmtYM(l.period, 'short') + ')' : '') + ' — ₱' + l.apply.toLocaleString() + (l.kind === 'advance' ? ' advance' : '') + (l.settles ? ', settled' : '')).join('\n');
   const preNote = pre && pre.added.length ? 'First posts ' + pre.added.length + ' missing bill' + (pre.added.length !== 1 ? 's' : '') + ' (' + pre.added.map(b => fmtYM(b.period, 'short')).join(', ') + '), then applies:\n' : '';
   if(!confirm('Apply ₱' + res.movedTotal.toLocaleString() + ' of credit for ' + t.name + '?\n\n' + preNote + lines + '\n\nPayment dates stay the same, so cash reports don\'t change.')) return;
-  const ok = await saveTenantData(tid, () => ({ bills: res.bills, templates: res.templates }), 'Credit applied.');
+  const ok = await saveTenantData(tid, () => ({ bills: res.bills, templates: res.templates }), 'Credit applied.', snap);
   if(ok) rerenderAdmin();
 }
 
@@ -3459,7 +3486,7 @@ function renderPayPreview() {
   if(amt > 0 && date) {
     const note = document.getElementById('pay-note').value.trim();
     const plan = allocatePayment(t, [{ amount: amt, date, note }], { today: todayISO(), advance: document.getElementById('pay-advance').checked, uid, rid: _payRid });
-    _payPlan = { tid: t.id, rev: t.rev, plan, amt };
+    _payPlan = { tid: t.id, rev: t.rev, snap: _tenantSnap(t), plan, amt };
     const n = plan.lines.length;
     body = !n ? '' : '<div class="pay-box"><div class="pay-box-head"><span>How it will be applied</span><span>' + n + ' item' + (n !== 1 ? 's' : '') + '</span></div>'
       + plan.lines.map(l => '<div class="pay-line' + (l.kind === 'advance' ? ' adv' : l.settles ? '' : ' part') + '">'
@@ -3484,10 +3511,10 @@ async function confirmPayment() {
   await _autoBillIdle();
   const t = tenants.find(x => x.id === p.tid);
   // The plan was built on the row as shown; if anything changed since, rebuild.
-  if(!t || t.rev !== p.rev) { renderPayPreview(); showToast('Data changed — please review the allocation again.', false); return; }
+  if(!t || t.rev !== p.rev || !_snapSame(t, p.snap)) { renderPayPreview(); showToast('Data changed — please review the allocation again.', false); return; }
   if(!_futureDateOk(document.getElementById('pay-date').value)) return;
   btnEl.disabled = true; btnEl.textContent = 'Saving…';
-  const ok = await saveTenantData(p.tid, () => ({ bills: p.plan.bills, templates: p.plan.templates }), 'Payment of ₱' + p.amt.toLocaleString() + ' recorded for ' + t.name + '.');
+  const ok = await saveTenantData(p.tid, () => ({ bills: p.plan.bills, templates: p.plan.templates }), 'Payment of ₱' + p.amt.toLocaleString() + ' recorded for ' + t.name + '.', p.snap);
   btnEl.disabled = false;
   if(ok) { _payRid = uid(); closePayModal(); rerenderAdmin(); }
   else renderPayPreview();
@@ -3803,11 +3830,11 @@ function renderSettingsModule() {
     + (_setEdit === key ? editor : '<div class="st-text' + (val ? '' : ' empty') + '">' + (val ? esc(val) : empty) + '</div>')
     + '<div class="st-hint">' + hint + '</div></div>';
   const ta = (key, label, val, ph, save, cancel) => '<div class="st-editor" onkeydown="if(event.key===\'Escape\'){event.stopPropagation();' + cancel + '}"><textarea id="' + key + '-textarea" aria-label="' + esc(label) + '" rows="4" placeholder="' + esc(ph) + '">' + esc(draft(key, key + '-textarea', val) || '') + '</textarea>'
-    + '<div id="' + key + '-error" class="st-err" hidden></div>'
+    + '<div id="' + key + '-error" class="st-err" role="alert" hidden></div>'
     + '<div class="st-editor-actions"><button type="button" class="btn-sec" onclick="' + cancel + '">Cancel</button>' + saveBtn(key, save) + '</div></div>';
   const brandEditor = '<div class="st-editor" onkeydown="if(event.key===\'Escape\'){event.stopPropagation();closeBrandingModal()}else if(event.key===\'Enter\'&&event.target.tagName===\'INPUT\'){saveBranding()}"><div class="field"><label for="branding-name">Property name</label><input type="text" id="branding-name" maxlength="60" value="' + esc(draft('branding', 'branding-name', propertyName, 'name')) + '" placeholder="e.g. Orange Apartment"></div>'
     + '<div class="field"><label for="branding-sub">Tagline / location <span class="opt">(optional, on statements)</span></label><input type="text" id="branding-sub" maxlength="80" value="' + esc(draft('branding', 'branding-sub', propertySubtitle, 'sub')) + '" placeholder="e.g. Tenant Billing Portal · Baguio"></div>'
-    + '<div id="branding-error" class="st-err" hidden></div>'
+    + '<div id="branding-error" class="st-err" role="alert" hidden></div>'
     + '<div class="st-editor-actions"><button type="button" class="btn-sec" onclick="closeBrandingModal()">Cancel</button>' + saveBtn('branding', 'saveBranding()') + '</div></div>';
   const portal = '<section class="card st-card">' + head('home', 'blue', 'Tenant portal', 'What tenants see when they sign in')
     + pRow('payinst', 'Payment instructions', paymentInstructions, 'Not set — tenants won\'t see how to pay.', 'Shown on every tenant\'s “How to pay” screen.',
@@ -3926,7 +3953,13 @@ function _expensesInMonth(ym) {
 }
 // Dashboard "Log an expense": the log form, not an edit left open earlier.
 function logExpenseShortcut(){ _editingExpenseId = null; go('expenses'); }
-function setExpenseMonth(v){ expenseMonth = (v && v!==_currentYM()) ? v : ''; _editingExpenseId = null; rerenderAdmin(); }
+function setExpenseMonth(v){
+  v = String(v || '').trim();
+  const m = /^(\d{4})[-\/.](\d{1,2})$/.exec(v); // typed in a plain text box
+  if(m) v = m[1] + '-' + m[2].padStart(2, '0');
+  if(v && !(isYM(v) && +v.slice(5) >= 1 && +v.slice(5) <= 12)) { showToast('Enter a month as YYYY-MM, e.g. 2026-09.', false); rerenderAdmin(); return; }
+  expenseMonth = (v && v!==_currentYM()) ? v : ''; _editingExpenseId = null; rerenderAdmin();
+}
 function shiftExpenseMonth(n){ setExpenseMonth(addYM(_expYM(), n)); }
 
 // Options for a floor dropdown: the whole building, every known floor, and
@@ -4017,7 +4050,7 @@ function renderExpensesModule() {
         <button type="button" class="oa-icon-btn" onclick="shiftExpenseMonth(-1)" aria-label="Previous month">${icon('back')}</button>
         <h2 class="card-title">${esc(monthLabel)}</h2>
         <button type="button" class="oa-icon-btn" onclick="shiftExpenseMonth(1)" aria-label="Next month">${icon('next')}</button>
-        <label class="ex-jump${_hasMonthInput ? '' : ' is-text'}" title="Jump to a month">${icon('calendar')}<input type="month" id="exp-month-filter" value="${ym}" onclick="try{this.showPicker()}catch(e){}" onchange="setExpenseMonth(this.value)" aria-label="Jump to a month"${_hasMonthInput ? '' : ' placeholder="YYYY-MM"'}></label>
+        <label class="ex-jump${_hasMonthInput ? '' : ' is-text'}" title="Jump to a month">${icon('calendar')}<input type="month" id="exp-month-filter" value="${ym}" onclick="try{this.showPicker()}catch(e){}" onchange="setExpenseMonth(this.value)" aria-label="Jump to a month"${_hasMonthInput ? '' : ' placeholder="YYYY-MM" pattern="\\d{4}-\\d{2}" inputmode="numeric"'}></label>
       </div><button type="button" class="link-btn oa-more" onclick="exportExpensesCSV()">${icon('download')}Expenses CSV</button></div>
       ${monthExpenses.length
         ? `<div class="oa-table"><div class="oa-thead ex-row${showFloor ? '' : ' no-floor'}" role="row"><span>Date</span><span>Category</span><span>Note</span>${showFloor ? '<span>Floor</span>' : ''}<span class="r">Amount</span><span></span></div>${rows}</div>`
@@ -4250,11 +4283,14 @@ function _formStale(expectT) {
 }
 
 async function saveBills(tid, mutate, toastMsg, expectT) {
+  // `mutate` works by bill index on the bills the caller saw just now.
+  const t0 = tenants.find(t=>t.id===tid), planned = t0 && t0.bills;
   await _autoBillIdle(); // never build a write on a row a background run is changing
   return _withTenantLock(tid, async () => {
     if(expectT && _formStale(expectT)){ rerenderAdmin(); return 'conflict'; }
     const t = tenants.find(t=>t.id===tid);
     if(!t) return false;
+    if(planned && t.bills !== planned) { _changedWhileSaving(); return 'conflict'; }
     const billsCopy = structuredClone(t.bills);
     mutate(billsCopy);
     if(JSON.stringify(billsCopy) === JSON.stringify(t.bills)) return true; // nothing to write
@@ -4417,7 +4453,14 @@ function renderTableView(c, rows) {
   // rows still on screen, and only while each still is the same bill.
   const selectable = r => !r.former && r.bill.status !== 'paid' && getDueStatus(r.bill) !== 'awaiting';
   const live = new Map(capped.filter(selectable).map(r => [key(r), r.bill]));
-  billSelection.forEach((b, k) => { if(live.get(k) !== b) billSelection.delete(k); });
+  // A save replaces the tenant's bill objects: keep the selection when the
+  // bill at that key is still the same bill.
+  billSelection.forEach((b, k) => {
+    const nb = live.get(k);
+    if(nb === b) return;
+    if(nb && nb.label === b.label && nb.due === b.due && (nb.period || '') === (b.period || '') && (nb.tmplId || '') === (b.tmplId || '')) billSelection.set(k, nb);
+    else billSelection.delete(k);
+  });
   // Just-paid rows (paid rows outside the Paid / All views) are not part of
   // the count or the total.
   const jpRow = r => billView !== 'paid' && billView !== 'all' && r.bill.status === 'paid';
@@ -4456,7 +4499,7 @@ function renderTableView(c, rows) {
     const sub = '<span class="bl-kind">' + kind(b) + (rest ? ' · ' : '') + '</span>' + rest;
     const amt = aw ? '<button type="button" class="link-btn" onclick="const x=this.closest(\'[data-tid]\');openEditBillFromTable(x.dataset.tid,+x.dataset.bi)">Enter amount</button>'
       : r.former ? peso(billOpen(b))
-      : '<span class="td-amt-edit" data-tid="' + esc(t.id) + '" data-bi="' + r.bi + '" onclick="enterAmountEdit(this)" title="Click to edit the amount">' + peso(jpe ? jpe.open : _billShownAmt(b)) + '</span>';
+      : '<span class="td-amt-edit" data-tid="' + esc(t.id) + '" data-bi="' + r.bi + '" onclick="enterAmountEdit(this)" title="Click to edit the amount">' + peso(jpe && jpRow(r) ? jpe.open : _billShownAmt(b)) + '</span>';
     const pill = isPaid && !jp && b.paidDate ? oaPill('paid', 'Paid · ' + shortDate(b.paidDate)) : billPill(b, jp);
     return '<div class="oa-tr bl-row' + (billSelection.has(k) ? ' is-sel' : '') + (jp ? ' is-paid' : '') + '" role="row" data-tid="' + esc(t.id) + '" data-bi="' + r.bi + '">'
       + (selectable(r) ? check(billSelection.has(k), ' data-k="' + esc(k) + '" onchange="billSelectToggle(this.dataset.k,this.checked)"', 'Select ' + esc(b.label) + ' for ' + esc(t.name)) : '<span role="cell"></span>')
@@ -4619,6 +4662,7 @@ function enterAmountEdit(td){
   if(!t || !t.bills[bi]) return;
   const original = Number(t.bills[bi].amount);
   td._tenant = t;
+  td._bill = t.bills[bi];
   td.dataset.prev = td.innerHTML; // what the cell showed (a balance, or the amount)
   const got = billTotalPaid(t.bills[bi]);
   td.innerHTML = '<input type="text" inputmode="decimal" value="'+original+'" aria-label="Bill amount"'
@@ -4708,6 +4752,7 @@ async function commitAmountEdit(input){
     const live = tenants.find(x=>x.id===tid);
     if(!live || !live.bills[bi]){ restore(); return; }
     if(td._tenant && _formStale(td._tenant)){ rerenderAdmin(); return; }
+    if(td._bill && live.bills[bi] !== td._bill){ _changedWhileSaving(); return; }
     const billsCopy = structuredClone(live.bills);
     billsCopy[bi].amount = next;
     const sync = _resyncPaidStatus(billsCopy[bi], original);
@@ -5716,8 +5761,9 @@ async function copyText(text, what) {
 // method row with Copy, any other line stays as plain text.
 function _payMethods(text) {
   return String(text || '').split(/\n+/).map(l => l.trim()).filter(Boolean).map(l => {
-    // "Label: value" — but not a URL, nor a time like "9:00".
-    const m = /^[a-z][\w+.-]*:\/\//i.test(l) ? null : /^([^:]{0,39}[^\d\s:])\s*:\s*(.+)$/.exec(l);
+    // "Label: value" — but not a URL, nor a time like "9:00" (digit:digit).
+    const m0 = /^[a-z][\w+.-]*:\/\//i.test(l) ? null : /^([^:]{1,40}):(\s*)(.+)$/.exec(l);
+    const m = m0 && !(/\d$/.test(m0[1]) && !m0[2] && /^\d/.test(m0[3])) && m0[1].trim() ? [m0[0], m0[1], m0[3]] : null;
     const label = m ? m[1].trim() : '', value = m ? m[2].trim() : l;
     const k = label.toLowerCase();
     const kind = /gcash|maya|paymaya|e-?wallet/.test(k) ? 'wallet' : /bank|bdo|bpi|metrobank|landbank|pnb|unionbank|security|rcbc|chinabank|transfer/.test(k) ? 'bank' : /cash/.test(k) ? 'cash' : 'other';
@@ -6044,10 +6090,10 @@ async function checkPasswordRecovery() {
 
   // Show password reset form
   const loginWrap = document.querySelector('.login-wrap');
-  const pName = esc((propertyName || 'Orange Apartment').trim() || 'Orange Apartment');
+  const rawName = (propertyName || 'Orange Apartment').trim() || 'Orange Apartment', pName = esc(rawName);
   loginWrap.innerHTML = `
     <div class="login-brand">
-      <span class="login-logo" aria-hidden="true">${esc(pName.charAt(0).toUpperCase())}</span>
+      <span class="login-logo" aria-hidden="true">${esc(rawName.charAt(0).toUpperCase())}</span>
       <div class="login-wordmark">${pName}</div>
       <div class="login-kicker">Property admin</div>
     </div>
@@ -6093,7 +6139,7 @@ window.addEventListener('resize',()=>{
     _lastWidth = w;
     // Phone and desktop layouts differ at 768px (bill sort control, chart range).
     // Only the Dashboard (chart range) and the bills table (sort control) depend on it.
-    if(crossed && currentUser==='admin') { if(_adminModule === 'home') _safeRerender(); else if(document.getElementById('bill-rows')) renderBillRows(); }
+    if(crossed && currentUser==='admin') { if(_adminModule === 'home' || _isEditingMain()) _safeRerender(); else if(document.getElementById('bill-rows')) renderBillRows(); }
   }, 250);
 });
 
@@ -6804,6 +6850,8 @@ async function _saveSetEdit(key, draft, write, okMsg, what) {
       requestAnimationFrame(() => {
         const errEl = document.getElementById(key + '-error');
         if(errEl) { errEl.textContent = 'Save failed. Make sure the settings table exists in Supabase.'; errEl.hidden = false; }
+        const b2 = document.querySelector('.st-editor .btn-pri');
+        if(b2 && (!document.activeElement || document.activeElement === document.body)) b2.focus();
       });
     }
   }
