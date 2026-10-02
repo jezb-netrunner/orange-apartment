@@ -1982,6 +1982,8 @@ function _kShort(v) {
   const a = Math.abs(v);
   return a >= 1000 ? (a / 1000).toFixed(a >= 10000 ? 0 : 1).replace(/\.0$/, '') + 'K' : String(Math.round(a));
 }
+// "Oct 1, 2026"
+function medDate(d) { const iso = isoOrEmpty(d); return iso ? shortDate(iso) + ', ' + iso.slice(0, 4) : ''; }
 function _monthName(ym, style) { return /^\d{4}-\d{2}$/.test(ym || '') ? new Date(ym + '-02').toLocaleString('default', { month: style || 'long' }) : ''; }
 
 // Bills marked paid this session from a list (Dashboard, Billing) stay on
@@ -2071,19 +2073,6 @@ function shortDateY(d) {
   if(!iso) return '';
   return iso.slice(0, 4) === todayISO().slice(0, 4) ? shortDate(iso) : shortDate(iso) + ', ' + iso.slice(0, 4);
 }
-function tenantStatusChip(s) {
-  if(s.overdue > 0) return chip('bad', peso(s.overdue) + ' overdue');
-  if(s.open > 0) return chip('warn', peso(s.open) + ' due' + (s.nextDue ? ' ' + shortDate(s.nextDue) : ''));
-  if(s.awaiting) return chip('warn', s.awaiting + ' need' + (s.awaiting === 1 ? 's' : '') + ' an amount');
-  return chip('good', 'Settled');
-}
-function tenantCycleNote(s) {
-  const p = s.primary;
-  if(!p || p.variable) return '';
-  if(!p.paidThrough) return '<span class="cycle-note">No cycle paid yet</span>';
-  return '<span class="cycle-note' + (p.status === 'behind' ? ' bad' : p.aheadCycles > 0 ? ' good' : '') + '">Paid thru ' + shortDateY(p.paidThrough)
-    + (p.aheadCycles > 0 ? ' · ' + p.aheadCycles + ' ahead' : '') + '</span>';
-}
 
 // Recurring charges whose CURRENT cycle should be billed by now but isn't
 // (due date passed, or within the posting lead) — for tenants without a
@@ -2105,41 +2094,6 @@ async function postCurrentCycle(tid, tmplId, period) {
   if(ok) rerenderAdmin();
 }
 
-// Bills needing attention: overdue first (oldest first), then due today/soon.
-function attentionItems() {
-  const items = [];
-  tenants.forEach(t => t.bills.forEach((b, bi) => {
-    const ds = getDueStatus(b);
-    // A placeholder waiting for its reading needs the admin once its
-    // posting window has opened (it was posted), whatever its date.
-    if(ds === 'awaiting') { items.push({ t, b, bi, ds }); return; }
-    if(billOpen(b) <= 0.005) return;
-    if(ds === 'overdue' || ds === 'grace' || ds === 'due-today' || ds === 'due-soon') items.push({ t, b, bi, ds });
-  }));
-  const rank = x => x.ds === 'overdue' ? 0 : x.ds === 'awaiting' ? 2 : 1; // placeholders are never late
-  items.sort((a, b) => rank(a) - rank(b) || (a.b.due || '').localeCompare(b.b.due || ''));
-  return items;
-}
-function attentionRowHtml(it) {
-  if(it.ds === 'awaiting') {
-    return '<div class="att-row" data-tid="' + esc(it.t.id) + '" data-bi="' + it.bi + '">'
-      + '<div class="att-main"><div class="att-title">' + esc(it.b.label) + ' ' + chip('warn', 'Needs amount') + '</div>'
-      + '<div class="att-sub"><a href="#/tenants/' + encodeURIComponent(it.t.id) + '">' + esc(it.t.name) + '</a> · Unit ' + esc(it.t.unit) + (it.b.due ? ' · due ' + shortDate(it.b.due) : '') + '</div></div>'
-      + '<div class="att-amt muted">TBD</div>'
-      + '<div class="att-actions"><button type="button" class="btn-mini" onclick="const r=this.closest(\'[data-tid]\');openEditBillFromTable(r.dataset.tid,+r.dataset.bi)">' + icon('edit') + 'Enter amount</button></div></div>';
-  }
-  const late = daysOverdue(it.b);
-  const tone = it.ds === 'overdue' ? 'bad' : 'warn';
-  const lbl = it.ds === 'overdue' ? (late + 'd late') : it.ds === 'due-today' ? 'Due today' : it.ds === 'grace' ? 'Grace period' : 'Due ' + shortDate(it.b.due);
-  return '<div class="att-row" data-tid="' + esc(it.t.id) + '" data-bi="' + it.bi + '">'
-    + '<div class="att-main"><div class="att-title">' + esc(it.b.label) + ' ' + chip(tone, lbl) + '</div>'
-    + '<div class="att-sub"><a href="#/tenants/' + encodeURIComponent(it.t.id) + '">' + esc(it.t.name) + '</a> · Unit ' + esc(it.t.unit) + (it.b.due ? ' · due ' + shortDate(it.b.due) : '') + '</div></div>'
-    + '<div class="att-amt">' + peso(billOpen(it.b)) + '</div>'
-    + '<div class="att-actions">'
-    +   '<button type="button" class="btn-icon" title="Copy payment reminder" aria-label="Copy payment reminder" onclick="copyReminder(this.closest(\'[data-tid]\').dataset.tid)">' + icon('mail') + '</button>'
-    +   '<button type="button" class="btn-mini pay" onclick="const r=this.closest(\'[data-tid]\');quickMarkPaid(r.dataset.tid,+r.dataset.bi)">' + icon('check') + 'Paid</button>'
-    + '</div></div>';
-}
 
 // ─────────────────────────────────────────────
 // HOME
@@ -2369,39 +2323,6 @@ function goBills(view) {
   go('billing');
 }
 
-// Automatic billing + reconciliation at a glance (Home and Billing › Recurring).
-function recurringStatusCard() {
-  let behind = 0, missing = 0, credit = 0, noMoveIn = 0, ahead = 0, unposted = 0;
-  tenants.forEach(t => {
-    unposted += unpostedCurrent(t).length;
-    const s = tenantSummary(t);
-    if(!s.recon.enabled) { if(s.recon.reason === 'no-move-in') noMoveIn++; return; }
-    s.recon.charges.forEach(c => {
-      missing += c.missing.length;
-      if(_creditApplicable(t, c)) credit++;
-    });
-    if(s.primary && s.primary.status === 'behind') behind++;
-    if(s.primary && s.primary.status === 'advance') ahead++;
-  });
-  const last = _autoBillLast;
-  const lastLine = !autoBilling.enabled ? 'Automatic billing is <strong>off</strong> — post recurring bills from Billing.'
-    : last ? (last.posted.length ? 'Posted <strong>' + last.posted.length + ' bill' + (last.posted.length !== 1 ? 's' : '') + '</strong> ' + (last.day === todayISO() ? 'today' : 'on ' + shortDate(last.day))
-                 : 'Checked ' + (last.day === todayISO() ? 'today' : shortDate(last.day)) + ' — nothing new to post.')
-             + (last.failed ? ' <span class="txt-bad">' + last.failed + ' could not be saved — try Run now.</span>' : '')
-             + (last.noRev ? ' <span class="txt-bad">' + last.noRev + ' tenant' + (last.noRev !== 1 ? 's were' : ' was') + ' skipped: background posting needs supabase-migration-2.sql (the rev column). Use Run now until it is installed.</span>' : '')
-    : 'Checking recurring bills…';
-  const stat = (n, label, tone) => n ? '<span class="rs-stat ' + tone + '"><strong>' + n + '</strong> ' + label + '</span>' : '';
-  const stats = stat(behind, 'behind', 'bad') + stat(missing, 'cycle' + (missing !== 1 ? 's' : '') + ' not billed', 'warn')
-    + stat(unposted, 'current bill' + (unposted !== 1 ? 's' : '') + ' not posted', 'warn')
-    + stat(credit, 'unapplied credit' + (credit !== 1 ? 's' : ''), 'warn') + stat(ahead, 'paid ahead', 'good')
-    + stat(noMoveIn, 'without move-in date', 'muted');
-  return '<section class="card">'
-    + '<div class="card-head"><h2 class="card-title">' + icon('repeat') + ' Recurring billing</h2>'
-    + '<button type="button" class="link-btn" onclick="_billingTab=\'recurring\';go(\'billing\')">Open checker</button></div>'
-    + '<p class="card-text">' + lastLine + '</p>'
-    + (stats ? '<div class="rs-stats">' + stats + '</div>' : '<p class="card-text muted">All reconciled — no missing cycles or unapplied credit.</p>')
-    + '</section>';
-}
 
 // ─────────────────────────────────────────────
 // TENANTS MODULE
@@ -2613,192 +2534,182 @@ function openTenantMenu(anchor, tid) {
 }
 
 // ── Tenant detail ──
+let tdBillTab = 'open'; // Bills card: 'open' | 'paid' | 'all'
+function _ordinal(n) { const s = ['th', 'st', 'nd', 'rd'], v = n % 100; return n + (s[(v - 20) % 10] || s[v] || s[0]); }
 function renderTenantDetail(t) {
   const s = tenantSummary(t);
   const tidA = ' data-tid="' + esc(t.id) + '"';
   const inclusive = t.billing_model === 'inclusive';
-  const primaryTmpl = primaryTemplate(t);
-  const rateLine = inclusive ? 'All-inclusive' + (Number(t.flat_rate) ? ' · ' + peso(t.flat_rate) + '/month' : '')
-    : 'Itemized' + (primaryTmpl ? ' · rent ' + peso(tmplRate(primaryTmpl)) + '/month' : '');
-  const subBits = ['Unit ' + esc(t.unit), floorKey(t) ? esc(t.floor) : '', rateLine, moveInOf(t) ? 'Since ' + formatDate(t.move_in_date) : ''].filter(Boolean);
-  const contact = [t.phone ? '<a href="tel:' + esc(t.phone) + '">' + esc(t.phone) + '</a>' : '', t.email ? '<a href="mailto:' + esc(t.email) + '">' + esc(t.email) + '</a>' : ''].filter(Boolean).join(' · ');
+  const mi = moveInOf(t);
+  const p = s.primary;
+  const sub = ['Unit ' + esc(t.unit), floorKey(t) ? esc(t.floor) : '', mi ? 'tenant since ' + new Date(mi + 'T00:00:00').toLocaleDateString('en-PH', { month: 'long', year: 'numeric' }) : ''].filter(Boolean).join(' · ');
 
-  const actions = '<div class="detail-actions"' + tidA + '>'
-    + btn('Receive payment', 'openPayModal(this.parentNode.dataset.tid)', { primary: true, icon: 'cash' })
-    + btn('Add bill', 'openQuickBill(this.parentNode.dataset.tid)', { icon: 'plus' })
-    + btn('Statement', 'openStmtModalById(this.parentNode.dataset.tid)', { icon: 'print' })
-    + '<button type="button" class="btn-icon lg" aria-label="More actions" aria-haspopup="menu" onclick="openTenantMenu(this,this.parentNode.dataset.tid)">' + icon('kebab') + '</button>'
-    + '</div>';
+  // Summary: balance + actions, then four stats.
+  const rate = tenantRate(t);
+  const rel = paymentReliability([t], addYM(_currentYM(), -11), _currentYM(), todayISO(), graceDays)[0];
+  const stat = (label, value, note) => '<div class="td-stat"><span class="td-stat-label">' + label + '</span><strong>' + value + '</strong><span class="td-stat-note">' + note + '</span></div>';
+  const openNote = s.overdueCount ? s.overdueCount + ' overdue' + (s.nextDue ? ' · next due ' + shortDate(s.nextDue) : '')
+    : s.nextDue ? 'Next due ' + shortDate(s.nextDue) : s.awaiting ? s.awaiting + ' need' + (s.awaiting === 1 ? 's' : '') + ' an amount' : 'Nothing open';
+  const summary = '<section class="card td-summary"' + tidA + '>'
+    + '<div class="td-sum-top"><div class="td-bal">' + avatar(t.name, 60)
+    +   '<div class="td-bal-fig"><span>Balance</span><strong' + (s.overdue > 0 ? ' class="bad"' : '') + '>' + peso(s.open) + '</strong></div>' + tenantPill(t) + '</div>'
+    +   '<div class="td-actions">'
+    +     btn('Receive payment', 'openPayModal(this.closest(\'[data-tid]\').dataset.tid)', { primary: true, icon: 'cash' })
+    +     btn('Add bill', 'openQuickBill(this.closest(\'[data-tid]\').dataset.tid)', { icon: 'plus' })
+    +     btn('Statement', 'openStmtModalById(this.closest(\'[data-tid]\').dataset.tid)', { icon: 'print' })
+    +     '<button type="button" class="oa-icon-btn lg" aria-label="More actions for ' + esc(t.name) + '" aria-haspopup="menu" onclick="openTenantMenu(this,this.closest(\'[data-tid]\').dataset.tid)">' + icon('kebab') + '</button>'
+    +   '</div></div>'
+    + '<div class="td-stats">'
+    +   stat(inclusive ? 'Monthly rate' : 'Rent', rate ? peso(rate) + ' / month' : '&mdash;', inclusive ? 'Utilities included' : rate ? 'Itemized utilities' : 'No recurring rent')
+    +   stat('Paid through', p && !p.variable ? (p.paidThrough ? medDate(p.paidThrough) : 'Not yet') : '&mdash;',
+          mi ? 'Cycle starts on the ' + _ordinal(Number(mi.slice(8, 10))) : 'Set a move-in date')
+    +   stat('Open bills', s.openCount ? s.openCount + ' · ' + peso(s.open) : 'None', openNote)
+    +   stat('On-time payments', rel ? (rel.n - rel.late) + ' of ' + rel.n : '&mdash;', rel ? 'Last 12 months' : 'No bills due yet')
+    + '</div></section>';
 
-  const cat = outstandingByCategory(t.bills);
-  const settledAll = r2(t.bills.reduce((x, b) => x + billSettled(b), 0));
-  const balance = '<div class="kpis kpis-3">'
-    + '<div class="kpi"><div class="kpi-label">Outstanding</div><div class="kpi-value">' + (s.open ? peso(s.open) : s.awaiting ? 'None yet' : 'Settled') + '</div>'
-    +   (s.open && !inclusive ? '<div class="kpi-lines">' + balanceLinesHtml(cat, 'stat-line') + '</div>'
-         : '<div class="kpi-sub">' + s.openCount + ' open bill' + (s.openCount !== 1 ? 's' : '') + (s.awaiting ? ' · ' + s.awaiting + ' need' + (s.awaiting === 1 ? 's' : '') + ' an amount' : '') + '</div>') + '</div>'
-    + '<div class="kpi"><div class="kpi-label">Overdue</div><div class="kpi-value ' + (s.overdue ? 'bad' : 'good') + '">' + (s.overdue ? peso(s.overdue) : 'None') + '</div><div class="kpi-sub">' + (s.overdueCount ? s.overdueCount + ' bill' + (s.overdueCount !== 1 ? 's' : '') + ' past due' : 'nothing past due') + '</div></div>'
-    + '<div class="kpi"><div class="kpi-label">Paid to date</div><div class="kpi-value">' + peso(settledAll) + '</div><div class="kpi-sub">all bills, all time</div></div>'
-    + '</div>';
-
-  // Open bills
-  const openBills = t.bills.map((b, bi) => ({ b, bi })).filter(x => billOpen(x.b) > 0.005 || billAwaitingAmount(x.b))
-    .sort((a, b) => getDueUrgencyScore(a.b) - getDueUrgencyScore(b.b));
-  const openCard = '<section class="card"><div class="card-head"><h2 class="card-title">Open bills</h2>'
-    + '<button type="button" class="link-btn"' + tidA + ' onclick="openEditModal(this.dataset.tid,\'bills\')">Manage bills</button></div>'
-    + (openBills.length ? '<div class="bill-mini-list">' + openBills.map(x => billMiniRow(t, x.b, x.bi)).join('') + '</div>'
-        : '<div class="empty-inline">' + icon('check') + ' No open bills.</div>')
+  // Bills: Open / Paid / All.
+  const all = t.bills.map((b, bi) => ({ b, bi }));
+  const isOpenB = x => billOpen(x.b) > 0.005 || billAwaitingAmount(x.b);
+  const lists = {
+    open: all.filter(isOpenB).sort((a, b) => getDueUrgencyScore(a.b) - getDueUrgencyScore(b.b)),
+    paid: all.filter(x => !isOpenB(x)).sort((a, b) => (b.b.due || '').localeCompare(a.b.due || '')),
+    all: all.slice().sort((a, b) => (b.b.due || '').localeCompare(a.b.due || ''))
+  };
+  if(!lists[tdBillTab]) tdBillTab = 'open';
+  const list = lists[tdBillTab], shown = list.slice(0, 12);
+  const tabs = segTabs([['open', 'Open'], ['paid', 'Paid'], ['all', 'All']].map(([k, l]) => ({ label: l, count: lists[k].length, active: tdBillTab === k, onclick: 'tdBillTab=\'' + k + '\';rerenderAdmin()' })), 'sm', 'Which bills');
+  const billSub = b => {
+    const bits = [];
+    const per = billPeriod(b);
+    if(mi && per && p && b.tmplId === p.tmplId) { const w = cycleWindow(mi, per); bits.push(shortDate(w.start) + ' – ' + shortDate(addDaysISO(w.end, -1))); }
+    else if(per) bits.push('For ' + fmtYM(per, 'short'));
+    const got = billTotalPaid(b);
+    if(b.status !== 'paid' && got > 0.005) bits.push(peso(got) + ' received');
+    if(b.remark) bits.push(esc(b.remark));
+    return bits.join(' · ');
+  };
+  const billRow = x => {
+    const b = x.b, aw = billAwaitingAmount(b);
+    return '<div class="oa-tr td-bill' + (aw ? ' is-awaiting' : '') + '"' + tidA + ' data-bi="' + x.bi + '">'
+      + '<div class="td-bill-main"><span class="td-bill-label">' + esc(b.label || 'Bill') + '</span>' + (billSub(b) ? '<span class="oa-sub">' + billSub(b) + '</span>' : '') + '</div>'
+      + '<span class="oa-cell-due">' + (b.due ? shortDate(b.due) : '&mdash;') + '</span>'
+      + '<span class="oa-cell-status">' + billPill(b, !!_justPaidEntry(t.id, x.bi)) + '</span>'
+      + '<span class="oa-cell-amt">' + (aw ? '<button type="button" class="link-btn" onclick="const r=this.closest(\'[data-tid]\');openEditBillFromTable(r.dataset.tid,+r.dataset.bi)">Enter amount</button>' : peso(b.amount)) + '</span>'
+      + '<span class="oa-cell-due td-paidon">' + (b.status === 'paid' && b.paidDate ? shortDate(b.paidDate) : '&mdash;') + '</span>'
+      + '<button type="button" class="oa-icon-btn ghost sm" aria-label="Actions for ' + esc(b.label || 'bill') + '" aria-haspopup="menu" onclick="const r=this.closest(\'[data-tid]\');openBillMenu(this,r.dataset.tid,+r.dataset.bi)">' + icon('kebab') + '</button>'
+      + '</div>';
+  };
+  const billsCard = '<section class="card oa-table-card td-bills">'
+    + '<div class="oa-card-head"><h2 class="card-title">Bills</h2>' + tabs + '</div>'
+    + (shown.length ? '<div class="oa-table"><div class="oa-thead td-bill" role="row"><span>Bill</span><span>Due</span><span>Status</span><span class="r">Amount</span><span class="td-paidon">Paid on</span><span></span></div>' + shown.map(billRow).join('') + '</div>'
+        : '<div class="oa-empty">' + icon('check') + ' ' + (tdBillTab === 'open' ? 'No open bills.' : 'No bills yet.') + '</div>')
+    + '<div class="oa-card-foot"><span>' + (list.length > shown.length ? 'Showing ' + shown.length + ' of ' + list.length : list.length + ' bill' + (list.length !== 1 ? 's' : '')) + '</span>'
+    +   '<button type="button" class="link-btn oa-more"' + tidA + ' onclick="openEditModal(this.dataset.tid,\'bills\')">Manage bills' + icon('next') + '</button></div>'
     + '</section>';
 
   // Payments received: every receipt (partial payments and advances
-  // included), newest first — the same cash the "Paid to date" tile sums.
-  // One Receive-payment receipt spread over several bills is one row, with
-  // Undo (for a payment recorded by mistake).
+  // included), newest first. One Receive-payment receipt spread over
+  // several bills is one row, with Undo (for a payment recorded by mistake).
   const receipts = [], byRid = new Map();
   t.bills.forEach(b => {
     let logged = 0;
-    (b.payments || []).forEach(p => {
-      const v = Number(p.amount) || 0; logged += v;
+    (b.payments || []).forEach(pay => {
+      const v = Number(pay.amount) || 0; logged += v;
       if(!v) return;
-      if(p.rid && v > 0) {
-        const gk = p.rid;
-        let g = byRid.get(gk);
-        if(!g) { g = { date: isoOrEmpty(p.date), dates: new Set(), amount: 0, note: p.note || '', bills: [], rid: p.rid }; byRid.set(gk, g); receipts.push(g); }
-        g.dates.add(isoOrEmpty(p.date));
+      if(pay.rid && v > 0) {
+        let g = byRid.get(pay.rid);
+        if(!g) { g = { date: isoOrEmpty(pay.date), dates: new Set(), amount: 0, note: pay.note || '', bills: [], rid: pay.rid }; byRid.set(pay.rid, g); receipts.push(g); }
+        g.dates.add(isoOrEmpty(pay.date));
         g.amount = r2(g.amount + v);
         if(!g.bills.includes(b)) g.bills.push(b);
-      } else receipts.push({ date: isoOrEmpty(p.date), amount: v, note: p.note || '', bills: [b] });
+      } else receipts.push({ date: isoOrEmpty(pay.date), amount: v, note: pay.note || '', bills: [b] });
     });
     if(b.status === 'paid') { const resid = r2((Number(b.amount) || 0) - logged); if(resid > 0) receipts.push({ date: isoOrEmpty(b.paidDate), amount: resid, note: '', bills: [b] }); }
   });
   receipts.sort((x, y) => (y.date || '').localeCompare(x.date || ''));
-  const recLabel = x => x.bills.length === 1
-    ? esc(x.bills[0].label) + (billPeriod(x.bills[0]) ? ' <span class="muted">· ' + fmtYM(billPeriod(x.bills[0]), 'short') + '</span>' : '')
-    : 'Payment <span class="muted">· ' + x.bills.length + ' bills</span>';
-  const payCard = '<section class="card"><div class="card-head"><h2 class="card-title">Payments received</h2>'
-    + (receipts.length > 6 ? '<button type="button" class="link-btn"' + tidA + ' onclick="openEditModal(this.dataset.tid,\'bills\')">All bills &amp; payments</button>' : '') + '</div>'
-    + (receipts.length ? '<div class="hist-list">' + receipts.slice(0, 6).map(x => '<div class="hist-row"><div><div class="hist-label">' + recLabel(x) + '</div>'
-        + '<div class="hist-sub">' + (x.dates && x.dates.size > 1 ? Array.from(x.dates).filter(Boolean).sort().map(d => shortDate(d)).join(', ') : x.date ? formatDate(x.date) : 'Date not recorded') + (x.note ? ' · ' + esc(x.note) : '')
-        + (x.rid ? ' · <button type="button" class="link-btn inline"' + tidA + ' data-rid="' + esc(x.rid) + '" onclick="undoPayment(this.dataset.tid,this.dataset.rid)">Undo</button>' : '') + '</div></div>'
-        + '<div class="hist-amt">' + (x.amount < 0 ? '&minus;' + peso(-x.amount) : peso(x.amount)) + '</div></div>').join('') + '</div>'
-        : '<div class="empty-inline">No payments recorded yet.</div>')
+  // "Rent – Sep, Water – Aug" (no month suffix when the label already names one).
+  const appliedTo = x => x.bills.map(b => { const per = billPeriod(b), m = per ? _monthName(per, 'short') : '';
+    return esc(b.label) + (m && !new RegExp('\\b(' + m + '|' + _monthName(per) + '|' + per.slice(0, 4) + ')\\b', 'i').test(b.label || '') ? ' – ' + m : ''); }).join(', ');
+  const payRow = x => '<div class="oa-tr td-pay">'
+    + '<span class="oa-cell-due">' + (x.dates && x.dates.size > 1 ? Array.from(x.dates).filter(Boolean).sort().map(d => shortDate(d)).join(', ') : x.date ? shortDateY(x.date) : 'No date') + '</span>'
+    + '<span class="td-pay-note">' + (x.note ? esc(x.note) : '<span class="oa-muted-sm">&mdash;</span>')
+    +   (x.rid ? ' <button type="button" class="link-btn inline"' + tidA + ' data-rid="' + esc(x.rid) + '" onclick="undoPayment(this.dataset.tid,this.dataset.rid)">Undo</button>' : '') + '</span>'
+    + '<span class="oa-cell-bill td-applied">' + appliedTo(x) + '</span>'
+    + '<span class="oa-cell-amt">' + (x.amount < 0 ? '&minus;' + peso(-x.amount) : peso(x.amount)) + '</span></div>';
+  const payCard = '<section class="card oa-table-card td-pays">'
+    + '<div class="oa-card-head"><h2 class="card-title">Payments</h2><span class="oa-muted-sm">Applied to the oldest bills first</span></div>'
+    + (receipts.length ? '<div class="oa-table"><div class="oa-thead td-pay" role="row"><span>Date</span><span>Note</span><span>Applied to</span><span class="r">Amount</span></div>' + receipts.slice(0, 8).map(payRow).join('') + '</div>'
+        : '<div class="oa-empty">No payments recorded yet.</div>')
+    + (receipts.length > 8 ? '<div class="oa-card-foot"><span>Showing 8 of ' + receipts.length + '</span><button type="button" class="link-btn oa-more"' + tidA + ' onclick="openEditModal(this.dataset.tid,\'bills\')">All bills &amp; payments' + icon('next') + '</button></div>' : '')
     + '</section>';
 
-  const details = '<section class="card"><div class="card-head"><h2 class="card-title">Details</h2>'
+  // Details.
+  const recurring = (t.templates || []).map((tmpl, i) => {
+    if(tmpl.retired) return '<div class="td-rec"><span>' + esc(tmpl.label) + ' <span class="oa-muted-sm">· stopped</span></span></div>';
+    const auto = isAutoTemplate(tmpl);
+    const np = auto && autoBilling.enabled ? nextPostInfo(t, tmpl) : null;
+    return '<div class="td-rec"><div class="td-rec-text"><span>' + esc(tmpl.label) + ' ' + (tmpl.pendingAmount ? '(amount varies)' : peso(tmpl.amount)) + ', monthly · due day ' + tmplDay(tmpl) + '</span>'
+      + '<span class="td-rec-note' + (auto && autoBilling.enabled ? ' good' : '') + '">' + (!auto ? 'Manual — post from Billing' : !autoBilling.enabled ? 'Automatic billing is off in Settings'
+        : 'Auto-posts ' + autoBilling.leadDays + ' day' + (autoBilling.leadDays !== 1 ? 's' : '') + ' before due' + (np ? ' · next ' + (np.post === todayISO() ? 'today' : shortDate(np.post)) : ''))
+      + (Array.isArray(tmpl.skip) && tmpl.skip.length ? ' · <button type="button" class="link-btn inline"' + tidA + ' data-tmpl="' + esc(tmpl.id || '') + '" aria-haspopup="menu" onclick="unwaiveMenu(this)">' + tmpl.skip.length + ' waived</button>' : '') + '</span></div>'
+      + '<label class="switch" title="Post automatically each cycle"><input type="checkbox"' + (auto ? ' checked' : '') + tidA + ' data-i="' + i + '" onchange="toggleTemplateAuto(this.dataset.tid,+this.dataset.i,this.checked)"><span class="switch-ui"></span><span class="sr-only">Auto-post ' + esc(tmpl.label) + '</span></label></div>';
+  }).join('');
+  const dl = (k, v) => '<div class="td-dl"><span class="td-dt">' + k + '</span><div class="td-dd">' + v + '</div></div>';
+  const details = '<section class="card td-details"><div class="td-card-head"><h2 class="card-title">Details</h2>'
     + '<button type="button" class="link-btn"' + tidA + ' onclick="openEditModal(this.dataset.tid)">Edit</button></div>'
-    + '<dl class="dl">'
-    + '<dt>Access code</dt><dd><span class="row-code">' + esc(t.code) + '</span> <button type="button" class="link-btn"' + tidA + ' onclick="copyPortalLink(this.dataset.tid)">Copy portal link</button></dd>'
-    + '<dt>Move-in date</dt><dd>' + (moveInOf(t) ? formatDate(t.move_in_date) + ' <span class="muted">(billing reckoning date)</span>' : '<span class="muted">Not set</span>') + '</dd>'
-    + '<dt>Billing model</dt><dd>' + rateLine + '</dd>'
-    + (contact ? '<dt>Contact</dt><dd>' + contact + '</dd>' : '')
-    + '</dl></section>';
+    + dl('Access code', '<span class="td-code">' + esc(t.code) + '</span><button type="button" class="link-btn"' + tidA + ' onclick="copyPortalLink(this.dataset.tid);this.textContent=\'Link copied\'">Copy portal link</button>')
+    + dl('Move-in date', mi ? medDate(mi) + ' <span class="oa-muted-sm">· billing date</span>' : '<span class="oa-muted-sm">Not set</span> <button type="button" class="link-btn inline"' + tidA + ' onclick="openEditModal(this.dataset.tid)">Set it</button>')
+    + dl('Recurring', recurring ? recurring + '<button type="button" class="link-btn inline"' + tidA + ' onclick="openEditModal(this.dataset.tid,\'templates\')">Manage charges</button>'
+        : '<span class="oa-muted-sm">None — bills are added by hand.</span> <button type="button" class="link-btn inline"' + tidA + ' onclick="openEditModal(this.dataset.tid,\'templates\')">Add</button>')
+    + (t.phone ? dl('Phone', '<a href="tel:' + esc(t.phone) + '">' + esc(t.phone) + '</a>') : '')
+    + (t.email ? dl('Email', '<a href="mailto:' + esc(t.email) + '">' + esc(t.email) + '</a>') : '')
+    + '</section>';
 
-  return '<button type="button" class="back-link" onclick="go(\'tenants\')">' + icon('back') + 'Tenants</button>'
-    + '<div class="detail-head"><h1 class="page-title">' + esc(t.name) + '</h1><div class="page-sub">' + subBits.join(' · ') + '</div>'
-    + (contact ? '<div class="page-sub">' + contact + '</div>' : '') + '</div>'
-    + actions + balance
-    + cycleCardHtml(t, s)
-    + '<div class="detail-grid">' + openCard + recurringChargesCard(t) + payCard + details + '</div>';
+  return pageHead(esc(t.name), sub, '', { label: 'Tenants', onclick: 'go(\'tenants\')' })
+    + summary
+    + '<div class="td-grid"><div class="td-col">' + billsCard + payCard + '</div>'
+    + '<div class="td-col">' + rentCyclesCard(t, s) + details + '</div></div>';
 }
 
-function billMiniRow(t, b, bi) {
-  const ds = getDueStatus(b);
-  if(ds === 'awaiting') {
-    return '<div class="bm-row" data-tid="' + esc(t.id) + '" data-bi="' + bi + '">'
-      + '<div class="bm-main"><div class="bm-label">' + esc(b.label) + (billPeriod(b) ? ' <span class="muted">· ' + fmtYM(billPeriod(b), 'short') + '</span>' : '') + '</div>'
-      + '<div class="bm-sub"><span class="due-chip soon">Needs amount' + (b.due ? ' · due ' + shortDate(b.due) : '') + '</span>'
-      + (billTotalPaid(b) > 0 ? ' <span class="muted">(' + peso(billTotalPaid(b)) + ' received)</span>' : '') + '</div></div>'
-      + '<div class="bm-amt muted">TBD</div>'
-      + '<div class="bm-actions"><button type="button" class="btn-mini" onclick="const r=this.closest(\'[data-tid]\');openEditBillFromTable(r.dataset.tid,+r.dataset.bi)">' + icon('edit') + '<span>Enter amount</span></button>'
-      + '<button type="button" class="btn-icon" aria-label="Bill actions" aria-haspopup="menu" onclick="const r=this.closest(\'[data-tid]\');openBillMenu(this,r.dataset.tid,+r.dataset.bi)">' + icon('kebab') + '</button></div></div>';
-  }
-  const cls = { overdue: 'overdue', grace: 'soon', 'due-today': 'today', 'due-soon': 'soon' }[ds] || 'normal';
-  const chipTxt = b.due ? ({ overdue: 'Overdue · ', grace: 'Grace period · due ', 'due-today': 'Due today · ', 'due-soon': 'Due soon · ' }[ds] || 'Due ') + shortDate(b.due) : 'No due date';
-  const part = billTotalPaid(b) > 0 ? ' <span class="muted">(' + peso(billTotalPaid(b)) + ' received)</span>' : '';
-  return '<div class="bm-row" data-tid="' + esc(t.id) + '" data-bi="' + bi + '">'
-    + '<div class="bm-main"><div class="bm-label">' + esc(b.label) + (billPeriod(b) ? ' <span class="muted">· ' + fmtYM(billPeriod(b), 'short') + '</span>' : '') + '</div>'
-    + '<div class="bm-sub"><span class="due-chip ' + cls + '">' + chipTxt + '</span>' + part + '</div></div>'
-    + '<div class="bm-amt">' + peso(billOpen(b)) + '</div>'
-    + '<div class="bm-actions">'
-    +   '<button type="button" class="btn-mini pay" onclick="const r=this.closest(\'[data-tid]\');quickMarkPaid(r.dataset.tid,+r.dataset.bi)">' + icon('check') + '<span>Paid</span></button>'
-    +   '<button type="button" class="btn-icon" aria-label="Bill actions" aria-haspopup="menu" onclick="const r=this.closest(\'[data-tid]\');openBillMenu(this,r.dataset.tid,+r.dataset.bi)">' + icon('kebab') + '</button>'
-    + '</div></div>';
-}
-
-// Billing-cycle card: the move-in reconciliation made visible.
-function cycleCardHtml(t, s) {
+// Rent cycles: the main rent's last 12 cycles, plus anything the
+// reconciliation checker wants fixed (unbilled cycles, unapplied credit).
+function rentCyclesCard(t, s) {
   const tidA = ' data-tid="' + esc(t.id) + '"';
-  const head = '<div class="card-head"><h2 class="card-title">' + icon('repeat') + ' Billing cycles</h2></div>';
+  const head = '<div class="td-card-head"><h2 class="card-title">Rent cycles</h2><span class="oa-muted-sm">Last 12 months</span></div>';
   if(!s.recon.enabled) {
     const allStopped = (t.templates || []).some(x => x && x.retired) && !activeTemplates(t).length;
-    const msg = allStopped
-      ? 'All recurring charges are stopped. Resume one under Recurring charges (&#9654;) to bill this tenant again.'
-      : s.recon.reason === 'no-templates'
-      ? 'No recurring charges yet. Add a monthly rent template and bills will post automatically each cycle.'
-      : 'Set a move-in date to reconcile billing cycles and see a paid-through date. Nothing changes until you do &mdash; recurring bills keep posting on their due dates.';
-    const action = allStopped ? btn('Manage charges', 'openEditModal(this.dataset.tid,\'templates\')', { icon: 'repeat', attrs: tidA })
-      : s.recon.reason === 'no-templates'
-      ? btn('Add recurring charge', 'openEditModal(this.dataset.tid,\'templates\')', { icon: 'plus', attrs: tidA })
+    const msg = allStopped ? 'All recurring charges are stopped. Resume one under Recurring charges to bill this tenant again.'
+      : s.recon.reason === 'no-templates' ? 'No recurring charges yet. Add a monthly rent and bills will post automatically each cycle.'
+      : 'Set a move-in date to see rent cycles and a paid-through date. Nothing changes until you do — recurring bills keep posting on their due dates.';
+    const action = allStopped || s.recon.reason === 'no-templates' ? btn(allStopped ? 'Manage charges' : 'Add recurring charge', 'openEditModal(this.dataset.tid,\'templates\')', { icon: 'repeat', attrs: tidA })
       : btn('Set move-in date', 'openEditModal(this.dataset.tid)', { icon: 'calendar', attrs: tidA });
-    return '<section class="card cycle-card">' + head + '<p class="card-text">' + msg + '</p>' + action + '</section>';
+    return '<section class="card td-cycles">' + head + '<p class="card-text">' + msg + '</p>' + action + '</section>';
   }
-  const today = todayISO();
-  const mi = moveInOf(t);
-  const charges = s.recon.charges.map(c => {
-    const tmpl = (t.templates || []).find(x => x.id === c.tmplId) || {};
-    const skip = new Set(Array.isArray(tmpl.skip) ? tmpl.skip : []);
-    const missingSet = new Set(c.missing.map(m => m.period));
-    const miYM = ymOf(mi);
-    // Cycle strip: the last 6 started cycles plus what's paid ahead (max 12).
-    const last = Math.max(c.covered, c.cyclesStarted) + (c.variable ? 0 : 1);
-    const first = Math.max(0, Math.min(c.cyclesStarted - 6, last - 11));
-    const cells = [];
-    for(let k = first; k <= last && cells.length < 12; k++) {
-      const ym = addYM(c.startYM || miYM, k);
-      const started = k < c.cyclesStarted;
-      let st, tip;
-      if(skip.has(ym)) { st = 'waived'; tip = 'waived'; }
-      else if(!c.variable && k < c.covered) { st = started ? 'paid' : 'ahead'; tip = started ? 'paid' : 'paid in advance'; }
-      else if(missingSet.has(ym)) { st = 'missing'; tip = 'not billed'; }
-      else if(started) {
-        if(c.variable) { st = 'var'; tip = 'variable amount'; }
-        else if(k === c.covered && c.remainder > 0.005) { st = 'partial'; tip = 'partly paid'; }
-        else { st = ((c.dues && c.dues[ym]) || templateDueDate(t, tmpl, ym)) < today ? 'late' : 'due'; tip = st === 'late' ? 'past due' : 'due'; }
-      } else { st = 'future'; tip = 'upcoming'; }
-      const w = cycleWindow(mi, ym);
-      cells.push('<span class="cy cy-' + st + '" title="' + fmtYM(ym, 'short') + ' cycle (' + shortDate(w.start) + ' – ' + shortDate(addDaysISO(w.end, -1)) + '): ' + tip + '"><span>' + new Date(ym + '-02').toLocaleString('default', { month: 'short' }) + '</span></span>');
-    }
-    let status;
-    if(c.variable) status = chip('muted', 'Variable amount') + ' <span class="muted">cycle check only</span>';
-    else if(c.status === 'behind') status = chip('bad', 'Behind · ' + peso(c.arrears)) + (c.paidThrough ? ' Paid through ' + formatDate(c.paidThrough) : c.pool > 0.005 ? ' Payments so far don\'t cover the first cycle' : ' No payments matched to this charge')
-      + (c.missing.length ? ' <span class="muted">· counted from ' + (moveInOf(t) && c.startYM === ymOf(moveInOf(t)) ? 'move-in' : fmtYM(c.startYM, 'short')) + ', including ' + c.missing.length + ' cycle' + (c.missing.length !== 1 ? 's' : '') + ' never billed — post or waive ' + (c.missing.length !== 1 ? 'them' : 'it') + ' below</span>' : '');
-    else if(c.status === 'advance') status = chip('good', c.aheadCycles + ' cycle' + (c.aheadCycles !== 1 ? 's' : '') + ' ahead') + ' Paid through <strong>' + formatDate(c.paidThrough) + '</strong>';
-    else status = chip('good', 'Current') + (c.paidThrough ? ' Paid through <strong>' + formatDate(c.paidThrough) + '</strong>' : '') + (c.nextDue ? ' · next ' + peso(c.nextAmount) + ' due ' + shortDate(c.nextDue) : '');
-    const a = ' data-tid="' + esc(t.id) + '" data-tmpl="' + esc(c.tmplId) + '"';
-    const issues = [];
-    if(c.missing.length) issues.push('<div class="issue"><span>' + icon('alert') + c.missing.length + ' cycle' + (c.missing.length !== 1 ? 's' : '') + ' not billed: '
+  const cy = rentCycles(t, 12);
+  const grid = cy.length ? '<div class="td-cy-grid">' + cy.map(x => '<div class="td-cy" title="' + esc(x.title) + '"><i class="q-' + x.st + '"></i><span>' + _monthName(x.ym, 'short') + '</span></div>').join('') + '</div>'
+    : '<p class="card-text muted">' + (s.primary && s.primary.variable ? 'The main charge varies each month — no cycle squares.' : 'No rent cycle has started yet.') + '</p>';
+  const issues = [];
+  s.recon.charges.forEach(c => {
+    const a = tidA + ' data-tmpl="' + esc(c.tmplId) + '"';
+    const who = s.recon.charges.length > 1 ? esc(c.label) + ': ' : '';
+    if(c.status === 'behind' && c.tmplId !== (s.primary && s.primary.tmplId)) issues.push('<div class="td-issue bad">' + icon('alert') + '<span>' + who + 'behind by ' + peso(c.arrears) + '</span></div>');
+    if(c.missing.length) issues.push('<div class="td-issue">' + icon('alert') + '<span>' + who + c.missing.length + ' cycle' + (c.missing.length !== 1 ? 's' : '') + ' not billed: '
       + c.missing.slice(0, 4).map(m => fmtYM(m.period, 'short')).join(', ') + (c.missing.length > 4 ? ' +' + (c.missing.length - 4) + ' more' : '') + '</span>'
-      + '<span class="issue-actions"><button type="button" class="btn-mini"' + a + ' aria-haspopup="menu" onclick="reconMenu(this,\'post\')">Post bills</button>'
+      + '<span class="td-issue-actions"><button type="button" class="btn-mini"' + a + ' aria-haspopup="menu" onclick="reconMenu(this,\'post\')">Post bills</button>'
       + '<button type="button" class="btn-mini ghost"' + a + ' aria-haspopup="menu" onclick="reconMenu(this,\'waive\')">Waive</button></span></div>');
     if(c.excess > 0.005) issues.push(_creditApplicable(t, c)
-      ? '<div class="issue"><span>' + icon('cash') + peso(c.excess) + ' overpaid on earlier bills, not yet applied</span>'
-        + '<span class="issue-actions"><button type="button" class="btn-mini"' + a + ' onclick="reconApplyCredit(this.dataset.tid,this.dataset.tmpl)">Apply credit</button></span></div>'
-      : '<div class="issue"><span>' + icon('cash') + peso(c.excess) + ' overpaid — kept as credit until there is an open bill to apply it to</span></div>');
-    if(c.ignored) issues.push('<div class="issue muted-issue"><span>' + icon('alert') + c.ignored + ' bill' + (c.ignored !== 1 ? 's' : '') + ' dated before '
-      + (c.startYM && c.startYM > ymOf(c.moveIn) ? fmtYM(c.startYM) + ' (when this charge starts counting)' : 'the move-in month') + ' or without a date '
-      + (c.ignored !== 1 ? 'are' : 'is') + ' not counted in these cycles' + (c.ignoredCash ? ' (' + peso(c.ignoredCash) + ' paid)' : '') + '. Check the move-in date if that looks wrong.</span></div>');
-    return '<div class="cyc">'
-      + '<div class="cyc-head"><strong>' + esc(c.label) + '</strong>' + (c.variable ? '' : ' <span class="muted">' + peso(c.rate) + ' per cycle</span>') + '</div>'
-      + '<div class="cyc-status">' + status + '</div>'
-      + '<div class="cy-strip" aria-label="Recent billing cycles">' + cells.join('') + '</div>'
-      + issues.join('')
-      + '</div>';
-  }).join('');
-  return '<section class="card cycle-card">' + head
-    + '<p class="card-text muted">Cycles start on day ' + Number(mi.slice(8, 10)) + ' each month (move-in ' + formatDate(mi) + '). Rent is paid in advance: each cycle is due at its start and covers the month ahead.</p>'
-    + charges
-    + '<div class="cy-legend"><span class="cy cy-paid"></span>Paid <span class="cy cy-ahead"></span>Advance <span class="cy cy-partial"></span>Partial <span class="cy cy-late"></span>Past due <span class="cy cy-missing"></span>Not billed <span class="cy cy-waived"></span>Waived</div>'
+      ? '<div class="td-issue">' + icon('cash') + '<span>' + who + peso(c.excess) + ' overpaid on earlier bills, not yet applied</span><span class="td-issue-actions"><button type="button" class="btn-mini"' + a + ' onclick="reconApplyCredit(this.dataset.tid,this.dataset.tmpl)">Apply credit</button></span></div>'
+      : '<div class="td-issue muted">' + icon('cash') + '<span>' + who + peso(c.excess) + ' overpaid — kept as credit until there is an open bill to apply it to</span></div>');
+    if(c.ignored) issues.push('<div class="td-issue muted">' + icon('alert') + '<span>' + who + c.ignored + ' bill' + (c.ignored !== 1 ? 's' : '') + ' dated before ' + (c.startYM && c.startYM > ymOf(c.moveIn) ? fmtYM(c.startYM) : 'the move-in month')
+      + ' or without a date ' + (c.ignored !== 1 ? 'are' : 'is') + ' not counted' + (c.ignoredCash ? ' (' + peso(c.ignoredCash) + ' paid)' : '') + '.</span></div>');
+  });
+  return '<section class="card td-cycles">' + head + grid
+    + (issues.length ? '<div class="td-issues">' + issues.join('') + '</div>' : '')
+    + '<div class="oa-cy-legend td-cy-legend"><span><i class="q-paid"></i>Paid</span><span><i class="q-ahead"></i>Ahead</span><span><i class="q-due"></i>Due</span><span><i class="q-late"></i>Late</span></div>'
     + '</section>';
 }
+
+
 
 // Next auto-post for a template: which cycle, its due date, when it posts.
 // Simulates the real planner day by day, so the hint can never promise a
@@ -2815,30 +2726,6 @@ function nextPostInfo(t, tmpl) {
   return null;
 }
 
-function recurringChargesCard(t) {
-  const tidA = ' data-tid="' + esc(t.id) + '"';
-  const list = (t.templates || []);
-  const rows = list.map((tmpl, i) => {
-    if(tmpl.retired) return '<div class="rc-row"><div class="rc-main"><div class="rc-label">' + esc(tmpl.label) + ' ' + chip('muted', 'Stopped') + '</div>'
-      + '<div class="rc-sub">No longer billed or owed · its bills stay as history</div></div></div>';
-    const np = nextPostInfo(t, tmpl);
-    const auto = isAutoTemplate(tmpl);
-    return '<div class="rc-row">'
-      + '<div class="rc-main"><div class="rc-label">' + esc(tmpl.label) + '</div>'
-      + '<div class="rc-sub">' + (tmpl.pendingAmount ? 'Amount varies' : peso(tmpl.amount)) + ' · due day ' + tmplDay(tmpl)
-      + (auto && autoBilling.enabled && np ? ' · next: ' + fmtYM(np.ym, 'short') + ' bill posts ' + (np.post === todayISO() ? 'today' : shortDate(np.post)) : '')
-      + (!auto ? ' · manual' : '')
-      + (Array.isArray(tmpl.skip) && tmpl.skip.length ? ' · <button type="button" class="link-btn inline"' + tidA + ' data-tmpl="' + esc(tmpl.id || '') + '" aria-haspopup="menu" onclick="unwaiveMenu(this)">' + tmpl.skip.length + ' waived</button>' : '')
-      + '</div></div>'
-      + '<label class="switch" title="Post automatically each cycle"><input type="checkbox"' + (auto ? ' checked' : '') + tidA + ' data-i="' + i + '" onchange="toggleTemplateAuto(this.dataset.tid,+this.dataset.i,this.checked)"><span class="switch-ui"></span><span class="sr-only">Auto-post ' + esc(tmpl.label) + '</span></label>'
-      + '</div>';
-  }).join('');
-  return '<section class="card"><div class="card-head"><h2 class="card-title">Recurring charges</h2>'
-    + '<button type="button" class="link-btn"' + tidA + ' onclick="openEditModal(this.dataset.tid,\'templates\')">' + (list.length ? 'Manage' : 'Add') + '</button></div>'
-    + (list.length ? '<div class="rc-list">' + rows + '</div>' + (!autoBilling.enabled ? '<p class="card-text muted">Automatic billing is off in Settings.</p>' : '')
-        : '<div class="empty-inline">No recurring charges. Bills for this tenant are added by hand.</div>')
-    + '</section>';
-}
 
 async function toggleTemplateAuto(tid, i, on) {
   const ok = await saveTenantData(tid, t => {
